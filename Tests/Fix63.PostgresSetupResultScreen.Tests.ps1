@@ -470,3 +470,43 @@ Describe 'FIX63 the details view keeps every technical sentence' {
         $lines | Should -Contain ('    Profiles unchanged     : {0}' -f $result.AlreadyConfigured)
     }
 }
+
+Describe 'FIX63 sweep: a database made from the bundled backup is counted and described truthfully' {
+    # A database this run built is counted under "Databases created", never as "Already set up" (only the games whose database was already there are).
+    # Mutation: count every unchanged profile as already set up -> a rerun that rebuilds four databases prints "Already set up: 6".
+    It 'counts a game whose profile was already right but whose database was made from the backup as created, not already set up' {
+        $fx = New-F63SixGames
+        Install-F63SetupMocks -Fixture $fx
+        $null = Invoke-F63Setup -Fixture $fx
+        foreach ($db in @('GameDB19', 'GameDBPPL13', 'GameDBSSB', 'GameDBLawn')) { $fx.State.Exists[$db] = $false }
+
+        $result = Invoke-F63Setup -Fixture $fx
+
+        $result.DbCreated | Should -Be 4
+        $result.Configured | Should -Be 0
+        $result.AlreadyConfigured | Should -Be 2
+        $lines = Get-F63Screen -Fixture $fx -Result $result -Width 120 -OfferDetails
+        $lines | Should -Contain '  Games set up: 0. Databases created: 4. Already set up: 2.'
+    }
+
+    # Mutation: keep the "did not exist" sentence for an empty database -> the Details say it did not exist.
+    It 'says an existing but empty database was empty and the backup was restored into it' {
+        $fx = New-F63Fixture -Name 'emptydb'
+        $fx.State.Exists['GameDB19'] = $true
+        [void](New-F63Profile -Fixture $fx -ProfileName 'GoldenTeeLive2019' -GameName 'Golden Tee Live 2019' -DbName 'GameDB19' -AutoCreate '1' -Backup)
+        Install-F63SetupMocks -Fixture $fx
+        Mock Get-PostgresUserTableCount {
+            $restored = @($script:F63State.Events | Where-Object { $_ -eq 'pg_restore:GameDB19' }).Count -gt 0
+            [pscustomobject]@{ Count = $(if ($restored) { 24 } else { 0 }); Error = $null }
+        }
+
+        $result = Invoke-F63Setup -Fixture $fx
+
+        $result.Outcome | Should -BeExactly 'SUCCEEDED'
+        @($fx.State.Events | Where-Object { $_ -eq 'pg_restore:GameDB19' }).Count | Should -Be 1
+        $flat = Join-F63Screen -Lines (Get-F63Screen -Fixture $fx -Result $result -Width 120 -Details)
+        $flat | Should -Not -Match 'did not exist'
+        $flat | Should -Match ([regex]::Escape('The database was there but empty. TeknoParrot Manager restored the backup that comes with the game into it.'))
+        (@($result.Warnings) -join ' ') | Should -Not -Match 'did not exist'
+    }
+}

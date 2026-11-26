@@ -716,3 +716,104 @@ Describe 'Two games that read the same without year and tags are both unpacked' 
         [IO.File]::ReadAllText($script:logPath) | Should -Match 'saved folder for .*Beta Board.* belongs to another game'
     }
 }
+
+Describe 'R94Z: a different edition of a game gets its own folder, and a failed unpack names the game and the difference' {
+    AfterEach {
+        $script:TpmOwnedLayout = $null
+        $script:TpmRegistrationLedger = $null
+        $script:TpmRegistrationLedgerStopLatch = $null
+    }
+
+    It 'unpacks an edition whose profile code reads like the original game name, in preview and for real' {
+        # Mutation: claim the normalized profile code again (Get-TpmAutoSyncClaimKeys) -> the edition is refused as "another ZIP in this run already created a new folder".
+        $original = 'Echo Bunko - Climax (1.30.01)(2014-12-15)[Sega RingEdge 2,APM2][TP]'
+        $ignition = 'Echo Bunko - Climax Ignition (2.32.00)(2015)[Sega RingEdge 2,APM2][TP]'
+        $edition = 'Echo Bunko - Climax (APM3 Edition)(2.32)(2021)[Sega ALLS][TP]'
+        $dat = @{}
+        $dat[(Get-NormalizedGameKey $original)] = [pscustomobject]@{ ProfileCode = 'EchoClimax'; OriginalName = $original; Executable = 'game.exe' }
+        $dat[(Get-NormalizedGameKey $ignition)] = [pscustomobject]@{ ProfileCode = 'EchoClimaxIgnition'; OriginalName = $ignition; Executable = 'game.exe' }
+        $dat[(Get-NormalizedGameKey $edition)] = [pscustomobject]@{ ProfileCode = 'EchoBunkoClimax'; OriginalName = $edition; Executable = 'game.exe' }
+        # The setup that failed for a tester: the edition's profile code normalizes to the original game's name.
+        (Get-NormalizedGameKey 'EchoBunkoClimax') | Should -Be (Get-NormalizedGameKey $original)
+
+        $previewFx = New-Fix41Fixture
+        foreach ($n in @($original, $ignition, $edition)) { [void](New-Fix41GameZip -Fixture $previewFx -Name $n) }
+        $preview = Invoke-Fix41AutoSync -Fixture $previewFx -DryRun $true -DatIndex $dat
+        $preview.WouldSync | Should -Be 3
+        $preview.UnsafePathSkipped | Should -Be 0
+
+        $script:TpmOwnedLayout = $null
+        $fx = New-Fix41Fixture
+        foreach ($n in @($original, $ignition, $edition)) { [void](New-Fix41GameZip -Fixture $fx -Name $n) }
+        $result = Invoke-Fix41AutoSync -Fixture $fx -DatIndex $dat
+
+        $result.Synced | Should -Be 3 -Because (Get-Fix41Diagnostic $result)
+        $result.UnsafePathSkipped | Should -Be 0
+        foreach ($n in @($original, $ignition, $edition)) {
+            [IO.File]::ReadAllText((Join-Path $fx.Games ($n + '\game.exe'))) | Should -BeExactly ('exe of ' + $n)
+        }
+    }
+
+    It 'still refuses a second ZIP of the very same game in one run' {
+        # Mutation: claim nothing for a game the list names -> both ZIPs of one game create a folder.
+        $a = 'Echo Bunko - Climax (1.30.01)(2014-12-15)[Sega RingEdge 2,APM2][TP]'
+        $b = 'Echo Bunko - Climax (1.31.00)(2015-02-01)[Sega RingEdge 2,APM2][TP]'
+        $dat = @{}
+        foreach ($n in @($a, $b)) { $dat[(Get-NormalizedGameKey $n)] = [pscustomobject]@{ ProfileCode = 'EchoClimax'; OriginalName = $n; Executable = 'game.exe' } }
+        $fx = New-Fix41Fixture
+        foreach ($n in @($a, $b)) { [void](New-Fix41GameZip -Fixture $fx -Name $n) }
+
+        $result = Invoke-Fix41AutoSync -Fixture $fx -DatIndex $dat
+
+        $result.Synced | Should -Be 1 -Because (Get-Fix41Diagnostic $result)
+        $result.UnsafePathSkipped | Should -Be 1
+        @($result.FailedNames) | Should -Contain $b
+        @(Get-ChildItem -LiteralPath $fx.Games -Directory).Count | Should -Be 1
+    }
+
+    It 'names the first difference in the log when the unpacked files do not match the ZIP, and rolls nothing into the game folder' {
+        # Mutation: drop the difference text from the staging error -> the log only says the folder "did not match" with no file named.
+        $fx = New-Fix41Fixture
+        $name = 'Echo Racing USA (2017-12-21)[Sega PC][TP]'
+        $zip = New-Fix41GameZip -Fixture $fx -Name $name
+        Mock Expand-ZipFileSafe {
+            # Stands in for a scanner that cuts a file short while it is unpacked: the checksums are the ZIP's, the file on disk is not.
+            $archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)
+            try {
+                foreach ($entry in $archive.Entries) {
+                    $target = Join-Path $DestDir ($entry.FullName.Replace('/', '\'))
+                    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
+                    $reader = New-Object IO.BinaryReader($entry.Open())
+                    try { $bytes = $reader.ReadBytes([int]$entry.Length) } finally { $reader.Dispose() }
+                    $sha = [Security.Cryptography.SHA256]::Create()
+                    try { $EntryHashes[$entry.FullName.Replace('/', '\').ToLowerInvariant()] = (-join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') })).ToUpperInvariant() } finally { $sha.Dispose() }
+                    [IO.File]::WriteAllBytes($target, [byte[]]($bytes | Select-Object -First ($bytes.Length - 2)))
+                }
+            } finally { $archive.Dispose() }
+        }
+
+        $run = Invoke-Fix41AutoSync -Fixture $fx
+
+        $run.Failed | Should -Be 1 -Because (Get-Fix41Diagnostic $run)
+        @($run.FailedNames) | Should -Contain $name
+        [IO.File]::ReadAllText($script:logPath) | Should -Match "did not match the complete ZIP inventory \('(game\.exe|data\\level\.bin)' differs from the ZIP \(\d+ bytes expected, \d+ found\)\)" -Because (Get-Fix41Diagnostic $run)
+        Test-Path -LiteralPath (Join-Path $fx.Games $name) | Should -BeFalse
+    }
+
+    It 'reports a missing file, an extra file and an unreadable folder in plain words' {
+        $inventory = [pscustomobject]@{ Entries = @(
+            [pscustomobject]@{ RelativePath = 'a.bin'; IsDirectory = $false; Length = [int64]3; Sha256 = 'AA' },
+            [pscustomobject]@{ RelativePath = 'b.bin'; IsDirectory = $false; Length = [int64]3; Sha256 = 'BB' }) }
+        $manifest = { param($items) [pscustomobject]@{ Readable = $true; Exists = $true; IsDirectory = $true; Error = $null; Items = $items } }
+        $a = [pscustomobject]@{ RelativePath = 'a.bin'; IsDirectory = $false; Length = [int64]3; Sha256 = 'AA' }
+        $c = [pscustomobject]@{ RelativePath = 'c.bin'; IsDirectory = $false; Length = [int64]3; Sha256 = 'CC' }
+        $difference = ''
+        (Test-TpmDirectoryAgainstZipInventory -Manifest (& $manifest @($a, $c)) -Inventory $inventory -Difference ([ref]$difference)) | Should -BeFalse
+        $difference | Should -Match "missing: 'b\.bin'"
+        (Test-TpmDirectoryAgainstZipInventory -Manifest (& $manifest @($a)) -Inventory $inventory -Difference ([ref]$difference)) | Should -BeFalse
+        $difference | Should -Match "ZIP lists 2 items and the folder has 1; missing: 'b\.bin'"
+        $unreadable = [pscustomobject]@{ Readable = $false; Exists = $true; IsDirectory = $true; Error = 'Access to the path is denied.'; Items = @() }
+        (Test-TpmDirectoryAgainstZipInventory -Manifest $unreadable -Inventory $inventory -Difference ([ref]$difference)) | Should -BeFalse
+        $difference | Should -Match 'could not be read completely: Access to the path is denied'
+    }
+}

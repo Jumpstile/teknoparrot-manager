@@ -8,9 +8,9 @@ Related: #200 (controller mapping), #201 (full HIP integration, post-1.0), #303 
 
 ## Ownership
 
-Providers own device probing, provider identity and version, normalized device-class observations, confidence and basis for each observation, and bounded availability status. They do not choose a capability profile, a reference game, a survey answer, or any setting.
+Providers own device probing, provider identity and version, normalized device-class observations, confidence and basis for each observation, and bounded availability status. They do not choose a capability profile, a survey answer, or any setting.
 
-TPM control propagation owns the Device Survey, the suggestion shown to the user, archetype choice, and all writes. It may read this evidence. It may not treat it as an answer.
+TPM's Controls screen owns the Device Survey, the suggestion shown to the user, the controller layout choice, and all writes. It may read this evidence. It may not treat it as an answer.
 
 The #303 capability contract owns capability classes and profile identity. Evidence may suggest one. The user's explicit selection stays authoritative.
 
@@ -26,7 +26,7 @@ The #307 verification model owns the Verified status. Device presence is never p
 - `SourceUnavailable`: the provider is missing, timed out, or failed. `DeviceObservations` is empty and `ReasonCodes` says why.
 - `Rejected`: reserved for a future provider (such as HIP) whose output fails validation against this contract. The 1.0 local provider builds its own result and never returns it.
 
-Every status is a normal result. None of them blocks the Device Survey or Propagate Controls. With any status other than `Observed`, TPM behaves exactly as RC8.1 and asks the user.
+Every status is a normal result. None of them blocks the Device Survey or the Controls screen. With any status other than `Observed`, TPM behaves exactly as RC8.1 and asks the user.
 
 ## Confidence and basis
 
@@ -36,7 +36,7 @@ In 1.0 only an active XInput slot with class `XboxStylePad` may be `High`. Every
 
 ## Time facts
 
-`ObservationTimeUtc` is the only time fact. It is excluded from `EvidenceId`. Evidence from an earlier run of the survey or propagation is stale and must be observed again, never reused.
+`ObservationTimeUtc` is the only time fact. It is excluded from `EvidenceId`. Evidence from an earlier run of the survey or controls setup is stale and must be observed again, never reused.
 
 A fingerprint set of the arcade encoders seen when the player taught TPM their keys is kept with the saved keys (`cabinet.json`, `EncoderFingerprints`, with the older `EncodersWhenLearned` count) and compared with a new observation. It is a note about the past, never evidence about the present, and it may only produce a hint: the controllers are the same, one was added or removed, or TPM could not check. It never changes a saved answer and never decides Verified.
 
@@ -46,7 +46,7 @@ A fingerprint set of the arcade encoders seen when the player taught TPM their k
 
 Serial numbers, MAC addresses, user names, and machine names are never read, stored, logged, or reported. Device paths, vendor and product numbers, and device instance IDs may be read, in memory only, so that TPM can count the boards of one model and recognize the same controller again. They are never stored, logged, shown, put in a guide, a report, an issue text, a support package, or the returned evidence. What is kept is the coarse class plus a local fingerprint per recognized arcade encoder (next paragraph). `SensitiveIdentifiersIncluded` is always false and `ReadOnly` is always true. A provider that cannot meet this must return `SourceUnavailable`. Detection writes no file, changes no setting, and starts no program. Each Windows query is limited to 3 seconds. If both probes (XInput and the device list) fail, the result is `SourceUnavailable`. If only one fails, the result is still `Observed` with a reason code for the failed probe.
 
-The schema is intentionally generic about the device list: `DeviceClass` is `XboxStylePad`, `OtherGamePad`, `Wheel`, `LightGun`, `ArcadeEncoder`, `Keyboard`, `PointerOrTrackball`, or `Unknown`. Per-game, per-emulator, and per-brand fields are not v1 fields.
+The schema is intentionally generic about the device list: `DeviceClass` is `XboxStylePad`, `OtherGamePad`, `Wheel`, `LightGun`, `ArcadeEncoder`, `Keyboard`, `PointerOrTrackball`, `PlayStationPad`, `NintendoPad`, `FlightStick`, `WiiRemote`, `Guitar`, `Drums`, `DancePad`, or `Unknown`. Per-game, per-emulator, and per-brand fields are not v1 fields.
 
 `DeviceFingerprints` is optional. It is `null` unless the caller passes a salt (`Get-TpmControllerEvidence -Salt`), and `null` when the device list could not be read. Otherwise it lists one `{ DeviceClass, Fingerprint }` per recognized arcade encoder (an empty list means none was recognized). `Fingerprint` is the SHA-256 of a version tag, the salt, the class, the maker and model numbers, and a counter (1, 2, ... for identical boards of one model, so two identical encoders have two different fingerprints). It does not include an instance id, so moving a board to another USB port keeps it. A board is counted by instance id: each interface of one board shows one id, so the most ids one interface shows is the number of boards. Swapping a board for an identical one is not detectable and is not claimed. Only makers on TPM's short list (`KnownVendor`, Medium at most) get a fingerprint. The fingerprint is not part of `EvidenceId`.
 
@@ -56,7 +56,7 @@ The salt is 16 random bytes made once by the code that saves the player's keys (
 
 Allowed: pre-fill a Device Survey answer (`High` only), show a "found" or "possible" hint, suggest a starting capability class to #303 marked as suggested, list the observed classes in the support package, and compare the local fingerprint set with the one saved when the keys were taught, to show a hint.
 
-Forbidden: mark any control or game Verified or ready, write or change any profile or setting, skip a question or hide a choice, choose a reference game without the user's confirmation, and block any screen.
+Forbidden: mark any control or game Verified or ready, write or change any profile or setting, skip a question or hide a choice, choose a controller layout without the user's confirmation, and block any screen.
 
 ## Provider seam
 
@@ -67,7 +67,7 @@ All TPM code calls `Get-TpmControllerEvidence` and receives `TpmControllerEviden
 | Module | Responsibilities | Inputs | Outputs | Non-goals | Allowed dependencies | Forbidden dependencies | Verification gates |
 |---|---|---|---|---|---|---|---|
 | Controller evidence provider | Probe connected controller classes and report them with confidence and basis. | Windows device information, XInput state. | `TpmControllerEvidence/v1`. | No profile reads, no writes, no capability choice, no identifiers. | Windows device APIs, this contract. | Profiles, UserProfiles, network, EPIC or HIP code (before HIP is pinned), any write path. | Schema validation, no-identifier scan, no-file-change check, timeout check. |
-| Device Survey and propagation (consumer) | Show hints, pre-fill `High` answers, keep the user's answer authoritative. | `TpmControllerEvidence/v1`, the user's answers. | Survey plan, suggestion to #303. | No Verified status, no automatic writes from evidence. | This contract, #303 capability contract. | Provider internals, raw device data. | Override-wins test, unchanged-behavior-on-failure test. |
+| Device Survey and controls setup (consumer) | Show hints, pre-fill `High` answers, keep the user's answer authoritative. | `TpmControllerEvidence/v1`, the user's answers. | Survey answers, suggestion to #303. | No Verified status, no automatic writes from evidence. | This contract, #303 capability contract. | Provider internals, raw device data. | Override-wins test, unchanged-behavior-on-failure test. |
 | Capability contract (#303) | Own capability classes and profile identity. | Suggested class, user selection. | Capability profile. | No device probing. | This contract (read only). | Provider internals. | #303 schema tests. |
 | Verification (#307) | Own gameplay verification. | Verification evidence only. | Verified status. | No inference from device presence. | Its own evidence. | This contract as a source of Verified. | #307 tests. |
 | Support package | Report observed classes. | `TpmControllerEvidence/v1`. | Class list and provider name. | No identifiers. | This contract. | Raw device data. | No-identifier scan. |

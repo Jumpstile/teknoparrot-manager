@@ -16,7 +16,7 @@
 | PostgreSQL | Invoke-PostgresGameSetup and recovery | 16 | TPM-OWNER-001 | Recovery matrix | Very high | Extract after mutation contract |
 | LaunchBox | Export/backup/restore functions | 23,24 | TPM-OWNER-001 | LaunchBox tests | High | FrontendExport.Core |
 | Support packages | New-TpmSupportPackage, manifest helpers | 27-29 | TPM-TRACE-001 | SupportPackage.Tests | Medium | SupportPackage.Core |
-| Controls readiness | Controls propagation/result reporting | 30 | TPM-OWNER-001 | Controls matrix | Very high | ControlsReadiness.Core |
+| Controls readiness | Controls setup/result reporting | 30 | TPM-OWNER-001 | Controls matrix | Very high | ControlsReadiness.Core |
 | Packaging/release gates | package validation and provenance reports | all runtime statuses | TPM-EVIDENCE-001 | Package/provenance checks | High | Package.Core last |
 | Permanent procedure enforcement | Test-TpmPermanentProcedures, Run-TpmQualityGate | all | all applicable | Gate tests | High | Keep small and independently tested |
 

@@ -1,0 +1,50 @@
+name: Game data publish
+
+# Manual start only. The owner signs the data file on their own computer first (scripts\Sign-TpmGameData.ps1) and commits
+# game-data\TpmGameRules.json and game-data\TpmGameRules.json.sig. This workflow only CHECKS those two files (the same strict
+# rules and the same public key TeknoParrot Manager uses) and then copies them, unchanged, to the game-data-live branch,
+# which is the address TeknoParrot Manager reads. No private key is stored in the repository or used here; this workflow
+# cannot sign anything, so a file that was not signed by the owner's key fails the check and is not published.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Check and publish signed game data
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check the signed files
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('game-data\TpmGameRules.json', 'game-data\TpmGameRules.json.sig')) {
+            if (-not (Test-Path -LiteralPath $name -PathType Leaf)) { throw "Missing $name. Sign the file first and commit both files." }
+          }
+          .\scripts\Sign-TpmGameData.ps1 -DataPath game-data\TpmGameRules.json -Verify
+
+      - name: Copy the two files to the game-data-live branch
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP 'game-data-live'
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item -LiteralPath 'game-data\TpmGameRules.json', 'game-data\TpmGameRules.json.sig' -Destination $stage
+          [System.IO.File]::WriteAllText((Join-Path $stage '.gitattributes'), "* -text`n")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config core.autocrlf false
+          git switch --orphan game-data-live
+          git rm -rf --quiet .
+          Copy-Item -Path (Join-Path $stage '*') -Destination . -Force
+          Copy-Item -LiteralPath (Join-Path $stage '.gitattributes') -Destination . -Force
+          git add .gitattributes TpmGameRules.json TpmGameRules.json.sig
+          git commit --quiet -m "Publish signed game rules"
+          git push --force origin game-data-live

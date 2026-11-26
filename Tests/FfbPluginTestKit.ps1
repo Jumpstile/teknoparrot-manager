@@ -23,7 +23,7 @@ function New-FfbTestZip {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][System.Collections.IDictionary]$Games,
         [string[]]$OmitIniFor = @(), [string[]]$OmitDllFor = @(), [string[]]$OmitSdlFor = @(),
-        [string[]]$ExtraEntryNames = @(), [string]$Arch = 'x64', [string]$IniText = '', [string[]]$ExtraGames = @()
+        [string[]]$ExtraEntryNames = @(), [string]$Arch = 'x64', [string]$IniText = '', [string[]]$ExtraGames = @(), [string[]]$OmitFolderFor = @()
     )
     [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($Path))
     $archive = [System.IO.Compression.ZipFile]::Open($Path, [System.IO.Compression.ZipArchiveMode]::Create)
@@ -35,6 +35,7 @@ function New-FfbTestZip {
             try { $stream.Write($Bytes, 0, $Bytes.Length) } finally { $stream.Dispose() }
         }
         foreach ($game in (@($Games.Keys) + @($ExtraGames))) {
+            if ($OmitFolderFor -contains $game) { continue }
             if ($OmitDllFor -notcontains $game) { & $add ($game + '/dinput8.dll') (New-FfbTestPe -Arch $Arch) }
             if ($OmitSdlFor -notcontains $game) { & $add ($game + '/SDL2.dll') ([System.Text.Encoding]::ASCII.GetBytes('sdl2-' + $game)) }
             if ($OmitIniFor -notcontains $game) {

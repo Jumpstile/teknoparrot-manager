@@ -154,8 +154,8 @@ BeforeAll {
     # The arcade catalog (FIX46 owner decision, extended by FIX51): Original plus sixteen profiles, so the chooser offers [1-17]; the target of the preview
     # selection changes below is the last profile, [17] Black/White Point Adjustment [Levels].
     $script:Fix46Choose110 = @(
-        '  Choose: [1-17] Select profile  [U] Use selected profile  [N] Skip ReShade -- no changes  [R] Reopen preview',
-        '          [B] Back  [D] Details'
+        '  Choose: [1-17] Select profile  [U] Use selected profile  [S] Custom preset  [N] Skip ReShade -- no changes',
+        '          [R] Reopen preview  [B] Back  [D] Details'
     )
     $script:Fix46TargetId = 'Levels'
     $script:Fix46CurrentTarget = '  Current selection: Black/White Point Adjustment [Levels]'
@@ -223,7 +223,7 @@ Describe 'FIX46 chooser screen after a selection change (fake console surface)' 
         Set-Fix46Script -Steps @($null, '1', { $script:surface.Width = 80; $script:session['SelectedProfileId'] = $script:Fix46TargetId }, $null, { Save-Fix46Snapshot 'After' }, 'BS', 'U', 'ENTER')
         $result = Read-TpmReShadeTerminalProfile -Profiles @($script:session['Profiles']) -DefaultProfileId 'Original' -PreviewSession $script:session
         $choose80 = @(
-            '  Choose: [1-17] Select profile  [U] Use selected profile',
+            '  Choose: [1-17] Select profile  [U] Use selected profile  [S] Custom preset',
             '          [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back',
             '          [D] Details'
         )
@@ -273,7 +273,7 @@ Describe 'FIX46 chooser screen after a selection change (fake console surface)' 
 Describe 'FIX46 Choose rows fit the window and wrap only at option boundaries' {
     It 'keeps every option whole and every row inside the text width for windows 80 to 200 columns wide' {
         # Mutation: change the wrap test in Get-TpmReShadeChooseLines to never start a new row -> rows longer than the width.
-        $options = @('[1-17] Select profile', '[U] Use selected profile', '[N] Skip ReShade -- no changes', '[R] Reopen preview', '[B] Back', '[D] Details')
+        $options = @('[1-17] Select profile', '[U] Use selected profile', '[S] Custom preset', '[N] Skip ReShade -- no changes', '[R] Reopen preview', '[B] Back', '[D] Details')
         foreach ($width in @(80, 81, 90, 100, 109, 110, 111, 120, 128, 129, 140, 160, 200)) {
             $textWidth = $width - 1
             $rows = @(Get-TpmReShadeChooseLines -LastNumber 17 -TextWidth $textWidth | ForEach-Object { [string]$_.Text })
@@ -286,7 +286,7 @@ Describe 'FIX46 Choose rows fit the window and wrap only at option boundaries' {
         # A width that cannot be measured keeps the single legacy row.
         $single = @(Get-TpmReShadeChooseLines -LastNumber 17 -TextWidth 0)
         $single.Count | Should -Be 1
-        $single[0].Text | Should -BeExactly '  Choose: [1-17] Select profile  [U] Use selected profile  [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back  [D] Details'
+        $single[0].Text | Should -BeExactly '  Choose: [1-17] Select profile  [U] Use selected profile  [S] Custom preset  [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back  [D] Details'
         $single[0].Kind | Should -Be 'Choose'
     }
 }
@@ -381,7 +381,6 @@ Describe 'FIX46 the ReShade setup progress bar is held while the user chooses' {
         $script:fix46GameFile = Join-Path $fixture.Profiles 'Game1.xml'
         [IO.File]::WriteAllText($script:fix46GameFile, '<GameProfile><GamePath>C:\Fix46\Missing\Game.exe</GamePath></GameProfile>')
         Mock Read-TpmReShadeTerminalProfile { [void]$script:holdEvents.Add('chooser:' + $script:holdDepth); [pscustomobject]@{ Cancelled = $false; SelectedProfile = (Get-TpmReShadeProfile -ProfileId 'Original'); PreviewSession = $null } }
-        Mock Read-TpmChoice { [void]$script:holdEvents.Add('confirm:' + $script:holdDepth); 'Y' }
         Mock Select-RegisteredGamesInteractive { [void]$script:holdEvents.Add('games:' + $script:holdDepth); @(Get-Item -LiteralPath $script:fix46GameFile) }
         Mock Get-TpmReShadeApplyPreflight { [void]$script:holdEvents.Add('preflight:' + $script:holdDepth); [pscustomobject]@{ Ready = 1; Protected = 0; MissingPath = 0; Unsafe = 0; Failed = 0 } }
         Mock Get-TpmReShadeChooserOptions { [pscustomobject]@{ Restore = [pscustomobject]@{ Found = $false; Valid = $false }; Remembered = [pscustomobject]@{ Found = $false; Valid = $false } } }
@@ -391,7 +390,6 @@ Describe 'FIX46 the ReShade setup progress bar is held while the user chooses' {
         try { $null = Invoke-ReShadeSetup -UserProfilesDir $fixture.Profiles -SourceDll $fixture.SourceDll } catch { Write-Verbose ('setup ended with: ' + $_.Exception.Message) }
         $events = @($script:holdEvents)
         @($events[0..3]) | Should -Be @('stage:Checking the ReShade files', 'suspend', 'gallery:1', 'chooser:1')
-        $events | Should -Contain 'confirm:1'
         $events | Should -Contain 'games:1'
         $events | Should -Contain 'preflight:1'
         $stageAt = [Array]::IndexOf($events, 'stage:Installing the selected profile')

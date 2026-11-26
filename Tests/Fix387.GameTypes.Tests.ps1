@@ -158,7 +158,7 @@ Describe 'Game types in the Library health check (issues 387 and 389)' {
     }
 }
 
-Describe 'System 11 game files (issue 387)' {
+Describe 'TeknoS11 arcade game files (issue 387)' {
     BeforeEach {
         Mock Write-Log { }
         Mock Write-Host { }
@@ -322,14 +322,14 @@ Describe 'System 11 saved files (issue 387)' {
         (Test-Path -LiteralPath (Join-Path $s11.Root 'TeknoS11\state')) | Should -BeFalse
     }
 
-    It 'puts a note in the Library health check for System 11 games that have no saved files, not for games that have them' {
+    It 'puts a note in the Library health check for TeknoS11 arcade games that have no saved files, not for games that have them' {
         $folder = Join-Path $s11.Root 'TeknoS11\state\gameA\cabinet-1'
         New-Item -ItemType Directory -Path $folder -Force | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $folder 'at28c16.bin'), 'x')
         $report = Get-F387GReport -Fixture $s11
         @($report.S11NoSavedFiles) | Should -Be @('gameB', 'gameC')
-        $row = @(Get-TpmGameTypeRows -Report $report | Where-Object { $_.Area -eq 'System 11' })[0]
-        $row.Text | Should -Match '^Note - 2 of 3 System 11 games have no saved setup files yet'
+        $row = @(Get-TpmGameTypeRows -Report $report | Where-Object { $_.Area -eq 'Saved files' })[0]
+        $row.Text | Should -Match '^Note - 2 of 3 arcade games that use the TeknoS11 loader \(System 10, System 11, System 12, Sony ZN, Konami 573, Taito G-NET and similar boards\) have no saved setup files yet'
         $row.Text | Should -Not -Match 'Needs attention'
     }
 }
@@ -364,7 +364,7 @@ Describe 'System 11 saved files offer (issue 387)' {
         (Test-Path -LiteralPath (Join-Path $s11o.Root 'TeknoS11\state')) | Should -BeFalse
     }
 
-    It 'does not ask when every System 11 game already has saved files' {
+    It 'does not ask when every TeknoS11 arcade game already has saved files' {
         $folder = Join-Path $s11o.Root 'TeknoS11\state\gameA\cabinet-1'
         New-Item -ItemType Directory -Path $folder -Force | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $folder 'at28c16.bin'), 'MY OWN SAVE')
@@ -438,6 +438,15 @@ Describe 'System 11 saved files offer: what the player reads (issue 387)' {
     It 'says in one correct sentence which game the set has no files for' {
         [void](Invoke-TpmS11PreinstallOffer -TpRoot $s11p.Root -UserProfilesDir $s11p.Profiles -SearchFolders @($s11pCollection))
         @($offerText) | Should -Contain 'Your set has no saved files for gameZ. That game starts without them.'
+    }
+
+    It 'names the TeknoS11 loader and lists the boards equally, never System 11 alone' {
+        [void](Invoke-TpmS11PreinstallOffer -TpRoot $s11p.Root -UserProfilesDir $s11p.Profiles -SearchFolders @($s11pCollection))
+        $shown = (@($offerText) -join ' ')
+        $shown | Should -Match '2 of your registered arcade games that use the TeknoS11 loader \(System 10, System 11, System 12, Sony ZN, Konami 573, Taito G-NET and similar boards\) have no saved setup files yet'
+        $shown | Should -Not -Match 'registered System 11'
+        $shown | Should -Not -Match 'System 11 and related'
+        $shown | Should -Not -Match 'System 11 is an old Namco'
     }
 
     It 'does not ask again once the set in the collection has nothing more for the games that still have none' {

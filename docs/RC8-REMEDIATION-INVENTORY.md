@@ -57,7 +57,7 @@ The runtime detected NVIDIA Quadro P620, created a backup, updated zero
 games, left 51 unchanged, skipped four missing saved executables
 (2Spicy, AkaiKatanaShinNesica, BBHPro, BBHWorld), and reported zero errors.
 The operation was safe but the result cleared too quickly for the user to
-understand. The remediation must keep the result visible until acknowledgement,
+understand. The remediation must keep the result visible until acknowledgment,
 explain each skip in beginner language with a next action, and provide a
 separate technical Details view.
 
@@ -104,7 +104,7 @@ not need to understand PowerShell, PostgreSQL, XML, ACLs, reparse points,
 BepInEx internals, permissions, or elevation. Every skipped, blocked, or failed
 item must explain what happened, why it happened, what TPM did or did not
 change, and what the user should do next. Normal screens remain readable and
-wait for acknowledgement; technical details remain available separately.
+wait for acknowledgment; technical details remain available separately.
 The acceptance question is whether a 14-year-old can complete the workflow
 without specialist knowledge.
 
@@ -175,7 +175,7 @@ before any profile write; passwords are never logged.
 | CH-S01  | Crosshair browser feedback | The visual picker reports P1 selection and highlights it before accepting P2, confirms the P2 selection, preserves typed numeric fallback, and keeps deployment behind terminal confirmation. | Export-CrosshairPreview; Start/Read-CrosshairSelectionBridge; P1/P2 browser feedback tests |
 | GPU-S01 | GPU Fix safe routing | GPU Fix validates each registered executable at the mutation boundary; missing or unavailable paths become per-game skips with actionable result guidance and a conditional Health Check handoff, never a fatal batch abort or false success. | Invoke-GpuFixSetup; Test-TpmGameMutationPath; GPU missing-device and guided-repair tests |
 | FFB-S02  | FFB overlap and path routing | FFB setup resolves plugin candidates before third-party mutation, identifies games covered by both native FFB Blaster and the plugin, asks once for one owner, defaults to native, switches native fields off with a verified backup before third-party deployment, prevents both owners, and reports overlap skips separately from no-match, no-DLL, missing saved path, unavailable device, and errors. Shared mutation-path classification preserves affected game names and offers a Health Check handoff even when plugin deployment also fails. | Invoke-FFBPluginSetup; Test-TpmGameMutationPath; Invoke-TpmFfbSetupMode; Disable-FFBBlasterForOverlap; Get-FFBBlasterSupport; overlap/path and FFB workflow tests |
-| SUP-S01 | Support package collection | Option 15 gathers only allowlisted TPM/TeknoParrotUI/TeknoParrot/game text diagnostics, redacted affected-game profile snapshots, and metadata-only plugin inventories into a fixed support ZIP; the exact TeknoParrotUI intake filename is required and arbitrary directories or game payloads are never archived. The manifest and completion output lead with `What failed` and `What TPM did not change`, then label Current, Stale, and Ambient evidence. | New-TpmSupportPackage; support-package allowlist/privacy/manifest tests |
+| SUP-S01 | Support package collection | Menu option 17 (option 15 in RC8) gathers only allowlisted TPM/TeknoParrotUI/TeknoParrot/game text diagnostics, redacted affected-game profile snapshots, and metadata-only plugin inventories into a fixed support ZIP; the exact TeknoParrotUI intake filename is required and arbitrary directories or game payloads are never archived. The manifest and completion output lead with `What failed` and `What TPM did not change`, then label Current, Stale, and Ambient evidence. | New-TpmSupportPackage; support-package allowlist/privacy/manifest tests |
 | SUP-S02 | Support package privacy | Common credentials and user-profile paths are redacted from included text and structured snapshots; credentials, raw UserProfile XML, recovery state, executables, DLL payloads, archives, firmware, and unrelated files are excluded. The manifest records collected/absent/excluded/failed/unsafe-content-rejected sources and stale Action Required evidence. | Redact-TpmSupportText; profile/intake/manifest privacy tests |
 | SUP-S03 | Support package object-bound safety | Source/profile/plugin reads consume identity-validated opened handles; unsafe path identity is rejected, destination promotion uses an identity-validated directory handle and CREATE_NEW, and staging cleanup deletes only through validated owned handles. | Open-TpmSupportSafeFileStream; Move-TpmSupportZipByIdentity; adversarial/workflow tests |
 | WS-S01 | Engineering handoff      | GitHub is authoritative; each machine uses a local clone/worktree and hands off pushed refs plus exact SHAs. NAS is storage/mirror evidence, not an authoritative active Git worktree. | RELEASE-SAFETY-CHECKLIST.md; #293 policy           |

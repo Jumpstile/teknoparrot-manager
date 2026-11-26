@@ -4,9 +4,9 @@ Restore backup puts back something TeknoParrot Manager saved earlier. You do it 
 
 TeknoParrot Manager saves copies for you:
 
-- Your `UserProfiles` folder (TeknoParrot's saved game settings) is backed up before [[AutoSync]] and [[Register]] make changes, and before other steps such as [[Propagate Controls]].
+- Your `UserProfiles` folder (TeknoParrot's saved game settings) is backed up before [[AutoSync]] and [[Register]] make changes, and before other steps such as [[Controls]].
 - LaunchBox's library files are backed up before TeknoParrot Manager writes to them. See [[LaunchBox Integration]].
-- Your PostgreSQL game databases are backed up before every [[Postgres Setup]] run.
+- Your PostgreSQL game databases are backed up when you run [[Postgres Setup]], normally before it changes them. If a setup was interrupted and is resumed, a reinitialize step can run first.
 
 ---
 
@@ -62,7 +62,7 @@ A restore does not keep a copy of the settings it replaces. If you may want your
 
 Use this to put back a game's PostgreSQL database. It only matters if you used [[Postgres Setup]].
 
-Backups are in `<your TeknoParrot folder>\TeknoParrotManager\Backups\PostgresBackups\<date and time>_<id>\`, one `<database name>.backup` file per database.
+Backups are in `<your TeknoParrot folder>\TeknoParrotManager\Backups\PostgresBackups\<date and time>_<id>\`, one `<database name>.backup` file per database. An older install may have them in a `PostgresBackups` folder next to `TeknoParrot-Manager.ps1` instead.
 
 1. Choose option 2. You see `Available Postgres database backups (most recent first):`.
 2. Type the number of the backup you want. Press Enter alone to cancel.
@@ -74,7 +74,7 @@ Your PostgreSQL install is not touched, only the database content. A backup mark
 
 <details><summary>Details</summary>
 
-To restore by hand, use `pg_restore.exe` from PostgreSQL (in `C:\Program Files (x86)\PostgreSQL\8.3\bin\`) on the `.backup` file.
+Restoring by hand is for experts. `pg_restore.exe` (in `C:\Program Files (x86)\PostgreSQL\8.3\bin\`) must be told which empty database to write into (the `-d` option). Running it on the `.backup` file alone does not restore a database.
 
 </details>
 
@@ -84,9 +84,9 @@ To restore by hand, use `pg_restore.exe` from PostgreSQL (in `C:\Program Files (
 
 Use this to put back LaunchBox files that TeknoParrot Manager changed. It only matters if you used [[LaunchBox Integration]].
 
-Backups are in `<your TeknoParrot folder>\TeknoParrotManager\Backups\LaunchBoxBackups\<date and time>-<id>\`. If your TeknoParrot folder is inside your LaunchBox folder, they are kept in `%LOCALAPPDATA%\TeknoParrotManager\LaunchBoxBackups\` instead.
+Backups are in `<your TeknoParrot folder>\TeknoParrotManager\Backups\LaunchBoxBackups\<date and time>-<id>\`. If your TeknoParrot folder is inside your LaunchBox folder, they are kept in `%LOCALAPPDATA%\TeknoParrotManager\LaunchBoxBackups\` instead, with one subfolder for each LaunchBox library. An older install may have them in a `LaunchBoxBackups` folder next to `TeknoParrot-Manager.ps1`.
 
-1. Close LaunchBox and BigBox. TeknoParrot Manager never closes them for you. If one is open, it waits. Close it and press Enter, or type `N` to cancel.
+1. Close LaunchBox and BigBox. TeknoParrot Manager never closes them for you. It checks after you pick a backup and answer the restore question (step 5), not before. If one is open then, it waits. Close it and press Enter, or type `N` to cancel.
 2. Choose option 3. If no LaunchBox folder is saved, you are asked for it (the folder with `LaunchBox.exe`).
 3. Pick a backup. Press Enter (or `B`) to cancel.
 4. You see the files that will be put back and a warning that any LaunchBox changes made to them since the backup will be replaced.

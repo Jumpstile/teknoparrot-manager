@@ -1,6 +1,6 @@
 # Auto-Update System
 
-Status: the standalone helper and the Check for Updates menu item (16) are part of v1.0 RC8.1, v1.0 RC8.2, v1.0 RC8.3, v1.0 RC8.4, v1.0 RC9, v1.0 RC9.1, v1.0 RC9.2 and v1.0 RC9.3. RC9.3 is the latest published release: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3. The previous published release is v1.0 RC9.2: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2. The older published releases are v1.0 RC9.1, RC9, RC8.4, RC8.3, RC8.2, RC8.1 and RC7. RC8 was a tester build and was never published. Final Version 1.0 has not been published yet. All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
+Status: the standalone helper and the Check for Updates menu item (16) are part of v1.0 RC8.1, v1.0 RC8.2, v1.0 RC8.3, v1.0 RC8.4, v1.0 RC9, v1.0 RC9.1, v1.0 RC9.2, v1.0 RC9.3 and v1.0 RC9.4. This guide is for v1.0 RC9.4. RC9.3 is the latest published release: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3. The previous published release is v1.0 RC9.2: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2. The older published releases are v1.0 RC9.1, RC9, RC8.4, RC8.3, RC8.2, RC8.1 and RC7. RC8 was a tester build and was never published. Final Version 1.0 has not been published yet. All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
 RC8.1 is the first build that can update itself in place with Check for Updates, including a release with many files. If you run RC8.1 or newer, Check for Updates offers the newer release when there is one. Builds before RC8.1 (for example RC8 or RC7) cannot update themselves. If you run one of those, install the newest release by hand once: download its ZIP from the Releases page and extract it over your old folder. After that, Check for Updates does the work.
 
@@ -20,7 +20,7 @@ The updater must never silently replace files. When you ask it to update, it doe
 3. It looks inside the ZIP before changing anything.
 4. It checks there is enough free space (twice the unpacked size).
 5. It saves a backup of every file it replaces, in `UpdateBackups`.
-6. It installs the files and checks each one. If anything goes wrong, it puts every file back.
+6. It installs the files and checks each one. If anything goes wrong, it puts every file back and checks that it did. If it cannot prove that, it tells you so, keeps its working folder and shows what to do.
 7. You start TeknoParrot Manager again yourself.
 
 It never deletes your own files, `UserProfiles`, your backups or older files the release no longer has.
@@ -234,7 +234,7 @@ In every case the original script must stay safe.
 
 The standalone helper is for scripted or manual use outside the interactive menu.
 
-`-CheckOnly` only looks for a newer release. `-Apply` installs it (see Menu integration below for multi-file ZIPs).
+`-CheckOnly` only looks for a newer release. `-Apply` installs it only when the release ZIP holds just the one file `TeknoParrot-Manager.ps1`. A multi-file package (RC8.1 and later) is refused and nothing is changed. If you use the script, start TeknoParrot Manager and choose 16 (Check for Updates) instead.
 
 ```powershell
 .\tools\Invoke-TpmAutoUpdate.ps1 -CheckOnly
@@ -301,7 +301,7 @@ It follows the flow originally planned here.
 
 **If the new release is a multi-file package (RC8.1 and later):**
 
-The update installs the whole package. It backs up every file it replaces first, and puts every file back if anything goes wrong. If the drive is too full, it says so and installs nothing. When it is done, you see `Update installed and verified. Restart TeknoParrot Manager to use it.` Start it again yourself.
+The update installs the whole package. It backs up every file it replaces first, and puts every file back if anything goes wrong. If it cannot prove that every file is back, it says so, keeps its working folder (`tpm-update-staging-...`) and tells you to restore from the backup folder it names. If the drive is too full, it says so and installs nothing. When it is done, you see `Update installed and verified. Restart TeknoParrot Manager to use it.` Start it again yourself.
 
 Files from an older version that the new release no longer has are left where they are and listed in Details. Your own files are never deleted.
 
@@ -333,10 +333,10 @@ It also states whether a backup was created, and returns safely to the main menu
 - The files are installed with `Invoke-TpmTransactionalPromote`, the same staging, promote and rollback primitive the ReShade and dgVoodoo2 installs use. The main script is replaced last. Every installed file is hashed again inside the promotion; a mismatch rolls everything back. If any step fails, every changed file is put back and every added file is removed (`ROLLED_BACK_VERIFIED`, reason code `UPDATE_ROLLBACK_VERIFIED`). If the rollback itself cannot be proven, the result is `ACTION_REQUIRED` with `UPDATE_ROLLBACK_UNVERIFIED` and the staging folder is kept.
 - Read-only flags on replaced files are cleared for the install and set again afterward.
 - Nothing is deleted. Files from an older version that the new package no longer has, inside the folders the package uses, are left in place and listed in Details (`TechnicalDetails.MultiFile.LeftInPlace`).
-- The staging folder (created by this run) and the downloaded ZIP are removed at the end, success or failure.
+- The staging folder (created by this run) and the downloaded ZIP are removed at the end, success or failure, except after `UPDATE_ROLLBACK_UNVERIFIED`, when the staging folder is kept.
 - `tools/Invoke-TpmAutoUpdate.ps1 -Apply` still refuses a multi-file ZIP and changes nothing. Its message now says to use menu 16 (Check for Updates) or the startup update, which install the whole release through the verified code above (there is no second implementation).
 - While an update runs, the staging folder holds an open marker file (`.tpm-update-running`). Each file's checksum is taken while it is written to staging and must equal the staged file before anything is installed, so a file damaged on its way to disk is never installed. The ZIP's SHA-256 from GitHub already covers every byte of every file in the ZIP; a list of per-file checksums inside the same ZIP would have the same trust root and add no protection, so none is shipped.
-- If an update is cut off (power loss, window closed), the staging folder is left behind. At the next start `Write-TpmInterruptedUpdateNotice` says so in plain words, names the newest `UpdateBackups` folder and how to copy the old files back, and logs it. A folder whose marker is still held open belongs to a running update (for example in a second window) and gets no notice. The folder is never deleted automatically, because it can hold the only copy of files that were moved aside; a guided restore is not offered because it cannot be verified.
+- If an update is cut off (power loss, window closed), the staging folder is left behind. At the next start `Write-TpmInterruptedUpdateNotice` says so in plain words and logs it. It names a backup folder only when that `UpdateBackups` folder was made by the cut-off run (made after its staging folder); an older backup from an earlier update is never offered, because copying it back would put an older version over this one. If the cut-off run made no backup, the notice says it stopped before it changed any program file. A folder whose marker is still held open belongs to a running update (for example in a second window) and gets no notice. The folder is never deleted automatically, because it can hold the only copy of files that were moved aside; a guided restore is not offered because it cannot be verified.
 
 **Actual flow (single-file ZIP), checking and confirming:**
 
@@ -355,7 +355,7 @@ It also states whether a backup was created, and returns safely to the main menu
 
 **Actual flow, replacing and restarting:**
 
-10. Replace script. As of issue #86 (v0.99.45), the replace step itself is verified, not just assumed to succeed: `Move-Item` is called with `-ErrorAction Stop`, and a post-move `Test-Path` confirms the destination now actually holds the new content before reporting success.
+10. Replace script. As of issue #86 (v0.99.45), the replace step itself is verified, not just assumed to succeed: `Move-Item` is called with `-ErrorAction Stop`, and after the move the installed script is read again and its SHA-256 hash and version are compared with the checked new file before success is reported.
 11. Tell the user to restart TeknoParrot Manager, then exit this session -- it never continues running the replaced script in the current process.
 
 **Why step 10 is checked:**
@@ -367,7 +367,7 @@ It also states whether a backup was created, and returns safely to the main menu
 
 When TeknoParrot Manager starts, it quietly checks for updates once.
 
-You can switch this off with `CheckForUpdatesOnStartup` in `TeknoParrot-Manager.config.json` (default `true`).
+You can switch this off with `CheckForUpdatesOnStartup` in `State\TeknoParrot-Manager.config.json` inside your TPM folder (default `true`).
 
 It never runs in `-Unattended` mode.
 

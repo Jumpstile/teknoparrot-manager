@@ -107,10 +107,6 @@ BeforeAll {
     # Mirror the production values explicitly.
     $script:FFBBlasterUnsupportedPlatforms = @('pcsx2x6')
     $script:FFBBlasterNamePattern          = 'ffb.*blaster|blaster.*ffb'
-    # Control propagation reads the real production list ($InputConfigFields), evaluated from the production source like the constants above.
-    $inputConfigAssignment = @($ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$InputConfigFields' })
-    if ($inputConfigAssignment.Count -ne 1) { throw 'Expected exactly one production assignment of $InputConfigFields.' }
-    $script:InputConfigFields = @(& ([scriptblock]::Create($inputConfigAssignment[0].Right.Extent.Text)))
 
     # The production script loads System.IO.Compression.FileSystem at startup
     # (top-level code, line ~82 -- not in a function body, so AST extraction
@@ -384,7 +380,7 @@ Describe "AST-extracted script state bootstrap" {
 
 Describe "Issue #217 AutoSync first-run guidance" {
     It "explains the staging folder role before path selection" {
-        $script:ProductionSource | Should -Match "Games folder \(also called the staging folder\)"
+        $script:ProductionSource | Should -Match "Staging folder for game files"
         $script:ProductionSource | Should -Match "AutoSync extracts your games into this folder"
         $script:ProductionSource | Should -Match "Your original ZIPs stay where they are"
         $script:ProductionSource | Should -Match "Press Enter to use this location, or B to choose another"
@@ -402,6 +398,10 @@ Describe "Issue #217 AutoSync first-run guidance" {
         $script:ProductionSource | Should -Match "Folder naming mode"
         $script:ProductionSource | Should -Not -Match "Is this a RetroBat/Batocera installation\?"
         $script:ProductionSource | Should -Match ([regex]::Escape('if (-not $configAccepted -and -not $Unattended)'))
+    }
+    It "tells a RetroBat user that only the folder names change and where the games folder is" {
+        $script:ProductionSource | Should -Match ([regex]::Escape("RetroBat mode only changes the folder names. TeknoParrot Manager does not move games into RetroBat's folders and does not change RetroBat."))
+        $script:ProductionSource | Should -Match ([regex]::Escape("Your games folder is: {0}. If RetroBat does not show your games"))
     }
 }
 Describe "Issue #217/#250 safe staging selection" {
@@ -899,8 +899,9 @@ Describe "Auto-detect root return contract (issue #65)" {
     It "keeps caller-side auto-detect assignments from re-wrapping the returned ArrayList" {
         $source = Get-Content -Raw -LiteralPath $scriptPath
 
-        $source | Should -Match '\$detected\s*=\s*Find-TeknoParrotRoot'
-        $source | Should -Not -Match '\$detected\s*=\s*@\(\s*Find-TeknoParrotRoot\s*\)'
+        # Find-TeknoParrotRoot returns one ArrayList. Callers must use the unrolling helper, never wrap it in @() themselves.
+        $source | Should -Match '\$detectedAll\s*=\s*@\(\s*Get-TpmDetectedRootList\s*\)'
+        $source | Should -Not -Match '=\s*@\(\s*Find-TeknoParrotRoot\s*\)'
     }
 }
 
@@ -1033,7 +1034,7 @@ Describe "Registered UserProfiles code scan" {
         @($progress | Where-Object { -not $_.Complete -and $null -ne $_.StartedAt }).Count | Should -Be 2
         @($script:registeredCodesProgress | Where-Object { $_.Label -eq 'test profile-code scan discovery' -and -not $_.Complete -and $null -ne $_.StartedAt }).Count | Should -Be 3
     }
-    It "returns only matching setup notes while reusing the progress-enabled code scan" {
+    It "returns the matching setup notes, plus a plain entry for a registered game the guide does not list, while reusing the progress-enabled code scan" {
         $profiles = Join-Path $TestDrive 'setup-notes-profiles'
         New-Item -ItemType Directory -Path $profiles -Force | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $profiles 'Abc.xml'),'<GameProfile />')
@@ -1053,9 +1054,11 @@ Describe "Registered UserProfiles code scan" {
 
         $notes = @(Get-GameSetupNotes -UserProfilesDir $profiles)
 
-        $notes.Count | Should -Be 1
+        $notes.Count | Should -Be 2
         $notes[0].Code | Should -Be 'abc'
         $notes[0].Notes | Should -Be 'note A'
+        $notes[1].Code | Should -Be 'def'
+        $notes[1].Generic | Should -BeTrue
         @($script:setupNotesProgress | Where-Object {
             $_.Label -eq 'Game setup notes profile-code scan' -and -not $_.Complete -and $_.Total -eq 2
         }).Count | Should -Be 2
@@ -2059,7 +2062,7 @@ Describe "Get-ButtonKey / Test-ButtonIsBound" {
 Describe "Control Readiness Engine (issue #255)" {
     BeforeAll {
     # Fixture modeled on the real, published After Burner Climax (abc) profile
-    # (teknogods/TeknoParrotUI GameProfiles/abc.xml, revision 22): Input API
+    # (TeknoParrot GameProfiles/abc.xml, revision 22): Input API
     # field plus the confirmed required input families -- Start, analog
     # Joystick X/Y, Throttle Lever, Gun Trigger, Missile Trigger, Climax
     # Switch -- matching Get-ControlReadinessKnownRequirements's 'abc' entry
@@ -2631,7 +2634,7 @@ $button2Block
               'Get-ControlReadinessActionItems') | ForEach-Object { @{ Name = $_ } }
         ) {
             param($Name)
-            $forbidden = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml',
+            $forbidden = @('Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml',
                 'Add-Content', 'Set-Content', 'Out-File', 'New-Item', 'Remove-Item', 'Move-Item',
                 'Copy-Item', 'Rename-Item')
             $fn = $productionAst.FindAll({
@@ -2913,6 +2916,26 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
 
             @(Get-TeknoParrotWizardAdviceLines -WizardState (Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot) -TeknoParrotRoot $tpRoot).Count | Should -Be 0
         }
+
+        It "gives the same one advisory for every unfinished or unreadable state and never says games were scanned or controls are set up" {
+            $cases = @(
+                (New-ParrotDataXml -FirstTimeSetupComplete 'false'),
+                $null,
+                '<ParrotData><FirstTimeSetupComplete>true',
+                (New-ParrotDataXml -OmitFirstTimeSetupComplete)
+            )
+            foreach ($xml in $cases) {
+                $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $root | Out-Null
+                if ($null -ne $xml) { Set-Content -LiteralPath (Join-Path $root 'ParrotData.xml') -Value $xml -Encoding utf8 }
+
+                $lines = @(Get-TeknoParrotWizardAdviceLines -WizardState (Get-TeknoParrotWizardState -TeknoParrotRoot $root) -TeknoParrotRoot $root)
+
+                $lines.Count | Should -Be 6
+                $lines | Should -Contain ('  1. Open this file: ' + (Join-Path $root 'TeknoParrotUi.exe'))
+                ($lines -join "`n") | Should -Not -Match '(?i)\b(complete|completed|verified|ready|working|done)\b'
+            }
+        }
     }
 
     Context "No-write regression (committed snapshot evidence, issue #253)" {
@@ -2997,7 +3020,7 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
             @('Get-TeknoParrotWizardState', 'Get-OnboardingHandoffSummaryLines', 'Get-TeknoParrotWizardAdviceLines') | ForEach-Object { @{ Name = $_ } }
         ) {
             param($Name)
-            $forbiddenCommands = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml',
+            $forbiddenCommands = @('Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml',
                 'Add-Content', 'Set-Content', 'Out-File', 'New-Item', 'Remove-Item', 'Move-Item', 'Copy-Item', 'Rename-Item')
             $fn = $wizardProductionAst.FindAll({
                 $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq $Name
@@ -3690,22 +3713,19 @@ Describe "PR #321 progress scan call-site coverage" {
         @($script:progressCalls | Where-Object { $_.Complete -and $_.Label -eq 'TeknoParrot profile list' -and $_.Phase -eq 'Checking' -and $_.Total -eq 0 }).Count | Should -Be 1
         @($script:progressCalls | Where-Object { $_.Complete -and $_.Label -eq 'TeknoParrot profile list discovery' -and $_.Current -eq 2 -and $_.Total -eq 0 }).Count | Should -Be 1
     }
-    It "Get-TeknoParrotProfileSet reports progress for the known GitHub tree" {
-        Mock Invoke-TpmWebRequestSilently {
-            if ($Uri -like '*git/trees/*') {
-                return [pscustomobject]@{ Content = '{"tree":[{"type":"blob","path":"TeknoParrotUi.Common/GameProfiles/Alpha.xml"},{"type":"tree","path":"TeknoParrotUi.Common/GameProfiles/Folder"}]}' }
-            }
-            return [pscustomobject]@{ Content = '{"default_branch":"main"}' }
-        }
+    It "Get-TeknoParrotProfileSet lists the local GameProfiles folder and reports progress" {
+        $profilesDir = Join-Path $TestDrive ("ProfileSetGameProfiles-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profilesDir -Force | Out-Null
+        foreach ($name in @('Alpha.xml', 'Beta-2.xml', 'not a profile.xml')) { [System.IO.File]::WriteAllText((Join-Path $profilesDir $name), '<GameProfile />') }
 
-        $result = Get-TeknoParrotProfileSet
+        $result = Get-TeknoParrotProfileSet $profilesDir
 
-        # A single-element result unrolls to a scalar through the pipeline, so Count/Contains must be asserted on the array form.
-        @($result).Count | Should -Be 1
+        # Only the local TeknoParrot install is read (no GitHub list). Names that are not plain profile codes are left out.
+        @($result).Count | Should -Be 2
         @($result) | Should -Contain 'Alpha'
-        @($script:progressCalls | Where-Object { $_.Phase -eq 'Checking' -and $_.Current -eq 1 -and $_.Total -eq 3 -and -not $_.Complete }).Count | Should -Be 1
-        @($script:progressCalls | Where-Object { $_.Phase -eq 'Scanning' -and $_.Total -eq 2 -and -not $_.Complete }).Count | Should -Be 2
-        @($script:progressCalls | Where-Object Complete).Count | Should -Be 1
+        @($result) | Should -Contain 'Beta-2'
+        @($script:progressCalls | Where-Object { $_.Phase -eq 'Scanning' -and $_.Current -eq 3 -and $_.Total -eq 3 -and -not $_.Complete }).Count | Should -Be 1
+        @($script:progressCalls | Where-Object { $_.Phase -eq 'Checking' -and $_.Complete }).Count | Should -Be 1
     }
 }
 
@@ -5234,7 +5254,7 @@ Describe "Test-ReShadeSetupTrustedSignature (fingerprint-as-root-of-trust, fail-
         $result.SubjectMatch | Should -BeTrue
         $result.ThumbprintMatch | Should -BeFalse
     }
-    It "fails closed when the Subject has changed, even with the pinned fingerprint and accepted status" {
+    It "still trusts the file when only the Subject has changed, because the pinned fingerprint and accepted status decide trust" {
         Mock Get-AuthenticodeSignature {
             [pscustomobject]@{ Status = 'UnknownError'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=SomeoneElse'; Thumbprint = $trustedThumbprint } }
         }
@@ -6956,7 +6976,7 @@ Describe "Skylinekiller executable workflow regressions" {
         }
         $sourceDll = Join-Path $TestDrive 'preflight-ReShade.dll'
         Set-Content -LiteralPath $sourceDll -Value 'source'
-        Mock Get-TpmReShadeProfileOwnershipPath { Join-Path $TestDrive ($GameId + '.ownership.json') }
+        Mock Get-TpmReShadeProfileOwnershipPath { param($GameId) Join-Path $TestDrive ($GameId + '.ownership.json') }
         Mock Test-TpmGameMutationPath {
             param([string]$GamePath)
             if ($GamePath -like '*MissingGame*') {
@@ -8114,7 +8134,7 @@ function Exit-PostgresRecoveryResume {
             }
         }
 
-        It "cleans a stale claimed envelope after expiry validation fails" {
+        It "rejects an expired envelope and leaves no claim or used marker behind" {
             $statePath = Join-Path (Join-Path $TestDrive 'RecoveryState') '.tpm-postgres-recovery-dddddddddddddddddddddddddddddddd.json'
             New-Item -ItemType Directory -Path (Split-Path -Parent $statePath) -Force | Out-Null
             [IO.File]::WriteAllText($statePath, '{"SchemaVersion":3,"Purpose":"TeknoParrotManager.PostgresRecovery","CipherText":"fake"}', (New-Object Text.UTF8Encoding $false))
@@ -8313,7 +8333,8 @@ Describe "BepInEx authorized-root and transaction guards" {
         $x86Root = Join-Path $approved 'X86Game'
         $unknownRoot = Join-Path $approved 'UnknownGame'
         $unsupportedRoot = Join-Path $approved 'UnsupportedGame'
-        New-Item -ItemType Directory -Path $x64Root,$x86Root,$unknownRoot,$unsupportedRoot,$outside,$profiles -Force | Out-Null
+        # The outside game gets a BepInEx folder: a game outside the Games folder with no BepInEx files is not part of the setup and is not counted.
+        New-Item -ItemType Directory -Path $x64Root,$x86Root,$unknownRoot,$unsupportedRoot,$outside,$profiles,(Join-Path $outside 'BepInEx') -Force | Out-Null
         $x64Exe = Join-Path $x64Root 'game.exe'
         $x86Exe = Join-Path $x86Root 'game.exe'
         $unknownExe = Join-Path $unknownRoot 'game.exe'
@@ -8460,6 +8481,43 @@ Describe "BepInEx authorized-root and transaction guards" {
         ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'did not download or change anything'
         ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Fix the path, then run BepInEx setup again'
         ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Not -Match '(?i)reparse|junction|symlink'
+    }
+
+    It "shows one short grouped BepInEx refusal with full game names and a count" {
+        $script:bepGroupMessages = @()
+        Mock Write-Host { $script:bepGroupMessages += [string]$Object }
+        Write-BepInExUnsafeRootGuidance -GameCode @('stv_a','stv_b','stv_c','stv_d','stv_e') -GameLabel @('Alpha Game','Beta Game','Gamma Game','Delta Game','Epsilon Game')
+        $text = $script:bepGroupMessages -join [Environment]::NewLine
+        $text | Should -Match '5 games: Alpha Game, Beta Game, Gamma Game and 2 more'
+        $text | Should -Match 'Details'
+        $text | Should -Not -Match 'stv_'
+        $text | Should -Not -Match 'Delta Game'
+        @($script:bepGroupMessages | Where-Object { $_ -match 'could not safely update BepInEx' }).Count | Should -Be 1
+    }
+
+    It "does not check or report games that have no BepInEx files" {
+        $approved = Join-Path $TestDrive 'GroupApproved'
+        $profiles = Join-Path $TestDrive 'GroupProfiles'
+        New-Item -ItemType Directory -Path $approved, $profiles -Force | Out-Null
+        foreach ($code in @('stv_plain1','stv_plain2','stv_bep1','stv_bep2')) {
+            $dir = Join-Path $TestDrive ("Outside_" + $code)
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $exe = Join-Path $dir 'game.exe'
+            New-Item -ItemType File -Path $exe -Force | Out-Null
+            if ($code -like 'stv_bep*') { New-Item -ItemType Directory -Path (Join-Path $dir 'BepInEx') -Force | Out-Null }
+            Set-Content -LiteralPath (Join-Path $profiles ($code + '.xml')) -Value ("<GameProfile><GamePath>$exe</GamePath></GameProfile>")
+        }
+        $script:bepSkipMessages = @()
+        Mock Write-Host { $script:bepSkipMessages += [string]$Object }
+        Mock Get-TpmGameTitle { switch ($Code) { 'stv_plain1' { 'Plain One' } 'stv_plain2' { 'Plain Two' } 'stv_bep1' { 'Bep One' } 'stv_bep2' { 'Bep Two' } default { $Code } } }
+        Mock Get-BepInExLatestRelease { throw 'release query should not run' }
+        Mock Read-HostSafe { 'N' }
+        $result = Invoke-BepInExUpdateCheck -UserProfilesDir $profiles -CacheDir (Join-Path $TestDrive 'GroupCache') -ApprovedGamesRoot $approved
+        $text = $script:bepSkipMessages -join [Environment]::NewLine
+        $text | Should -Match '2 games: Bep One, Bep Two'
+        $text | Should -Not -Match 'Plain (One|Two)'
+        $text | Should -Not -Match 'stv_'
+        @($script:bepSkipMessages | Where-Object { $_ -match 'could not safely update BepInEx' }).Count | Should -Be 1
     }
 
     It "fails closed when the approved root is reparse-backed" {
@@ -9037,7 +9095,7 @@ Describe "Read-PathWithBrowse" {
         Mock Read-Host { "C:\Some\Typed\Path" }
         Read-PathWithBrowse "Enter a path" | Should -Be "C:\Some\Typed\Path"
     }
-    It "is case-insensitive when checking for the browse trigger (only 'b'/'B' triggers it, not a path that happens to start with B)" {
+    It "returns a typed path that merely starts with B instead of opening the browse dialog" {
         Mock Read-Host { "B:\SomeDrive" }
         # A typed path literally starting with the letter B must NOT be misread as
         # the browse trigger -- only an exact "B" (after Trim) should be.
@@ -9436,7 +9494,7 @@ Describe "Invoke-TpmDownload progress overlay cleanup (issue #132)" {
 Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #132)" {
     # Rounds out the issue #132 acceptance criteria (HTTP 200/404 and mixed-
     # batch cleanup are already covered above): a network timeout, a
-    # corrupt/incomplete downloaded file, and a user-cancelled transfer are
+    # corrupt/incomplete downloaded file, and a user-canceled transfer are
     # not special-cased anywhere in Invoke-TpmDownload -- they are ordinary
     # exceptions that must still be caught by the outer try/catch/finally,
     # never mis-reported as a 404 ("not in the online pack"), and must still
@@ -9488,7 +9546,7 @@ Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #
     It "treats a canceled transfer (OperationCanceledException) as a clean failure, not an unhandled crash" {
         Mock Invoke-TpmDownloadHttpClient { throw [System.OperationCanceledException]::new("The operation was canceled.") }
         Mock Invoke-TpmDownloadWebRequest { throw [System.OperationCanceledException]::new("The operation was canceled.") }
-        $savePath = Join-Path $TestDrive "cancelled.png"
+        $savePath = Join-Path $TestDrive "canceled.png"
 
         { Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails' } | Should -Not -Throw
         $result = Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails'
@@ -10170,12 +10228,13 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         @(Get-EggmanDatDestinationCandidates).Count | Should -Be 0
     }
 
-    It "reports actionable recovery without querying or downloading when no fallback exists" {
+    It "reports actionable recovery without querying or downloading when no safe place to save can be found" {
         $tp = Join-Path $TestDrive 'TeknoParrot'
         New-Item -ItemType Directory -Path $tp -Force | Out-Null
         $script:tpRoot = $tp
         $script:messages = @()
         Mock Write-Host { $script:messages += [string]$Object }
+        Mock Get-EggmanDatDataRoot { $null }
         Mock Read-HostSafe { throw 'No prompt is expected without a safe destination.' }
         Mock Get-EggmanDatRelease { throw 'No release query is expected before destination selection.' }
         Mock Invoke-EggmanDatDownload { throw 'No download is expected without a safe destination.' }
@@ -10187,6 +10246,88 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         ($script:messages -join [Environment]::NewLine) | Should -Match 'Action: configure a reachable primary ZIP/source folder'
         Should -Invoke Get-EggmanDatRelease -Times 0
         Should -Invoke Invoke-EggmanDatDownload -Times 0
+    }
+
+    It "offers its own data folder with one question and no browse window when the saved DAT is under TeknoParrot and no ZIP folder is set" {
+        $tp = Join-Path $TestDrive 'TeknoParrot'
+        $owned = Join-Path $TestDrive 'OwnedData\Eggman'
+        New-Item -ItemType Directory -Path $tp -Force | Out-Null
+        $script:tpRoot = $tp
+        $script:messages = @()
+        Mock Get-EggmanDatDataRoot { $owned }
+        Mock Write-Host { $script:messages += [string]$Object }
+        Mock Read-HostSafe { 'Y' }
+        Mock Read-PathWithBrowse { throw 'No browse window is expected.' }
+
+        $resolution = Resolve-EggmanDatUpdateDestination -CurrentPath (Join-Path $tp 'current.zip')
+
+        $resolution.Status | Should -Be 'FallbackSelected'
+        $resolution.DestinationFolder | Should -Be $owned
+        ($script:messages -join [Environment]::NewLine) | Should -Match 'in its own folder'
+        ($script:messages -join [Environment]::NewLine) | Should -Match 'Your current DAT file stays where it is'
+        Should -Invoke Read-HostSafe -Times 1 -Exactly
+        Should -Invoke Read-PathWithBrowse -Times 0
+        Test-Path -LiteralPath $owned | Should -BeFalse
+    }
+
+    It "keeps the saved DAT and starts no download when the user says no to its own data folder" {
+        $tp = Join-Path $TestDrive 'TeknoParrot'
+        New-Item -ItemType Directory -Path $tp -Force | Out-Null
+        $script:tpRoot = $tp
+        $script:messages = @()
+        Mock Get-EggmanDatDataRoot { Join-Path $TestDrive 'OwnedData\Eggman' }
+        Mock Write-Host { $script:messages += [string]$Object }
+        Mock Read-HostSafe { 'N' }
+        Mock Invoke-EggmanDatDownload { throw 'No download is expected after a no.' }
+
+        $resolution = Resolve-EggmanDatUpdateDestination -CurrentPath (Join-Path $tp 'current.zip')
+
+        $resolution.Status | Should -Be 'Declined'
+        ($script:messages -join [Environment]::NewLine) | Should -Match 'No download was started'
+        Should -Invoke Invoke-EggmanDatDownload -Times 0
+    }
+
+    It "offers its own data folder when the saved DAT sits in the games folder, instead of ending at an instruction" {
+        $staging = Join-Path $TestDrive 'GameStaging'
+        $owned = Join-Path $TestDrive 'OwnedData\Eggman'
+        $script:tpRoot = Join-Path $TestDrive 'TeknoParrot'
+        $script:gamesInstallFolder = $staging
+        Mock Get-EggmanDatDataRoot { $owned }
+        Mock Write-Host {}
+        Mock Read-HostSafe { 'Y' }
+        Mock Read-PathWithBrowse { throw 'No browse window is expected.' }
+
+        $resolution = Resolve-EggmanDatUpdateDestination -CurrentPath (Join-Path $staging 'current.zip')
+
+        $resolution.Status | Should -Be 'FallbackSelected'
+        $resolution.DestinationFolder | Should -Be $owned
+        Should -Invoke Read-PathWithBrowse -Times 0
+    }
+
+    It "saves a newer DAT next to the saved safe one, with no question and no browse window" {
+        $legacy = Join-Path $TestDrive 'Dats\TeknoParrot.Collection.2026-08-16_RomVault.zip'
+        New-EggmanFixtureZip -zipPath $legacy
+        $script:tpRoot = Join-Path $TestDrive 'TeknoParrot'
+        $script:downloadPath = $null
+        Mock Read-HostSafe { throw 'No question is expected for a safe saved location.' }
+        Mock Read-PathWithBrowse { throw 'No browse window is expected.' }
+        Mock Invoke-EggmanDatDownload {
+            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes, [string]$ProgramDirectory)
+            $script:downloadPath = $savePath
+            return $true
+        }
+        $rel = [pscustomobject]@{ DownloadUrl = 'https://example.com/eggman.zip'; FileName = 'TeknoParrot.Collection.2026-08-22_RomVault.zip'; SizeBytes = 0 }
+
+        $resolution = Resolve-EggmanDatUpdateDestination -CurrentPath $legacy
+        $resolution.Status | Should -Be 'Ready'
+        $preferred = Join-Path $resolution.DestinationFolder $rel.FileName
+        $result = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $preferred
+
+        $result.Action | Should -Be 'Downloaded'
+        $result.Path | Should -Be ([System.IO.Path]::GetFullPath((Join-Path $TestDrive 'Dats\TeknoParrot.Collection.2026-08-22_RomVault.zip')))
+        $script:downloadPath | Should -Be $result.Path
+        Should -Invoke Read-HostSafe -Times 0
+        Should -Invoke Read-PathWithBrowse -Times 0
     }
 
     It "revalidates the destination immediately before the final write" {
@@ -10251,7 +10392,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
             }, $true) | Select-Object -First 1
             $fn | Should -Not -BeNullOrEmpty
             $forbiddenCommands = @('Add-Content', 'Set-Content', 'Out-File', 'New-Item', 'Remove-Item', 'Move-Item', 'Copy-Item', 'Rename-Item',
-                'Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml')
+                'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml')
             $calls = $fn.Body.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) |
                 ForEach-Object { $_.GetCommandName() } | Where-Object { $_ }
             foreach ($nameToReject in $forbiddenCommands) { $calls | Should -Not -Contain $nameToReject }
@@ -10411,7 +10552,7 @@ Describe "Test-ButtonNameDirectional" {
     }
 }
 
-Describe "Invoke-ControlPropagation duplicate-key handling (issue #53)" {
+Describe "Write-ControlsStatus progress" {
     BeforeAll {
         function New-ControlProfileXml {
             param(
@@ -10459,43 +10600,6 @@ $binding
         }
     }
 
-    It "uses an archetype match key only once per target profile" {
-        $profiles = Join-Path $TestDrive 'UserProfiles'
-        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
-
-        $archetypeButtons = @(
-            New-WheelButtonXml -Name 'Wheel Right' -Bound
-            New-WheelButtonXml -Name 'Gas' -Mapping 'P1Gas' -Bound
-            New-WheelButtonXml -Name 'Brake' -Mapping 'P1Brake' -Bound
-        ) -join "`n"
-        New-ControlProfileXml -Name 'Reference Driver' -Buttons $archetypeButtons |
-            Set-Content -LiteralPath (Join-Path $profiles 'ReferenceDriver.xml') -Encoding UTF8
-
-        $targetButtons = @(
-            New-WheelButtonXml -Name 'Wheel Left'
-            New-WheelButtonXml -Name 'Wheel Right'
-        ) -join "`n"
-        New-ControlProfileXml -Name 'Duplicate Wheel Target' -Buttons $targetButtons |
-            Set-Content -LiteralPath (Join-Path $profiles 'DuplicateWheelTarget.xml') -Encoding UTF8
-
-        $script:controlPropagationProgress=New-Object System.Collections.Generic.List[object]
-        Mock Write-TpmCompactExtractionProgress { [void]$script:controlPropagationProgress.Add([pscustomobject]@{ Label=$Label; Current=$Current; Total=$Total; Complete=[bool]$Complete }) }
-        $pool = Build-ArchetypePool $profiles 3
-        $reports = (Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 3 -DryRun:$false).Reports
-        [xml]$updated = Get-Content -LiteralPath (Join-Path $profiles 'DuplicateWheelTarget.xml') -Raw
-        $targetSlots = @($updated.SelectNodes('/GameProfile/JoystickButtons/JoystickButtons'))
-        $boundSlots = @($targetSlots | Where-Object { Test-ButtonIsBound $_ })
-        $manualReport = @($reports | Where-Object { $_.Code -eq 'DuplicateWheelTarget' } | Select-Object -First 1)
-
-        $boundSlots.Count | Should -Be 1
-        $manualReport.Status | Should -Be 'bound'
-        $manualReport.Manual | Should -Contain 'Wheel Right'
-        foreach ($label in @('Control propagation archetype scan','Control propagation profile scan')) {
-            @($script:controlPropagationProgress | Where-Object { $_.Label -eq $label -and -not $_.Complete -and $_.Total -eq 2 }).Count | Should -Be 2
-            @($script:controlPropagationProgress | Where-Object { $_.Label -eq $label -and $_.Complete -and $_.Current -eq 2 }).Count | Should -Be 1
-        }
-    }
-
     It "reports progress while generating the controls status file" {
         $profiles = Join-Path $TestDrive 'StatusProfiles'
         $output = Join-Path $TestDrive 'controls-status.txt'
@@ -10509,7 +10613,7 @@ $binding
             })
         }
 
-        $count = Write-ControlsStatus -userProfilesDir $profiles -pool @() -propagationReports @() -outputPath $output -RunId 'test-run'
+        $count = Write-ControlsStatus -userProfilesDir $profiles -outputPath $output -RunId 'test-run'
 
         $count | Should -Be 1
         $content = Get-Content -LiteralPath $output -Raw
@@ -10519,360 +10623,7 @@ $binding
         @($statusProgress | Where-Object { -not $_.Complete -and $_.Current -eq 1 -and $_.Total -eq 1 }).Count | Should -Be 1
         @($statusProgress | Where-Object { $_.Complete -and $_.Current -eq 1 -and $_.Total -eq 1 }).Count | Should -Be 1
     }
-    It "closes the archetype scan row when profile analysis throws" {
-        $profiles = Join-Path $TestDrive 'archetype-scan-failure'
-        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
-        [System.IO.File]::WriteAllText((Join-Path $profiles 'Game.xml'),'<GameProfile />')
-        $script:archetypeFailureProgress = New-Object System.Collections.Generic.List[object]
-        Mock Get-ButtonNodes { throw 'simulated button analysis failure' }
-        Mock Write-TpmCompactExtractionProgress {
-            [void]$script:archetypeFailureProgress.Add([pscustomobject]@{
-                Label=$Label; Current=$Current; Total=$Total; Complete=[bool]$Complete
-            })
-        }
-
-        { Build-ArchetypePool $profiles 1 } | Should -Throw '*simulated button analysis failure*'
-        # RC8 count contract: the close reports FINISHED units, so a failure on the first of one profile closes at 0/1.
-        @($script:archetypeFailureProgress | Where-Object {
-            $_.Label -eq 'Control propagation archetype scan' -and $_.Complete -and $_.Current -eq 0 -and $_.Total -eq 1
-        }).Count | Should -Be 1
-    }
-
-    It "closes the propagation profile row when profile analysis throws" {
-        $profiles = Join-Path $TestDrive 'propagation-scan-failure'
-        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
-        [System.IO.File]::WriteAllText((Join-Path $profiles 'Game.xml'),'<GameProfile />')
-        $script:propagationFailureProgress = New-Object System.Collections.Generic.List[object]
-        Mock Get-ButtonNodes { throw 'simulated target analysis failure' }
-        Mock Write-TpmCompactExtractionProgress {
-            [void]$script:propagationFailureProgress.Add([pscustomobject]@{
-                Label=$Label; Current=$Current; Total=$Total; Complete=[bool]$Complete
-            })
-        }
-
-        { Invoke-ControlPropagationLegacy -userProfilesDir $profiles -pool @() -minBound 1 -DryRun:$true } |
-            Should -Throw '*simulated target analysis failure*'
-        # RC8 count contract: the close reports FINISHED units, so a failure on the first of one profile closes at 0/1.
-        @($script:propagationFailureProgress | Where-Object {
-            $_.Label -eq 'Control propagation profile scan' -and $_.Complete -and $_.Current -eq 0 -and $_.Total -eq 1
-        }).Count | Should -Be 1
-    }
 }
-
-Describe "Invoke-ControlPropagation canonicalArchetype Input API correction (issue #139)" {
-    # Fixtures modeled directly on the real diagnostic data posted to issue
-    # #139: StreetFighterIII3rdStrike (SF3) and fghtjam (Capcom Fighting Jam)
-    # were found to have byte-for-byte identical Coin1/Coin2/P1ButtonStart/
-    # P2ButtonStart bindings (button 54/54/55/55 on the same two joystick
-    # GUIDs) -- the reported "inconsistent mapping" was never a binding
-    # divergence between these two titles. The actual defect confirmed on
-    # this issue was that "Input API" can independently drift between two
-    # archetypes of the same family (fghtjam's on-disk FieldOptions lacked
-    # MergedInput entirely, unlike SF3's), and that canonicalArchetype
-    # correction only propagates whatever the canonical game's Input API
-    # happens to be in the live pool snapshot at the moment propagation
-    # runs -- so the canonical game must already be on the intended API
-    # before the fix is applied, or the "fix" just propagates the wrong
-    # value to every other archetype in the family.
-    BeforeAll {
-        function New-ButtonFamilyProfileXml {
-            param(
-                [string]$Name,
-                [string]$InputApiValue,
-                [string[]]$InputApiOptions
-            )
-            $optionsXml = ($InputApiOptions | ForEach-Object { "        <string>$_</string>" }) -join "`n"
-            $slots = @(
-                @{ Name = 'Test';               Mapping = 'Test';           Button = 92 }
-                @{ Name = 'Service 1';           Mapping = 'Service1';       Button = 93 }
-                @{ Name = 'Service 2';           Mapping = 'Service2';       Button = 94 }
-                @{ Name = 'Coin 1';              Mapping = 'Coin1';          Button = 54 }
-                @{ Name = 'Coin 2';              Mapping = 'Coin2';          Button = 54 }
-                @{ Name = 'Player 1 Start';      Mapping = 'P1ButtonStart';  Button = 55 }
-                @{ Name = 'Player 2 Start';      Mapping = 'P2ButtonStart';  Button = 55 }
-            )
-            $buttonsXml = ($slots | ForEach-Object {
-                @"
-    <JoystickButtons>
-      <ButtonName>$($_.Name)</ButtonName>
-      <InputMapping>$($_.Mapping)</InputMapping>
-      <DirectInputButton>
-        <Button>$($_.Button)</Button>
-      </DirectInputButton>
-    </JoystickButtons>
-"@
-            }) -join "`n"
-            return @"
-<GameProfile>
-  <GameName>$Name</GameName>
-  <JoystickButtons>
-$buttonsXml
-  </JoystickButtons>
-  <ConfigValues>
-    <FieldInformation>
-      <FieldName>Input API</FieldName>
-      <FieldValue>$InputApiValue</FieldValue>
-      <FieldOptions>
-$optionsXml
-      </FieldOptions>
-    </FieldInformation>
-  </ConfigValues>
-</GameProfile>
-"@
-        }
-    }
-
-    It "does not alter either archetype's own button bindings, even though both are independently bound and physically identical" {
-        $profiles = Join-Path $TestDrive ("issue139-bindings-" + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
-
-        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
-            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
-        New-ButtonFamilyProfileXml -Name 'fghtjam' -InputApiValue 'DirectInput' -InputApiOptions @('DirectInput', 'XInput') |
-            Set-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Encoding UTF8
-
-        $before = Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw
-        $pool = Build-ArchetypePool $profiles 5
-        Mock New-TpmVerifiedUserProfilesBackup { throw 'a no-change propagation must not create a backup' }
-        $result = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -DryRun:$false
-        $after = Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw
-        $result.Outcome | Should -Be 'NO_OP'
-        Should -Invoke New-TpmVerifiedUserProfilesBackup -Times 0 -Exactly
-
-        ([xml]$after).SelectSingleNode("/GameProfile/JoystickButtons/JoystickButtons[InputMapping='Coin1']/DirectInputButton/Button").InnerText | Should -Be '54'
-        ([xml]$after).SelectSingleNode("/GameProfile/JoystickButtons/JoystickButtons[InputMapping='P1ButtonStart']/DirectInputButton/Button").InnerText | Should -Be '55'
-    }
-
-    It "corrects a non-canonical archetype's Input API to match the canonical archetype's CURRENT value, including injecting a missing MergedInput FieldOptions entry" {
-        $profiles = Join-Path $TestDrive ("issue139-api-fix-" + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
-
-        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
-            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
-        New-ButtonFamilyProfileXml -Name 'fghtjam' -InputApiValue 'DirectInput' -InputApiOptions @('DirectInput', 'XInput') |
-            Set-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Encoding UTF8
-
-        $pool = Build-ArchetypePool $profiles 5
-        $canonicalArchetype = @{ button = 'StreetFighterIII3rdStrike' }
-        $reports = (Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false).Reports
-
-        [xml]$fghtjamAfter = Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw
-        $apiField = $fghtjamAfter.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='Input API']")
-        $apiField.FieldValue | Should -Be 'MergedInput'
-        @($apiField.SelectNodes('FieldOptions/string') | ForEach-Object { $_.InnerText }) | Should -Contain 'MergedInput'
-
-        $fixedReport = @($reports | Where-Object { $_.Code -eq 'fghtjam' } | Select-Object -First 1)
-        $fixedReport.Status | Should -Be 'api-fixed-canonical'
-    }
-
-    It "does not let the preview use up the Input API correction, so the real run with the same pool still makes it" {
-        # Mutation: let the dry run change the shared pool entry (remove the copy of the pool in preview mode) -> the real run reports nothing to correct.
-        $profiles = Join-Path $TestDrive ("issue139-api-preview-" + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
-
-        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
-            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
-        New-ButtonFamilyProfileXml -Name 'fghtjam' -InputApiValue 'DirectInput' -InputApiOptions @('DirectInput', 'XInput') |
-            Set-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Encoding UTF8
-
-        $pool = Build-ArchetypePool $profiles 5
-        $canonicalArchetype = @{ button = 'StreetFighterIII3rdStrike' }
-        $preview = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$true
-        @($preview.Reports | Where-Object { $_.Status -eq 'api-fixed-canonical' }).Count | Should -Be 1
-        ([xml](Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw)).SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='Input API']").FieldValue | Should -Be 'DirectInput'
-
-        $real = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false
-        @($real.Reports | Where-Object { $_.Status -eq 'api-fixed-canonical' }).Count | Should -Be 1
-        ([xml](Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw)).SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='Input API']").FieldValue | Should -Be 'MergedInput'
-    }
-
-    It "propagates the WRONG value if the canonical archetype itself is not yet on the intended API when correction runs (ordering hazard confirmed on issue #139)" {
-        # This documents the exact failure mode from the issue thread: writing
-        # canonicalArchetype to overrides.json before switching the canonical
-        # game's own Input API does not "fix forward" -- it corrects every
-        # other archetype in the family to match whatever the canonical
-        # game's CURRENT (possibly still-wrong) value is.
-        $profiles = Join-Path $TestDrive ("issue139-ordering-" + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
-
-        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'DirectInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
-            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
-        New-ButtonFamilyProfileXml -Name 'fghtjam' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
-            Set-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Encoding UTF8
-
-        $pool = Build-ArchetypePool $profiles 5
-        $canonicalArchetype = @{ button = 'StreetFighterIII3rdStrike' }
-        [void](Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false)
-
-        [xml]$fghtjamAfter = Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw
-        $fghtjamAfter.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='Input API']/FieldValue").InnerText | Should -Be 'DirectInput'
-    }
-
-    It "does not touch a non-canonical archetype whose Input API already matches the canonical archetype" {
-        $profiles = Join-Path $TestDrive ("issue139-noop-" + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
-
-        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
-            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
-        New-ButtonFamilyProfileXml -Name 'BBCF' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
-            Set-Content -LiteralPath (Join-Path $profiles 'BBCF.xml') -Encoding UTF8
-
-        $pool = Build-ArchetypePool $profiles 5
-        $canonicalArchetype = @{ button = 'StreetFighterIII3rdStrike' }
-        Mock New-TpmVerifiedUserProfilesBackup { throw 'a no-change propagation must not create a backup' }
-        $result = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false
-        $reports = $result.Reports
-
-        @($reports | Where-Object { $_.Code -eq 'BBCF' }).Count | Should -Be 0
-        $result.Outcome | Should -Be 'NO_OP'
-        $result.Backup.Attempted | Should -BeFalse
-        Should -Invoke New-TpmVerifiedUserProfilesBackup -Times 0 -Exactly
-    }
-
-    It "creates the safety backup once, before the first real write, and reports it truthfully" {
-        $profiles = Join-Path $TestDrive ("issue139-lazy-backup-" + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
-        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
-            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
-        New-ButtonFamilyProfileXml -Name 'fghtjam' -InputApiValue 'DirectInput' -InputApiOptions @('DirectInput', 'XInput') |
-            Set-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Encoding UTF8
-        $script:lazyBackupHadWrite = $null
-        $script:lazyFghtjamPath = Join-Path $profiles 'fghtjam.xml'
-        $script:lazyFghtjamBefore = Get-Content -LiteralPath $script:lazyFghtjamPath -Raw
-        Mock New-TpmVerifiedUserProfilesBackup {
-            $script:lazyBackupHadWrite = ((Get-Content -LiteralPath $script:lazyFghtjamPath -Raw) -ne $script:lazyFghtjamBefore)
-            [pscustomobject]@{ Required = $true; Attempted = $true; Created = $true; Succeeded = $true; Verified = $true; Path = (Join-Path $TestDrive 'lazy-backup'); Manifest = @(); FailureStage = $null; Reason = $null; ResiduePaths = @() }
-        }
-        $pool = Build-ArchetypePool $profiles 5
-        $result = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype @{ button = 'StreetFighterIII3rdStrike' } -DryRun:$false
-        Should -Invoke New-TpmVerifiedUserProfilesBackup -Times 1 -Exactly
-        $script:lazyBackupHadWrite | Should -BeFalse
-        $result.Outcome | Should -Be 'SUCCEEDED'
-        $result.Backup.Attempted | Should -BeTrue
-    }
-}
-
-Describe "Control propagation familyOverride for reference games (issue #343)" {
-    BeforeAll {
-        function New-SpinnerFixtureXml {
-            param([string]$Name, [switch]$Bound)
-            $binding = if ($Bound) { '<DirectInputButton><Button>54</Button></DirectInputButton>' } else { '' }
-            return @"
-<GameProfile>
-  <GameName>$Name</GameName>
-  <JoystickButtons>
-    <JoystickButtons>
-      <ButtonName>Spinner</ButtonName>
-      <InputMapping>P1Spinner</InputMapping>
-      <AnalogType>Slider</AnalogType>
-      $binding
-    </JoystickButtons>
-  </JoystickButtons>
-  <ConfigValues />
-</GameProfile>
-"@
-        }
-    }
-
-    It "copies controls to a spinner game from a reference game the user also set to spinner" {
-        $profiles = Join-Path $TestDrive ("issue343-" + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
-        New-SpinnerFixtureXml -Name 'SpinnerSource' -Bound | Set-Content -LiteralPath (Join-Path $profiles 'SpinnerSource.xml') -Encoding UTF8
-        New-SpinnerFixtureXml -Name 'SpinnerTarget' | Set-Content -LiteralPath (Join-Path $profiles 'SpinnerTarget.xml') -Encoding UTF8
-        Mock New-TpmVerifiedUserProfilesBackup {
-            [pscustomobject]@{ Required = $true; Attempted = $true; Created = $true; Succeeded = $true; Verified = $true; Path = (Join-Path $TestDrive 'issue343-backup'); Manifest = @(); FailureStage = $null; Reason = $null; ResiduePaths = @() }
-        }
-        $familyOverride = @{ SpinnerSource = 'spinner'; SpinnerTarget = 'spinner' }
-
-        $pool = @(Build-ArchetypePool -userProfilesDir $profiles -minBound 1 -familyOverride $familyOverride)
-        $reports = (Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 1 -familyOverride $familyOverride -DryRun:$false).Reports
-
-        $pool[0].Family | Should -Be 'spinner'
-        @($reports | Where-Object { $_.Code -eq 'SpinnerTarget' }).Status | Should -Be 'bound'
-        [xml]$after = Get-Content -LiteralPath (Join-Path $profiles 'SpinnerTarget.xml') -Raw
-        $after.SelectSingleNode('/GameProfile/JoystickButtons/JoystickButtons/DirectInputButton/Button').InnerText | Should -Be '54'
-    }
-}
-
-Describe "MinBoundForArchetype initialization order (issue #139)" {
-    # Confirmed root cause on issue #139: the standalone "Propagate Controls"
-    # menu handler runs entirely inside the MAIN MENU LOOP and returns via
-    # `continue` without ever reaching SECTION 10, where
-    # $MinBoundForArchetype was previously first assigned. Left unset on
-    # that path, [int]$minBound coerced $null to 0 in Build-ArchetypePool,
-    # so every profile (including fully unbound ones) qualified as an
-    # archetype and propagation silently produced "Games updated: 0" with no
-    # per-game report lines. This is a source-level regression guard (not a
-    # functional test) because the bug is about variable-initialization
-    # ordering in the interactive menu loop, not a pure function's behavior.
-    BeforeAll {
-        $script:rawScriptText = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\TeknoParrot-Manager.ps1") -Raw
-    }
-
-    It "assigns `$MinBoundForArchetype before the standalone PropagateControls menu handler can read it" {
-        $handlerIndex = $script:rawScriptText.IndexOf('if ($mode -eq "PropagateControls")')
-        $handlerIndex | Should -BeGreaterThan 0
-
-        $assignmentIndex = $script:rawScriptText.IndexOf('$MinBoundForArchetype = 5')
-        $assignmentIndex | Should -BeGreaterThan 0
-        $assignmentIndex | Should -BeLessThan $handlerIndex
-    }
-}
-
-Describe "Write-ControlPropagationResults (issue #59: standalone Propagate Controls)" {
-    # This function is the shared reporting step behind both the AutoSync/
-    # Register-only flow and the standalone "Propagate Controls" menu option
-    # (issue #59) -- the same $reports shape Invoke-ControlPropagation always
-    # returns, in, count out. Exercising it directly protects both call sites
-    # from drifting out of sync with each other.
-    It "counts saved controls and design skips separately without hiding save failures" {
-        # Mutation: omit design skips from skipped counts or count them as failures -> mixed accounting is dishonest.
-        $reports = @(
-            [pscustomobject]@{ Code = 'GameA'; Status = 'bound'; Family = 'driving'; Archetype = 'RefDriver'; Bound = 3; Manual = @(); ConfigCarried = @(); ApiSet = $true; ArchetypeApi = 'RawInput'; Forced = $false; MismatchSlots = $null }
-            [pscustomobject]@{ Code = 'GameB'; Status = 'api-fixed'; ArchetypeApi = 'RawInput'; Archetype = 'RefDriver'; MismatchSlots = $null }
-            [pscustomobject]@{ Code = 'GameC'; Status = 'api-fixed-canonical'; ArchetypeApi = 'RawInput'; Archetype = 'RefDriver'; MismatchSlots = $null }
-            [pscustomobject]@{ Code = 'GameD'; Status = 'skipped-no-reference'; ReasonCode = 'NO_USABLE_FAMILY_REFERENCE'; Family = 'lightgun'; MismatchSlots = $null }
-            [pscustomobject]@{ Code = 'GameE'; Status = 'skipped-bound'; MismatchSlots = $null }
-            [pscustomobject]@{ Code = 'GameF'; Status = 'skipped-override'; MismatchSlots = $null }
-            [pscustomobject]@{ Code = 'GameG'; Status = 'save-failed'; Archetype = 'RefDriver'; MismatchSlots = $null }
-        )
-
-        $result = Write-ControlPropagationResults -Reports $reports -Unattended
-
-        $result.BoundCount | Should -Be 3
-        $result.ControlsCopiedCount | Should -Be 1
-        $result.SettingsOnlyCount | Should -Be 0
-        $result.DesignSkippedItems.Count | Should -Be 1
-        $result.DesignSkippedItems[0].Code | Should -Be 'GameD'
-        $result.SkippedCount | Should -Be 3
-        $result.FailedCount | Should -Be 1
-        $result.ApiFixedCount | Should -Be 2
-        $result.VerifiedPhysicalBindingsCount | Should -Be 0
-    }
-    It "returns zero copied controls for settings-only results" {
-        # Mutation: treat settings-only writes as skips -> persisted settings disappear from the updated count.
-        $reports = @(
-            [pscustomobject]@{ Code = 'GameS'; Status = 'settings-only'; Bound = 0; ConfigCarried = @('Sensitivity'); Manual = @('Start') }
-        )
-        $result = Write-ControlPropagationResults -Reports $reports -Unattended
-        $result.ControlsCopiedCount | Should -Be 0
-        $result.SettingsOnlyCount | Should -Be 1
-        $result.BoundCount | Should -Be 0
-    }
-    It "returns zero updated and an empty design-skip list for ordinary skips" {
-        # Mutation: classify all skips as missing-reference design skips -> ordinary exclusions gain false setup instructions.
-        $reports = @(
-            [pscustomobject]@{ Code = 'GameH'; Status = 'skipped-bound'; MismatchSlots = $null }
-            [pscustomobject]@{ Code = 'GameI'; Status = 'skipped-override'; MismatchSlots = $null }
-        )
-        $result = Write-ControlPropagationResults -Reports $reports -Unattended
-        $result.BoundCount | Should -Be 0
-        $result.DesignSkippedItems.Count | Should -Be 0
-        $result.SkippedCount | Should -Be 2
-    }
-
-}
-
 
 # =============================================================================
 # COMPATIBILITY REGRESSION SUITE (issues #41 / #43 / #46)
@@ -10966,15 +10717,14 @@ Describe "Get-FFBBlasterFieldNames drift vs absent distinction (issue #41 diagno
         }
     }
     It "Get-FFBBlasterFieldNames returns a non-empty set when the field is Bool" {
-        $doc = New-GpFieldDoc "Bool"
-        # Categories are discovered from GameProfile XML at runtime; here we
-        # validate that a Bool field would be discovered (so Get-FFBBlasterSupport
-        # later gets a valid Categories list and reaches the Supported branch).
-        $doc.SelectNodes("/GameProfile/ConfigValues/FieldInformation") |
-            Where-Object { $_.FieldType -ieq 'Bool' -and
-                           ($_.CategoryName -imatch $script:FFBBlasterNamePattern -or
-                            $_.FieldName    -imatch $script:FFBBlasterNamePattern) } |
-            Should -Not -BeNullOrEmpty
+        $boolDir = Join-Path $TestDrive 'FfbBoolGameProfiles'
+        $dropdownDir = Join-Path $TestDrive 'FfbDropdownGameProfiles'
+        foreach ($pair in @(@($boolDir, 'Bool'), @($dropdownDir, 'Dropdown'))) {
+            New-Item -ItemType Directory -Path $pair[0] -Force | Out-Null
+            (New-GpFieldDoc $pair[1]).Save((Join-Path $pair[0] 'Alpha.xml'))
+        }
+        @(Get-FFBBlasterFieldNames -GameProfilesDir $boolDir) | Should -Contain 'FFB Blaster'
+        @(Get-FFBBlasterFieldNames -GameProfilesDir $dropdownDir).Count | Should -Be 0
     }
     It "Get-FFBBlasterSupport returns Unknown (not Unsupported) when the only shaped field is non-Bool (upstream schema drift)" {
         # This is the critical distinction: if ALL shaped fields changed FieldType
@@ -11128,7 +10878,7 @@ Describe "Manager script version identity" {
     }
 
     It "extracts the current script's literal identity from its full source" {
-        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC9.3'
+        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC9.4'
     }
 
     It "ignores assignment-looking lines inside a here-string" {
@@ -11367,75 +11117,6 @@ Describe "Get-ManagerUpdateRelease" {
         Get-ManagerUpdateRelease | Should -BeNullOrEmpty
         Should -Invoke Invoke-TpmWebRequestSilently -Times 3
         Should -Invoke Start-Sleep -Times 2
-    }
-}
-
-Describe "Get-TeknoParrotProfileSet" {
-    BeforeAll {
-        Mock Write-Log {}
-    }
-
-    It "builds the git/trees URL with the branch placed before the query string, not swallowed by it" {
-        # Regression test for the reported #78 root cause: interpolating an
-        # unbraced variable immediately followed by a literal '?' inside a
-        # double-quoted string (e.g. "$branchEncoded?recursive=1") silently
-        # drops everything up to the next '=', producing ".../git/trees/=1"
-        # instead of ".../git/trees/master?recursive=1". GitHub then 404s on
-        # that malformed URL every single time -- this was not intermittent
-        # or network-related. The fix braces the variable: "${branchEncoded}?...".
-        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
-            [pscustomobject]@{ Content = (@{ default_branch = 'master' } | ConvertTo-Json) }
-        }
-        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -like '*/git/trees/*' } {
-            [pscustomobject]@{ Content = (@{ tree = @(@{ type = 'blob'; path = 'TeknoParrotUi.Common/GameProfiles/Foo.xml' }) } | ConvertTo-Json -Depth 5) }
-        }
-
-        [void](Get-TeknoParrotProfileSet)
-
-        Should -Invoke Invoke-TpmWebRequestSilently -Times 1 -ParameterFilter {
-            $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
-        }
-    }
-
-    It "returns the profile stems parsed from the tree response" {
-        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
-            [pscustomobject]@{ Content = (@{ default_branch = 'master' } | ConvertTo-Json) }
-        }
-        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -like '*/git/trees/*' } {
-            [pscustomobject]@{
-                Content = (@{
-                    tree = @(
-                        @{ type = 'blob'; path = 'TeknoParrotUi.Common/GameProfiles/BladeArcus.xml' },
-                        @{ type = 'blob'; path = 'TeknoParrotUi.Common/GameProfiles/Tekken7.xml' },
-                        @{ type = 'tree'; path = 'TeknoParrotUi.Common/GameProfiles' }
-                    )
-                } | ConvertTo-Json -Depth 5)
-            }
-        }
-
-        $result = Get-TeknoParrotProfileSet
-        $result | Should -Contain 'BladeArcus'
-        $result | Should -Contain 'Tekken7'
-    }
-
-    It "logs the HTTP status code when the tree request fails" {
-        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
-            [pscustomobject]@{ Content = (@{ default_branch = 'master' } | ConvertTo-Json) }
-        }
-        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -like '*/git/trees/*' } {
-            # Mirror the shape production code actually reads --
-            # $_.Exception.Response.StatusCode -- rather than relying on a
-            # specific exception type, since PowerShell 5.1 (the script's
-            # target runtime) and later versions surface HTTP errors from
-            # Invoke-WebRequest differently.
-            $ex = [System.Exception]::new("Not Found")
-            $ex | Add-Member -NotePropertyName Response -NotePropertyValue ([pscustomobject]@{ StatusCode = 404 }) -Force
-            throw $ex
-        }
-
-        [void](Get-TeknoParrotProfileSet)
-
-        Should -Invoke Write-Log -Times 1 -ParameterFilter { $msg -like "*HTTP 404*" }
     }
 }
 
@@ -12417,9 +12098,9 @@ Describe "Main menu source-level drift check" {
         foreach ($mode in $expected.Keys) {
             $help | Should -Match ('(?m)(?:^|\s){0} {1}' -f $byMode[$mode], [regex]::Escape($expected[$mode])) -Because "Help must quote option $($byMode[$mode]) for $mode"
         }
-        $help | Should -Match ('(?m)^\s+{0}-{1} .*PostgreSQL setup and repair' -f $byMode['PropagateControls'], $byMode['RequiredPatch'])
+        $help | Should -Match ('(?m)^\s+{0}-{1} .*PostgreSQL setup and repair' -f $byMode['Controls'], $byMode['RequiredPatch'])
         # PostgreSQL setup sits inside that range, so its number is covered by it.
-        $byMode['PostgresSetup'] | Should -BeGreaterOrEqual $byMode['PropagateControls']
+        $byMode['PostgresSetup'] | Should -BeGreaterOrEqual $byMode['Controls']
         $byMode['PostgresSetup'] | Should -BeLessOrEqual $byMode['RequiredPatch']
         $help | Should -Match ('trying option {0} again' -f $byMode['PostgresSetup'])
         foreach ($quoted in @([regex]::Matches($help, '(?m)(?:^\s+|\.\s+|option\s)(\d+)\b') | ForEach-Object { [int]$_.Groups[1].Value })) {
@@ -12530,7 +12211,7 @@ Describe "Path-concept non-conflation guard (Part 2 item 9)" {
         $script:ProductionSource | Should -Not -Match '(?i)deployed location'
     }
     It "the staging folder prompt still pairs the plain phrase with the technical term on first mention" {
-        $script:ProductionSource | Should -Match ([regex]::Escape("Games folder (also called the staging folder)"))
+        $script:ProductionSource | Should -Match ([regex]::Escape("Staging folder for game files"))
         $script:ProductionSource | Should -Match ([regex]::Escape("AutoSync extracts your games into this folder, one folder per game. Your original ZIPs stay where they are."))
     }
 }
@@ -12663,9 +12344,10 @@ Describe "Split-TextForMenuWidth" {
         $lines.Count | Should -Be 1
         $lines[0] | Should -Be 'Alpha beta gamma delta'
     }
-    It "wraps text deterministically when the menu column is narrow" {
+    It "wraps at the 20-character minimum when the menu column is narrower than that" {
         $lines = Split-TextForMenuWidth -Text 'Alpha beta gamma delta' -Width 12
         $lines.Count | Should -BeGreaterThan 1
+        @($lines | Where-Object { $_.Length -gt 20 }).Count | Should -Be 0
         ($lines -join '|') | Should -Be 'Alpha beta gamma|delta'
     }
 }
@@ -12998,6 +12680,108 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
 
         $mainScriptContent | Should -Match '\[Console\]::IsInputRedirected'
         $mainScriptContent | Should -Match 'Read-Host \$displayPrompt'
+    }
+}
+
+Describe "Compact main menu section colors and color key (RC9.4)" {
+    BeforeAll {
+        # Reference packing: the plain-text greedy packer the compact menu used before colors were added.
+        function script:Get-OldPackedText {
+            param([int]$Width)
+            $wrap = [Math]::Max(20, $Width)
+            $lines = New-Object System.Collections.Generic.List[string]
+            $current = ''
+            foreach ($item in (Get-MainMenuItems)) {
+                $token = '{0}) {1}' -f $item.Number, $item.Label
+                if ($current.Length -eq 0) { $current = $token }
+                elseif (($current.Length + 2 + $token.Length) -le $wrap) { $current = "$current  $token" }
+                else { [void]$lines.Add($current); $current = $token }
+            }
+            if ($current.Length -gt 0) { [void]$lines.Add($current) }
+            return @($lines)
+        }
+        $script:KeyText = 'Library | Enhancements | Requirements | Recovery | App'
+    }
+
+    It "packed rows have the same text as before at width <Width>" -TestCases @(
+        @{ Width = 20 }, @{ Width = 40 }, @{ Width = 58 }, @{ Width = 80 }, @{ Width = 120 }
+    ) {
+        param($Width)
+        $geometry = Get-MainMenuGeometry -Tier 'Compact' -ViewportWidth 200 -ViewportHeight 30
+        $rows = @(Get-MainMenuFlowPackedItemRows -Width $Width -Geometry $geometry)
+        $expected = @(Get-OldPackedText -Width $Width)
+        $rows.Count | Should -Be $expected.Count
+        for ($i = 0; $i -lt $expected.Count; $i++) {
+            $rows[$i].Text.TrimStart() | Should -BeExactly $expected[$i]
+            $rows[$i].Text | Should -Not -Match "\x1b"
+        }
+    }
+
+    It "every packed item carries the same color the wide tier gives its section" {
+        $geometry = Get-MainMenuGeometry -Tier 'Compact' -ViewportWidth 200 -ViewportHeight 30
+        $rows = @(Get-MainMenuFlowPackedItemRows -Width 80 -Geometry $geometry)
+        $segments = @($rows | ForEach-Object { $_.Segments })
+        foreach ($section in (Get-MainMenuSections)) {
+            $expectedColor = Get-MainMenuSectionColor -Header $section.Header
+            foreach ($item in $section.Items) {
+                $segment = @($segments | Where-Object { $_.Text -eq ('{0}) {1}' -f $item.Number, $item.Label) })
+                $segment.Count | Should -Be 1
+                $segment[0].Color | Should -Be $expectedColor
+            }
+        }
+        (Get-MainMenuSectionColor -Header 'Library Management') | Should -Be 'Cyan'
+        (Get-MainMenuSectionColor -Header 'Maintenance and Recovery') | Should -Be 'Magenta'
+        (Get-MainMenuSectionColor -Header 'Application') | Should -Be 'Yellow'
+        (Get-MainMenuSectionColor -Header 'Game Enhancements (optional -- not every game needs them)') | Should -Be 'Green'
+        (Get-MainMenuSectionColor -Header 'Game Requirements (only for some games)') | Should -Be 'DarkYellow'
+    }
+
+    It "the key is added only when one more row fits, and adds exactly one line" {
+        $geometry = Get-MainMenuGeometry -Tier 'Compact' -ViewportWidth 100 -ViewportHeight 30
+        $plain = @(Get-MainMenuFlowPackedItemRows -Width 78 -Geometry $geometry)
+        $atLimit = @(Get-MainMenuFlowPackedItemRows -Width 78 -Geometry $geometry -AvailableRows $plain.Count)
+        $withKey = @(Get-MainMenuFlowPackedItemRows -Width 78 -Geometry $geometry -AvailableRows ($plain.Count + 1))
+        $atLimit.Count | Should -Be $plain.Count
+        $withKey.Count | Should -Be ($plain.Count + 1)
+        for ($i = 0; $i -lt $plain.Count; $i++) { $withKey[$i].Text | Should -BeExactly $plain[$i].Text }
+        $withKey[-1].Text.Trim() | Should -BeExactly $script:KeyText
+        $keySegments = @($withKey[-1].Segments | Where-Object { $_.Text.Trim() -notin @('', '|') })
+        @($keySegments | ForEach-Object { $_.Color }) | Should -Be @('Cyan', 'Green', 'DarkYellow', 'Magenta', 'Yellow')
+    }
+
+    It "the key is skipped when it would wrap" {
+        $geometry = Get-MainMenuGeometry -Tier 'Compact' -ViewportWidth 100 -ViewportHeight 30
+        $narrow = @(Get-MainMenuFlowPackedItemRows -Width ($script:KeyText.Length - 1) -Geometry $geometry -AvailableRows 99)
+        @($narrow | Where-Object { $_.Text -match 'Enhancements' }).Count | Should -Be 0
+        $exact = @(Get-MainMenuFlowPackedItemRows -Width $script:KeyText.Length -Geometry $geometry -AvailableRows 99)
+        @($exact | Where-Object { $_.Text -match 'Enhancements' }).Count | Should -Be 1
+    }
+
+    It "at <Width>x<Height> the key is <Expect> and the screen still fits with its prompt, Exit and footer" -TestCases @(
+        @{ Width = 80; Height = 20; Expect = 'shown' }
+        @{ Width = 120; Height = 24; Expect = 'shown' }
+        @{ Width = 80; Height = 9; Expect = 'absent' }
+        @{ Width = 60; Height = 10; Expect = 'absent' }
+        @{ Width = 50; Height = 20; Expect = 'absent' }
+    ) {
+        param($Width, $Height, $Expect)
+        $screen = Render-MainMenuScreen -Tier (Get-ConsoleLayoutTier -Width $Width -Height $Height) -Width $Width -Height $Height
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+        $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, $Height - 2))
+        if ($Expect -eq 'shown') {
+            $output | Should -Match ([regex]::Escape($script:KeyText))
+            $screen.PromptAllowed | Should -BeTrue
+            $output | Should -Match '18\) Exit'
+            $output | Should -Match 'Q=Quit'
+            $screen.Rows[-1].Text | Should -Match 'Enter number'
+        } else {
+            $output | Should -Not -MatchExactly 'Enhancements'
+        }
+    }
+
+    It "the wide tier prints no key" {
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 200 -Height 50
+        (($screen.Rows | ForEach-Object { $_.Text }) -join "`n") | Should -Not -Match 'Library \| Enhancements'
     }
 }
 
@@ -13644,8 +13428,8 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
         $warningBlock | Should -Match 'ExpectedPath'
         $warningBlock | Should -Match 'DetectorMethod|DetectorSource'
         $warningBlock | Should -Match 'Confidence'
-        $warningBlock | Should -Match 'Verify or restore this component through your normal TeknoParrot"'
-        $warningBlock | Should -Match 'installation/update process using TeknoParrotUI'
+        $warningBlock | Should -Match 'use its own update or repair screen'
+        $warningBlock | Should -Match 'Show the technical details'
         $warningBlock | Should -Not -Match '(?i)anti[- ]?virus|quarantine'
         $script:ProductionSource | Should -Match '\$builder\.AppendLine\("  Contract : \$\(\$e\.ContractId\)'
         $script:ProductionSource | Should -Match '\$builder\.AppendLine\("  Detector : \$\(\$e\.DetectorMethod\)'
@@ -13680,7 +13464,7 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
         $errors = $null
         $ast = [System.Management.Automation.Language.Parser]::ParseInput($script:ProductionSource, [ref]$tokens, [ref]$errors)
         $errors.Count | Should -Be 0
-        $banned = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml', 'Set-Content', 'Add-Content', 'Out-File', 'New-Item', 'Remove-Item', 'Move-Item', 'Copy-Item', 'Rename-Item')
+        $banned = @('Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml', 'Set-Content', 'Add-Content', 'Out-File', 'New-Item', 'Remove-Item', 'Move-Item', 'Copy-Item', 'Rename-Item')
         $bannedMembers = @('Save', 'WriteAllText', 'WriteAllBytes', 'AppendAllText', 'Create', 'Delete', 'Move', 'Copy')
         foreach ($name in @('Get-CompatibilityWarnings', 'Get-ContractBackedMissingComponents')) {
             $fnAst = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq $name }, $true))[0]
@@ -13977,7 +13761,7 @@ Describe "Issue #300 shared workflow status state machine" {
         (Start-TpmWorkflowStep $ctx -StepId 'three' -Activity 'Third work') | Should -BeNullOrEmpty
     }
 
-    It "pins failures until acknowledgement and retains only bounded completion history" {
+    It "pins failures until acknowledgment and retains only bounded completion history" {
         $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'failure' -Title 'Failure workflow' -Steps @('a','b','c','d','e') -ConsoleFacts ([pscustomobject]@{ NoRender = $true })
         [void](Start-TpmWorkflowStatus $ctx)
         foreach ($step in @('a','b','c','d')) {
@@ -14207,7 +13991,7 @@ Describe "Issue #300 shared workflow status state machine" {
     }
 
     It "renders actionable normal-mode states" {
-        $renders = 0
+        $script:renders = 0
         Mock Render-TpmWorkflowStatus { $script:renders++ }
         foreach ($kind in @('failure','waiting','completed','aborted')) {
             $ctx = New-TpmWorkflowStatusContext -WorkflowKey $kind -Title $kind -Steps @('one')
@@ -15035,9 +14819,7 @@ Describe "RC8 menu and ReShade regressions" {
     It "normal ReShade setup does not require a preset path" {
         $source = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
         $source | Should -Match 'Read-TpmReShadeTerminalProfile'
-        $source | Should -Match 'Use the selected ReShade profile\?'
-        $source | Should -Match '\{0\} will be applied\. Choose a custom ReShade \.ini preset only if you already have one\.'
-        $source | Should -Match '\[Y\] Yes, use \{0\}\s+\[S\] Custom preset\s+\[B\] Back'
+        $source | Should -Not -Match 'Use the selected ReShade profile\?'
         $source | Should -Not -Match 'Get it at\s+https://reshade\.me'
         $source | Should -Not -Match 'replace ReShade\\ReShade64\.dll'
     }
@@ -15275,11 +15057,11 @@ Describe "RC8 menu and ReShade regressions" {
         Mock Read-TpmReShadeTerminalProfile {
             [pscustomobject]@{ Cancelled = $false; SelectedProfile = $selectedProfile; PreviewSession = $session }
         }
-        Mock Read-TpmChoice {
+        Mock Select-RegisteredGamesInteractive {
             $session['Closed'] | Should -BeTrue
             $timer.Enabled | Should -BeFalse
             $timer.Disposed | Should -BeTrue
-            'B'
+            @()
         }
         Mock Install-TpmReShadeProfileDeployment { throw 'deployment must remain behind explicit confirmation' }
         Mock Write-Host {}
@@ -15291,11 +15073,11 @@ Describe "RC8 menu and ReShade regressions" {
             $result.Cancelled | Should -BeTrue
             $result.Deployed | Should -Be 0
             $result.Errors | Should -Be 0
-            $result.Reason | Should -Be 'USER_CANCELLED'
+            $result.Reason | Should -Be 'NO_GAMES_SELECTED'
             $session.Closed | Should -BeTrue
             $timer.Enabled | Should -BeFalse
             $timer.Disposed | Should -BeTrue
-            Should -Invoke Read-TpmChoice -Times 1 -Exactly
+            Should -Invoke Select-RegisteredGamesInteractive -Times 1 -Exactly
             Should -Invoke Install-TpmReShadeProfileDeployment -Times 0 -Exactly
         } finally {
             $script:TpmOwnedLayout = $oldLayout
@@ -16216,7 +15998,7 @@ Describe "Approved ReShade profile catalog" {
                 @($profile.Parameters.Keys).Count | Should -Be 0 -Because $row[0]
             }
         }
-        @(Get-TpmReShadeProfileGroups | ForEach-Object Label) | Should -Be @('CRT Choices','Main Catalog','Actual HDR Setups Only')
+        @(Get-TpmReShadeProfileGroups | ForEach-Object Label) | Should -Be @('CRT Choices','Main Catalog','Advanced Alternatives','Actual HDR Setups Only')
     }
     It "removes Monochrome, Sepia, Film Grain, Vignette and Cartoon from the beginner catalog without remapping them" {
         foreach ($id in @('Cartoon','FilmGrain','Monochrome','Sepia','Vignette')) {
@@ -16488,7 +16270,7 @@ Describe "Approved ReShade profile catalog" {
         }
     }
 
-    It "accepts LumaSharpen and Vibrance with a warning" {
+    It "accepts LumaSharpen and Vibrance together in either order" {
         foreach ($ids in @(
             @('SweetFX.LumaSharpen','SweetFX.Vibrance'),
             @('SweetFX.Vibrance','SweetFX.LumaSharpen')
@@ -17512,7 +17294,7 @@ Describe "ReShade trusted profile restore" {
     It "classifies PostgreSQL failure causes and preserves next actions" {
         (Get-PostgresFailureDiagnosis -GameLabel 'GameA' -DbName 'db_a' -Detail 'connection refused').Category | Should -Be 'CannotConnect'
         (Get-PostgresFailureDiagnosis -GameLabel 'GameB' -DbName 'db_b' -Detail 'psql.exe could not be verified').Category | Should -Be 'ToolUnavailable'
-        (Get-PostgresFailureDiagnosis -GameLabel 'GameC' -DbName 'db_c' -Detail 'database does not exist').Category | Should -Be 'DatabaseMissing'
+        (Get-PostgresFailureDiagnosis -GameLabel 'GameC' -DbName 'db_c' -Detail 'FATAL: database "db_c" does not exist').Category | Should -Be 'DatabaseMissing'
         $diagnosis = Get-PostgresFailureDiagnosis -GameLabel 'GameD' -DbName 'db_d' -Detail 'access denied'
         $diagnosis.Category | Should -Be 'PermissionOrElevation'
         $diagnosis.NextAction | Should -Not -BeNullOrEmpty
@@ -17550,16 +17332,6 @@ Describe "ReShade trusted profile restore" {
         $source | Should -Match '\$shown = ConvertTo-PostgresRedactedText -Text \$rawOutput -Secrets \(@\(\$Secrets\) \+ @\(\$PasswordPlain\)\)'
     }
 
-
-    It "keeps confirmation choices adjacent with a matching default and preserves Back" {
-        $source = $script:ProductionSource
-        $source | Should -Match '\[Y\] Yes, use .* \[S\] Custom preset  \[B\] Back'
-        $source | Should -Match 'Choice \(default Y\)'
-        $source | Should -Not -Match '\[Y\].*\[C\].*\[B\].*default Y'
-        $source | Should -Match '\$customPresetChoice -eq ''S''\)\s*\{\s*'
-        $source | Should -Not -Match '\[Y\].*\[S\].*\[B\].*default A'
-        $source | Should -Match '\$customPresetChoice -eq ''B''\)\s*\{[^}]*return \[pscustomobject\]@\{ Succeeded = \$false; Cancelled = \$true;[^}]*Reason = ''USER_CANCELLED'''
-    }
 
     It "keeps 17 canonical profiles that use 12 of the 25 unique shader effects" {
         # Mutation: change the profile count, the technique/effect catalog size or the number of effects the profiles use (17 profiles, 25 techniques, 12 used).
@@ -17792,7 +17564,7 @@ Describe "ReShade eligibility display mutation guard" {
             'DisplaySwitch', 'SetPrimaryMonitor', 'EnableDisplay', 'DisableDisplay',
             'SetDisplayMode', 'SetRefreshRate', 'SetOrientation', 'SetWindowPos',
             'MoveWindow', 'Set-Content', 'Add-Content', 'Out-File', 'Set-ItemProperty',
-            'Save-Xml', 'Save-XmlMaybe', 'Invoke-ControlPropagation'
+            'Save-Xml', 'Save-XmlMaybe'
         )
         foreach ($name in $reachable) {
             $fn = $functionAsts[$name]
@@ -17872,7 +17644,7 @@ Describe "ReShade result action priority" {
         (Get-TpmReShadeResultActionModel -Result ([pscustomobject]@{ Protected=0; MissingPath=1; MissingDevice=0 })).Primary | Should -Be 'HealthCheck'
         (Get-TpmReShadeResultActionModel -Result ([pscustomobject]@{ Protected=1; MissingPath=0; MissingDevice=0 })).Primary | Should -Be 'ReShade'
     }
-    It "returns a no-op acknowledgement for a clean result" {
+    It "returns a no-op acknowledgment for a clean result" {
         $model = Get-TpmReShadeResultActionModel -Result ([pscustomobject]@{ Protected=0; MissingPath=0; MissingDevice=0 })
         $model.Primary | Should -Be 'Acknowledge'
     }
@@ -18004,7 +17776,7 @@ Describe "Paged picker wrapping" {
 
 Describe "Action Required report output" {
     It "Action Required report excludes raw imported notes" {
-        # Mutation: drop informational family skips or call them required repairs -> downstream guidance contradicts propagation.
+        # Mutation: include the raw imported notes in Action Required -> internal wording reaches the player.
         $actionPath = Join-Path $TestDrive 'ActionItems.txt'
         $notesPath = Join-Path $TestDrive 'GameNotes.txt'
         $manual = @{
@@ -18015,7 +17787,6 @@ Describe "Action Required report output" {
         }
         $ambiguous = @([pscustomobject]@{ Code = 'Broken Racer'; Exe = 'C:\Games\Broken\pcsx2x6.exe' })
         $notFound = @([pscustomobject]@{ Code = 'Missing Racer' })
-        $designSkipped = @([pscustomobject]@{ Code = 'Controls Racer'; Status = 'skipped-no-reference'; ReasonCode = 'NO_USABLE_FAMILY_REFERENCE'; Family = 'driving' })
         $result = [pscustomobject]@{ Unmatched = @('TPM-ExternalFolder') }
         $compatibilityWarnings = [pscustomobject]@{
             PathTooLong = @([pscustomobject]@{ Code = 'Long Racer'; Length = 280; Limit = 260; Suggested = 'D:\TPGames\Long Racer' })
@@ -18044,7 +17815,7 @@ Describe "Action Required report output" {
         })
         Write-TpmGameNotesReport -SetupNotes $importedNotes -NotesPath $notesPath -Quiet | Should -BeTrue
         Write-TpmActionRequiredReport -ActionPath $actionPath -ManualRegData $manual `
-            -AmbiguousPaths $ambiguous -NotFound $notFound -DesignSkippedItems $designSkipped `
+            -AmbiguousPaths $ambiguous -NotFound $notFound `
             -Result $result -CompatibilityWarnings $compatibilityWarnings `
             -ControlReadinessItems $controls -GameNotesPath $notesPath -Quiet | Should -BeTrue
         $action = [System.IO.File]::ReadAllText($actionPath)
@@ -18055,8 +17826,6 @@ Describe "Action Required report output" {
         $action | Should -Match 'shorten parent folders'
         $action | Should -Match 'saved GamePath'
         $action | Should -Match 'CONTROLS NOT READY : Controls Racer'
-        $action | Should -Match 'CONTROLS SKIPPED BY DESIGN \(informational; not a failed save\)'
-        $action | Should -Match "Controls Racer: Skipped by design:.*'driving'.*Add one game"
         $action | Should -Match 'TeknoParrot Manager only checked the contract-declared path'
         $action | Should -Not -Match 'TPM only checked the contract-declared path'
         $action | Should -Not -Match 'Source notes:|Raw technical note|This game sucks|fuckin'
@@ -18283,7 +18052,6 @@ Describe "Library Health Check guided repair UX contracts" {
         $source | Should -Match '\[M\] Let me pick the correct executable manually'
         $source | Should -Match '\[S\] Search another game folder'
         $source | Should -Match '\[C\] Re-copy/re-extract only these affected games from the configured source'
-        $source | Should -Match 'Affected profile evidence:'
         $source | Should -Match 'Searched folder:'
         $source | Should -Match 'if \(\$searchAgainChoice -eq ''B''\)'
         $source | Should -Match 'HealthCheck: user selected Back after no automatic repair candidates'
@@ -18563,14 +18331,14 @@ Describe "Library Health Check guided repair UX contracts" {
         $source | Should -Match '-DryRun:\$true'
         $source | Should -Match '-ReviewedCandidates \$repairCandidates'
         $source | Should -Match 'Candidate paths found'
-        $source | Should -Match 'FIXED:'
-        $source | Should -Match 'STILL BROKEN:'
+        $source | Should -Match 'REPAIRED:'
+        $source | Should -Match 'STILL NEEDS YOU:'
         $source | Should -Match 'Scoped repair: searching only'
         $source | Should -Match 'GamePath before:'
         $source | Should -Match 'GamePath after'
         $source | Should -Match 'Already extracted \(no ZIP work; GamePath repair is separate\)'
         $source | Should -Match 'Existing profile files: \{0\}\. Their saved mappings are not exact selected-game verification'
-        $repairResultIndex = $source.IndexOf('Repair result: {0} FIXED', [StringComparison]::Ordinal)
+        $repairResultIndex = $source.IndexOf('Repair result: {0} repaired', [StringComparison]::Ordinal)
         $thumbnailPromptIndex = $source.IndexOf('Download the missing game pictures?', [StringComparison]::Ordinal)
         $repairResultIndex | Should -BeGreaterOrEqual 0
         $thumbnailPromptIndex | Should -BeGreaterThan $repairResultIndex
@@ -18679,7 +18447,7 @@ Describe "BepInEx runtime hold UX contracts" {
         $source | Should -Match 'PathReasonCounts'
         $source | Should -Match 'Succeeded ='
     }
-    It "keeps BepInEx acknowledgement and Health Check routing explicit" {
+    It "keeps BepInEx acknowledgment and Health Check routing explicit" {
         $source = $script:ProductionSource
         $source | Should -Match '\$bepChoices = if \(\$bepRollbackIssue\)'
         $source | Should -Match '\$bepPromptChoices = \$bepChoices -join'
@@ -18997,7 +18765,7 @@ Describe "Focused RC8 remediation contracts" {
         $source = $script:ProductionSource
         $source | Should -Match '\$lines\.Add\(''What to do next:''\)'
         $supportStart = $source.IndexOf('if ($mode -eq "Support")', [StringComparison]::Ordinal)
-        $nextModeStart = $source.IndexOf('if ($mode -eq "PropagateControls")', $supportStart, [StringComparison]::Ordinal)
+        $nextModeStart = $source.IndexOf('if ($mode -eq "Controls")', $supportStart, [StringComparison]::Ordinal)
         $supportMode = $source.Substring($supportStart, $nextModeStart - $supportStart)
         $supportMode | Should -Match 'Write-TpmSupportPackageResult'
         $supportMode | Should -Match 'Invoke-TpmSupportPackageFollowUp'
@@ -19031,7 +18799,7 @@ Describe "Focused RC8 remediation contracts" {
         $source | Should -Match '\$pendingAutoSyncGames = \$null'
         $source | Should -Match '\$autoSyncTargetGames = if \(\$pendingApplyMode -eq ''AutoSync'' -and \$pendingAutoSyncGames\)'
         $source | Should -Match '\$onlySyncList = @\(\)'
-        $source | Should -Match 'Health Check repair scope: affected profile codes only'
+        $source | Should -Match 'Health Check repair scope: affected games only'
         $source | Should -Match '-OnlyProfileCodes \(\[string\[\]\]\$autoSyncTargetGames\)'
         $source | Should -Match '\$scopedHealthRepair'
         $source | Should -Match 'if \(\$null -ne \$autoSyncTargetGames -and @\(\$autoSyncTargetGames\)\.Count -gt 0\)'
@@ -19858,7 +19626,7 @@ Describe 'TPM-owned layout and legacy migration' {
         foreach ($category in @('State','Logs','Reports','Backups','SupportPackages','Assets','Cache')) {
             $script:ProductionSource | Should -Match ([regex]::Escape($category))
         }
-        $script:ProductionSource | Should -Match 'Not moved: games, ROM ZIP sources, TeknoParrot installation files, LaunchBox data, other frontend data'
+        $script:ProductionSource | Should -Match 'Not moved: games, ROM ZIP sources, TeknoParrot installation files, LaunchBox data, and other frontend data'
         $script:ProductionSource | Should -Match 'If you choose N: nothing is moved\.'
         $script:ProductionSource | Should -Match "ReasonCode 'DECLINED'"
     }
@@ -20128,17 +19896,6 @@ Describe 'S2-B1 shared transaction renderers' -Tag 'S2-B1-RENDERERS' {
         (Format-TpmTransactionPresentationRows -Presentation $noOp) -join "`n" | Should -Not -Match '^\s*Skipped\b'
     }
 
-    It 'adapts the normal ReShade summary to the shared renderer without legacy counts' {
-        $start=$script:ProductionSource.IndexOf('Write-Host "  ReShade result -- review before continuing to dgVoodoo2:"')
-        $end=$script:ProductionSource.IndexOf("[void](Read-HostSafe '  Press Enter to review the ReShade result before dgVoodoo2')", $start)
-        $start | Should -BeGreaterOrEqual 0
-        $end | Should -BeGreaterThan $start
-        $summary=$script:ProductionSource.Substring($start, $end - $start)
-        $summary | Should -Match 'ConvertTo-TpmTransactionPresentation -TransactionResult \$normalReShadeResult'
-        $summary | Should -Match 'Format-TpmTransactionPresentationRows -Presentation \$normalReShadePresentation'
-        $summary | Should -Not -Match 'Transaction outcome:|ProtectedDetails|UnsafeDetails'
-        $summary | Should -Match 'Format-TpmReShadeSummaryDetailRows -Result \$normalReShadeResult'
-    }
     It 'maps ReShade changed skipped and failed labels from the legacy result' {
         $start=$script:ProductionSource.IndexOf('function Invoke-ReShadeSetup {')
         $end=$script:ProductionSource.IndexOf('function Invoke-ReShadeSetupLegacy {', $start)
@@ -20238,7 +19995,7 @@ Describe 'S2-B1 shared transaction renderers' -Tag 'S2-B1-RENDERERS' {
         }
         $text=(Format-TpmReShadeSummaryDetailRows -Result $result) -join "`n"
         $text | Should -Match 'Protected item:'
-        $text | Should -Match 'Unsafe/malformed item:'
+        $text | Should -Match 'Left unchanged for safety:'
         $text | Should -Match 'Native settings preserved for GameC:'
         $text | Should -Not -Match 'C:\\Games|password=secret'
     }
@@ -23794,6 +23551,73 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 grouped preview selector and readable l
         (Get-TpmReShadeProfileSelectorNextIndex -Rows $rows -FromIndex 1 -Direction 1) | Should -Be 2
         (Get-TpmReShadeProfileSelectorNextIndex -Rows $rows -FromIndex 1 -Direction -1) | Should -Be 0
     }
+    It "lists every effect under its own group in all four groups; each can be picked in the terminal and the preview list, and Back picks nothing" {
+        # Shipped profiles fill CRT Choices and Main Catalog; one synthetic profile fills Advanced Alternatives and the synthetic HDR pair fills Actual HDR Setups Only.
+        $advanced = (Get-TpmReShadeProfile -ProfileId 'Levels') | Select-Object *
+        $advanced.ProfileId = 'SyntheticAdvanced'; $advanced.FriendlyName = 'Synthetic Advanced'; $advanced.DisplayLabel = 'Synthetic Advanced [Levels]'; $advanced.Group = 'Advanced'
+        $profiles = @(@(Get-TpmReShadeProfiles | Where-Object { -not $_.RequiresHdr }) + @($advanced) + @(New-TpmTestSyntheticHdrProfiles))
+        $expectedHeadings = [ordered]@{ Crt = 'CRT Choices'; Main = 'Main Catalog'; Advanced = 'Advanced Alternatives'; Hdr = 'Actual HDR Setups Only' }
+        $rows = @(Get-TpmReShadeProfileSelectorRows -Profiles $profiles)
+        @($rows | Where-Object RowKind -eq 'Header' | ForEach-Object DisplayLabel) | Should -Be @($expectedHeadings.Values)
+        foreach ($group in $expectedHeadings.Keys) {
+            $headerIndex = @(0..($rows.Count - 1) | Where-Object { $rows[$_].RowKind -eq 'Header' -and $rows[$_].Group -eq $group })[0]
+            $nextHeader = @(($headerIndex + 1)..($rows.Count - 1) | Where-Object { $rows[$_].RowKind -eq 'Header' })
+            $end = if ($nextHeader.Count -gt 0) { $nextHeader[0] - 1 } else { $rows.Count - 1 }
+            @($rows[($headerIndex + 1)..$end] | ForEach-Object ProfileId) | Should -Be @($profiles | Where-Object { $_.Group -eq $group } | ForEach-Object ProfileId) -Because "every $group profile sits under its own heading"
+        }
+
+        $script:fourGroupText = New-Object System.Collections.Generic.List[string]
+        Mock Write-Host { if ($null -ne $Object) { [void]$script:fourGroupText.Add([string]$Object) } }
+        Mock Write-Log {}
+        Mock Get-TpmReShadeHdrGate { [pscustomobject]@{ State = 'ENABLED'; Visible = $true; Enabled = $true; Reason = '' } }
+        $script:chooserInputs = [System.Collections.Generic.Queue[string]]::new()
+        Mock Read-TpmReShadeTerminalInput { $script:chooserInputs.Dequeue() }
+        $selector = [pscustomobject]@{ SelectedIndex = -1 }
+        $session = [hashtable]::Synchronized(@{
+            Initialized = $true; Closed = $false; PreviewEnabled = $true; SelectedProfileId = 'Original'
+            Profiles = $profiles; ProfileSelectorRows = $rows; ProfileSelector = $selector
+            ProfileSelectorUpdating = $false; Refresh = { $true }
+        })
+        for ($number = 1; $number -le $profiles.Count; $number++) {
+            $expected = $profiles[$number - 1]
+            $script:fourGroupText.Clear()
+            [void]$script:chooserInputs.Enqueue([string]$number)
+            [void]$script:chooserInputs.Enqueue('U')
+            $result = Read-TpmReShadeTerminalProfile -Profiles $profiles
+            $result.Cancelled | Should -BeFalse
+            $result.SelectedProfile.ProfileId | Should -Be $expected.ProfileId -Because "number $number picks $($expected.ProfileId)"
+            $shown = @($script:fourGroupText | Where-Object { $_ -match '^\s*\[\d+\]' })
+            @($shown | Where-Object { $_ -match ('^\s*\[{0}\] ' -f $number) -and $_ -match [regex]::Escape($expected.FriendlyName) }).Count | Should -BeGreaterThan 0 -Because "$($expected.ProfileId) is listed as number $number"
+            (Sync-TpmReShadeGallerySelection -Session $session -ProfileId $expected.ProfileId) | Should -BeTrue
+            $rows[$selector.SelectedIndex].ProfileId | Should -Be $expected.ProfileId -Because 'the preview list shows the same profile'
+        }
+        $script:fourGroupText.Clear()
+        [void]$script:chooserInputs.Enqueue('B')
+        $back = Read-TpmReShadeTerminalProfile -Profiles $profiles
+        $back.Cancelled | Should -BeTrue
+        $back.SelectedProfile | Should -BeNullOrEmpty
+        $text = $script:fourGroupText -join "`n"
+        $lastIndex = -1
+        foreach ($heading in $expectedHeadings.Values) {
+            $at = $text.IndexOf('  ' + $heading)
+            $at | Should -BeGreaterThan $lastIndex -Because "$heading is shown, after the group before it"
+            $lastIndex = $at
+        }
+    }
+    It "keeps the preview window on the screen: shrinks one that is too big, moves one that hangs off an edge, leaves a fitting one alone" -ForEach @(
+        @{ Name = 'too big for a small screen'; Form = @(40, 30, 1300, 950); Area = @(0, 0, 1366, 728); Expected = @(40, 0, 1300, 728) }
+        @{ Name = 'hangs off the right and bottom edges'; Form = @(700, 400, 1040, 760); Area = @(0, 0, 1920, 1040); Expected = @(700, 280, 1040, 760) }
+        @{ Name = 'fits on a second screen left of the main one'; Form = @(-1800, 20, 1040, 760); Area = @(-1920, 0, 1920, 1040); Expected = $null }
+        @{ Name = 'second screen, too wide'; Form = @(-1900, 20, 2400, 700); Area = @(-1920, 0, 1920, 1040); Expected = @(-1920, 20, 1920, 700) }
+        @{ Name = 'already fits'; Form = @(100, 100, 1040, 760); Area = @(0, 0, 1920, 1040); Expected = $null }
+    ) {
+        $window = [pscustomobject]@{ Left = $Form[0]; Top = $Form[1]; Width = $Form[2]; Height = $Form[3]; Calls = (New-Object System.Collections.Generic.List[string]) }
+        $window | Add-Member -MemberType ScriptMethod -Name SetBounds -Value { param($l, $t, $w, $h) [void]$this.Calls.Add(('{0},{1},{2},{3}' -f $l, $t, $w, $h)) }
+        $area = [pscustomobject]@{ Left = $Area[0]; Top = $Area[1]; Width = $Area[2]; Height = $Area[3] }
+        Set-TpmReShadeGalleryFormFit -Form $window -WorkArea $area
+        if ($null -eq $Expected) { $window.Calls.Count | Should -Be 0 -Because $Name }
+        else { @($window.Calls) | Should -Be @(($Expected -join ',')) -Because $Name }
+    }
     It "uses owner drawing, readable DPI-scaled text, autosized toolbar rows, and disposes selector handlers" {
         $source = $script:ProductionSource
         $gallery = [regex]::Match($source, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
@@ -23803,8 +23627,10 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 grouped preview selector and readable l
         $gallery | Should -Match '\$profileSelector\.AccessibleDescription'
         $gallery | Should -Match '\$toolbar\.WrapContents = \$true'
         $gallery | Should -Not -Match '\$toolbar\.Height = 55'
+        $gallery | Should -Match '\$form\.Add_Shown\(\$formFitHandler\)'
         $close = [regex]::Match($source, '(?s)function Close-TpmReShadeProfileGallerySession \{.*?\r?\n\}').Value
         $close | Should -Match 'Remove_DrawItem'
+        $close | Should -Match "Remove_Shown\(\`$Session\['FormFitHandler'\]\)"
         $close | Should -Match 'ProfileSelectorHeaderFont.*Dispose'
         $source | Should -Match "New-Object Drawing\.Font\('Consolas', 12"
     }
@@ -23913,6 +23739,36 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 live terminal and gallery selection syn
         Mock Read-TpmReShadeTerminalInput { $script:session['SelectedProfileId'] = 'Levels'; 'U' }
         $result = Read-TpmReShadeTerminalProfile -Profiles @(Get-TpmReShadeProfiles) -DefaultProfileId 'Original' -PreviewSession $script:session
         $result.SelectedProfile.ProfileId | Should -Be 'Levels'
+    }
+    It "a numbered choice shows a short Selected line instead of the whole catalog, and U goes straight on" {
+        Mock Get-TpmConsoleMetrics { [pscustomobject]@{ Width = 0; Left = 0; Top = 0; Height = 0; BufferWidth = 0; BufferHeight = 0 } }
+        Mock Write-Host { [void]$script:console.Add([string]$Object) }
+        Mock Test-TpmConsoleKeyAvailable { $false }
+        $script:answers = New-Object System.Collections.Generic.Queue[string]
+        foreach ($a in @('3', '4', 'U')) { $script:answers.Enqueue($a) }
+        Mock Read-TpmReShadeTerminalInput { $script:answers.Dequeue() }
+        $result = Read-TpmReShadeTerminalProfile -Profiles @(Get-TpmReShadeProfiles) -DefaultProfileId 'Original' -PreviewSession $null
+        $text = $script:console -join "`n"
+        $result.Cancelled | Should -BeFalse
+        $result.CustomPreset | Should -BeFalse
+        $script:answers.Count | Should -Be 0 -Because 'U is the last question'
+        ([regex]::Matches($text, 'Current selection:')).Count | Should -Be 1 -Because 'the catalog is printed once'
+        ([regex]::Matches($text, '(?m)^\s*Selected: ')).Count | Should -Be 2
+        $text | Should -Not -Match 'Use the selected ReShade profile'
+    }
+    It "S (custom preset), B (back) and L (show list) stay reachable from the profile screen" {
+        Mock Get-TpmConsoleMetrics { [pscustomobject]@{ Width = 0; Left = 0; Top = 0; Height = 0; BufferWidth = 0; BufferHeight = 0 } }
+        Mock Write-Host { [void]$script:console.Add([string]$Object) }
+        Mock Test-TpmConsoleKeyAvailable { $false }
+        $script:answers = New-Object System.Collections.Generic.Queue[string]
+        foreach ($a in @('S', '3', 'L', 'S')) { $script:answers.Enqueue($a) }
+        Mock Read-TpmReShadeTerminalInput { $script:answers.Dequeue() }
+        $result = Read-TpmReShadeTerminalProfile -Profiles @(Get-TpmReShadeProfiles) -DefaultProfileId '' -PreviewSession $null
+        $result.CustomPreset | Should -BeTrue
+        $result.SelectedProfile | Should -Not -BeNullOrEmpty
+        ([regex]::Matches(($script:console -join "`n"), 'Current selection:')).Count | Should -Be 2 -Because 'L shows the list again'
+        $script:answers.Enqueue('B')
+        (Read-TpmReShadeTerminalProfile -Profiles @(Get-TpmReShadeProfiles) -DefaultProfileId 'Original' -PreviewSession $null).Cancelled | Should -BeTrue
     }
     It "reports each of several rapid gallery changes at most once and settles on the newest" {
         $script:steps = New-Object System.Collections.Generic.Queue[object]
@@ -24694,7 +24550,7 @@ Describe 'Required patch engine and local recipes' {
         $script:requiredPatchInputQueue = $null
     }
     AfterEach {
-        $script:TpmRequiredPatchCatalogSha256 = '8A2BB6B4017440653F846042C3DAEC574E07AF03CBBA9E25BB4DF65A8E210BBD'
+        $script:TpmRequiredPatchCatalogSha256 = 'EE5BDEBB68424069DF51A8A178D2AEA8A7B7326A9643661F597818FF4B1F405D'
         $script:TpmOwnedLayout = $null
         $script:gamesInstallFolder = $null
         $script:requiredPatchInputQueue = $null
@@ -26023,7 +25879,7 @@ Describe 'Required patch engine and local recipes' {
         [IO.File]::ReadAllText($requiredPatchFixture.PluginTarget) | Should -Be 'synthetic required plugin'
         Test-Path -LiteralPath $userProfile | Should -BeFalse
         Should -Invoke Read-PathWithBrowse -Times 1 -Exactly
-        $script:TpmRequiredPatchCatalogSha256 = '8A2BB6B4017440653F846042C3DAEC574E07AF03CBBA9E25BB4DF65A8E210BBD'
+        $script:TpmRequiredPatchCatalogSha256 = 'EE5BDEBB68424069DF51A8A178D2AEA8A7B7326A9643661F597818FF4B1F405D'
         $script:TpmOwnedLayout = $null
     }
 
@@ -26076,7 +25932,7 @@ Describe 'Required patch engine and local recipes' {
         Invoke-TpmRequiredPatchMenu -TpRoot $tp -UserProfilesDir (Join-Path $tp 'UserProfiles') -ManagerRoot $manager -ProgramRoot $manager -MainSource $source -SupplementarySource ''
         Test-Path -LiteralPath $requiredPatchFixture.PluginTarget | Should -BeFalse
         @(Get-ChildItem -LiteralPath (Join-Path $owned 'Backups\GamePatches') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
-        $script:TpmRequiredPatchCatalogSha256 = '8A2BB6B4017440653F846042C3DAEC574E07AF03CBBA9E25BB4DF65A8E210BBD'
+        $script:TpmRequiredPatchCatalogSha256 = 'EE5BDEBB68424069DF51A8A178D2AEA8A7B7326A9643661F597818FF4B1F405D'
         $script:TpmOwnedLayout = $null
     }
     It 'selects exact Cross Elysion GPU recipes and refuses a different executable revision' {
@@ -26801,8 +26657,9 @@ Describe 'LaunchBox verified backup write restore and discovery (#335-#338)' {
         $r.Outcome | Should -Be 'SAVED' -Because ($r.Errors -join '; ')
         $r.Results['TeknoParrot'] | Should -Be 1
         @($r.SkippedUnreadable).Count | Should -Be 0
-        @($r.SkippedBadPath) | Should -Be @('BadPath.xml')
-        (@(Get-TpmLaunchBoxDetailBlocks -Result $r | ForEach-Object { $_.Lines }) -join "`n") | Should -Match 'BadPath\.xml.*not a valid path'
+        # The game is named by its game name (no known name: its code), not its file name.
+        @($r.SkippedBadPath) | Should -Be @('BadPath')
+        (@(Get-TpmLaunchBoxDetailBlocks -Result $r | ForEach-Object { $_.Lines }) -join "`n") | Should -Match 'BadPath.*not a valid path'
     }
 
     It 'preserves existing emulator, platform and game identities even with absolute profile paths' {
@@ -27511,7 +27368,7 @@ Describe 'Next version: firmware, Play! game file and menu layout' {
             $warning[0].EmulatorType | Should -Be 'RPCS3'
             @($warning[0].MissingFiles) | Should -Be @('liblv2.sprx')
             @($warning[0].AffectedGames) | Should -Be @('SOMEGAME')
-            (Get-TpmGameNeedsLine -ProfilePath (Join-Path $fixture.Profiles 'SOMEGAME.xml')) | Should -Match 'PlayStation 3 \(RPCS3\) firmware'
+            (Get-TpmGameNeedsLine -ProfilePath (Join-Path $fixture.Profiles 'SOMEGAME.xml')) | Should -Match 'PlayStation 3 style arcade firmware \(RPCS3\)'
         }
 
         It 'finds the firmware file in the player''s archive and accepts it only when the DAT lists the same size and hashes' {
@@ -27615,7 +27472,7 @@ Describe 'Next version: firmware, Play! game file and menu layout' {
             $found = Get-NfPlan -Fixture $fixture -Collection $collection
             $found.Plan.AnySource | Should -BeFalse
             $text = (Get-TpmPrerequisiteScreenLines -Warning $found.Warning[0] -Plan $found.Plan).Plain -join ' '
-            $text | Should -Match 'PlayStation 3 firmware archive'
+            $text | Should -Match 'PlayStation 3 style hardware'
             $text | Should -Match 'Supplementary or main ZIP folder'
             $text | Should -Not -Match 'put the missing files'
         }

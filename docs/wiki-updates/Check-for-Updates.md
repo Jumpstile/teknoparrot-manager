@@ -33,11 +33,11 @@ RC8.1 is the first version that can update itself like this. If you run a build 
 What it touches:
 
 - It replaces the program files that are different in the new release. Files that are the same are left alone. New files are added.
-- It never deletes anything. Your own files, `UserProfiles` and your backups are not touched. Older program files that the new release no longer has stay where they are.
+- It never deletes your own files, `UserProfiles` or your backups. Older program files that the new release no longer has stay where they are. It does remove two things of its own when it finishes, whether the update worked or not: its temporary update folder and the downloaded ZIP. If an update fails, it also removes any new file it just added, to put things back as they were.
 
 The backup goes to `UpdateBackups\TeknoParrotManager_<date and time>\` next to the script. A backup is never reused or overwritten.
 
-If any file cannot be replaced, every file is put back and nothing changes. The message says your old version is back only when that was checked.
+If any file cannot be replaced, TeknoParrot Manager puts every replaced file back and removes any new file it added, so nothing changes. The message says your old version is back only when that was checked. If it could not check, it says so, and your backup is in the `UpdateBackups` folder next to TeknoParrot Manager. Keep that folder.
 
 If the drive is too full, you see `There is not enough free space for the update` and nothing is installed. Free some space and try again.
 

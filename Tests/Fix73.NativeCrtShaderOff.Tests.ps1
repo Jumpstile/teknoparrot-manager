@@ -559,9 +559,9 @@ Describe 'FIX73 the setup flow with fixture games (Prot = protected, ReadyA and 
         $firstNotice | Should -BeGreaterOrEqual 0
         $firstOption | Should -BeGreaterThan $firstNotice
         $noticeLines = @($run.Out[$firstNotice..($firstOption - 1)])
-        (Get-F73Normalized $noticeLines) | Should -BeExactly "2 of these games already use TeknoParrot's own CRT look. Together with this ReShade look, it can look doubled."
+        (Get-F73Normalized $noticeLines) | Should -Match "^2 of these games already use TeknoParrot's own CRT look\. That look stays on\. This ReShade look adds another effect on top, so the picture can look doubled\. Games: Ready[AB], Ready[AB]$"
         $shown = @($run.Out[0..($firstOption + 2)])
-        @($shown | Where-Object { $_ -cmatch 'CRT Shader|Lottes|Video /|\b(ReadyA|ReadyB|Prot)\b' }).Count | Should -Be 0
+        @($shown | Where-Object { $_ -cmatch 'CRT Shader|Lottes|Video /|\bProt\b' }).Count | Should -Be 0
         @($run.Out | Where-Object { $_ -match 'Native TeknoParrot display/shader settings detected|preserves those native settings|may stack another display effect' }).Count | Should -Be 0
         (Get-F73Normalized $run.Out) | Should -Match '\[K\] Keep TeknoParrot''s CRT look \(default\) \[T\] Turn it off for 2 games \[D\] Details'
     }
@@ -604,13 +604,14 @@ Describe 'FIX73 the setup flow with fixture games (Prot = protected, ReadyA and 
         @($run.Result.NativeCrtTurnedOff) | Should -Be @('ReadyA')
     }
 
-    It 'says "this game" and shows no game name or setting when only one game is selected' {
+    It 'says "this game", names the game and shows no setting when only one game is selected' {
         # Mutation: print the game name or the 'Video / CRT Shader = Lottes' line in the default view of a single game -> the name/setting checks fail.
         $run = Invoke-F73Setup -Games @('ReadyA')
         $text = Get-F73Normalized $run.Out
         $text | Should -Match "This game already uses TeknoParrot's own CRT look\."
         $text | Should -Match '\[T\] Turn it off for this game'
-        @($run.Out | Where-Object { $_ -cmatch 'ReadyA|Lottes|CRT Shader|Video /|Turn off :|Turn off:' }).Count | Should -Be 0
+        @($run.Out | Where-Object { $_ -cmatch 'Lottes|CRT Shader|Video /|Turn off :|Turn off:' }).Count | Should -Be 0
+        $text | Should -Match 'Game: ReadyA'
     }
 
     It 'never changes anything in an unattended run and shows the short notice only' {
@@ -621,17 +622,18 @@ Describe 'FIX73 the setup flow with fixture games (Prot = protected, ReadyA and 
         @($run.Prompts | Where-Object { $_ -match 'Choice, default K' }).Count | Should -Be 0
         $run.Events | Should -Not -Contain 'backup'
         $run.Result.NativeCrtRequested | Should -BeFalse
-        (Get-F73Normalized $run.Out) | Should -Match "3 of these games use TeknoParrot's own screen settings, such as a CRT look\. TeknoParrot Manager keeps them as they are\. A ReShade look can add to them\."
+        (Get-F73Normalized $run.Out) | Should -Match "3 of these games use TeknoParrot's own screen settings, such as a CRT look\. TeknoParrot Manager keeps them as they are, so they stay on\. A ReShade look can add another effect on top\."
         @($run.Out | Where-Object { $_ -match 'Press D at the next menu|Press D for details' }).Count | Should -Be 0
     }
 
-    It 'shows no game name, setting or "Turn off" line in the default view of one unattended game, but logs them' {
+    It 'shows the game name but no setting or "Turn off" line in the default view of one unattended game, and logs the settings' {
         # Mutation: print the old per-game lines (game name, 'Video / CRT Shader = Lottes; Video / SSAA = 2', 'Turn off :') in the general notice -> the default-view checks fail.
         Set-Variable -Name Unattended -Scope Global -Value ([switch]$true)
         $run = Invoke-F73Setup -Games @('ReadyA') -Interactive $false
         $text = Get-F73Normalized $run.Out
-        $text | Should -Match "This game uses TeknoParrot's own screen settings, such as a CRT look\. TeknoParrot Manager keeps them as they are\."
-        @($run.Out | Where-Object { $_ -cmatch 'ReadyA|Lottes|CRT Shader|SSAA|Video /|Turn off' }).Count | Should -Be 0
+        $text | Should -Match "This game uses TeknoParrot's own screen settings, such as a CRT look\. TeknoParrot Manager keeps them as they are, so they stay on\."
+        @($run.Out | Where-Object { $_ -cmatch 'Lottes|CRT Shader|SSAA|Video /|Turn off' }).Count | Should -Be 0
+        $text | Should -Match 'Game: ReadyA'
         Should -Invoke Write-Log -ParameterFilter { $msg -match 'native display settings kept in ReadyA: Video / CRT Shader=Lottes; Video / SSAA=2' } -Times 1 -Exactly
     }
 
@@ -711,7 +713,7 @@ Describe 'FIX73 the setup flow with fixture games (Prot = protected, ReadyA and 
         $row.Count | Should -BeGreaterOrEqual 1
         $row[0].Color | Should -BeExactly 'Red'
         (Get-F73Normalized $run.Out) | Should -Match "- TeknoParrot's own CRT look was turned off for 1 game\."
-        (Get-F73Normalized $run.Out) | Should -Match 'Next: Open Restore backup from the main menu and pick the newest saved copy\.'
+        (Get-F73Normalized $run.Out) | Should -Match 'Next: Open Restore backup from the main menu and pick the saved copy named '
         @($run.Out | Where-Object { $_ -match 'could not confirm the files' }).Count | Should -Be 0
         $run.Result.Summary | Should -Match 'game profile may be damaged'
         Should -Invoke Write-Log -ParameterFilter { $msg -match 'ReadyA: the game profile may be damaged.*ReShadeNativeCrt_fixture' } -Times 1 -Exactly
@@ -854,7 +856,7 @@ Describe 'FIX73 the screens reflow at <Width> columns' -ForEach @(@{ Width = 40 
         $rows = @($script:f73Rows | ForEach-Object { ([string]$_.Text).TrimEnd() })
         @($rows | Where-Object { $_.Length -ge $Width }).Count | Should -Be 0
         (Get-F73LongestRun -Rows $rows -Limit ($Width - 1)) | Should -BeLessOrEqual 5
-        (Get-F73Normalized $rows) | Should -BeExactly "3 of these games use TeknoParrot's own screen settings, such as a CRT look. TeknoParrot Manager keeps them as they are. A ReShade look can add to them. Press D at the next menu for details."
+        (Get-F73Normalized $rows) | Should -Match "^3 of these games use TeknoParrot's own screen settings, such as a CRT look\. TeknoParrot Manager keeps them as they are, so they stay on\. A ReShade look can add another effect on top\. Games: .+ Press D at the next menu for details\.$"
         $script:f73PromptAt | Should -Be -1
     }
 }

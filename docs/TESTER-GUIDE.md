@@ -1,4 +1,4 @@
-# TeknoParrot Manager RC9.3 - Tester Guide
+# TeknoParrot Manager RC9.4 - Tester Guide
 
 Updated Nov 23, 2026
 
@@ -6,7 +6,7 @@ Thank you for helping! You will try a program that sets up arcade games on a PC.
 
 Follow the steps in order. Take your time. If you get stuck, stop and send a screenshot to the person who gave you this guide. If something goes wrong, your backup lets us fix it.
 
-**What is new in RC9.3?** This guide tests RC9.3. RC9.3 shows progress by size while a game unpacks, keeps each ZIP in its own folder, and lists the games that still need a database or controls. Tests 1 to 51 are the same as before, except Test 17 (the database choice for games like Golden Tee) and Test 43 (LaunchBox). **Tests 52 to 66 are new since RC8.4. If you only have a little time, do tests 52 to 66 first.**
+**What is new in RC9.4?** This guide tests RC9.4. It keeps everything new in RC9.3: RC9.3 shows progress by size while a game unpacks, keeps each ZIP in its own folder, and lists the games that still need a database or controls. Tests 1 to 51 are the same as before, except Test 17 (the database choice for games like Golden Tee) and Test 43 (LaunchBox). **Tests 52 to 66 are new since RC8.4. If you only have a little time, do tests 52 to 66 first.**
 
 Words you will see:
 
@@ -23,7 +23,7 @@ Do all of these before you test. Tick each box when you are done.
 
 - [ ] Use a PC that has TeknoParrot and at least 3 games on it. Different kinds of games are best.
 - [ ] Make a backup. Find your TeknoParrot folder. Inside it is a folder named UserProfiles. Copy that folder and paste the copy on your desktop.
-- [ ] Get the file TeknoParrot.Manager.v1.0.RC9.3.zip from the person who sent you this guide, or from the release page: https://github.com/Jumpstile/teknoparrot-manager/releases. The release page shows a SHA-256 check value for the file. To see yours, open PowerShell and run: `Get-FileHash -Algorithm SHA256 "C:\path\to\the\zip"`. The two values must match. If they do not, download the file again.
+- [ ] Get the file TeknoParrot.Manager.v1.0.RC9.4.zip from the person who sent you this guide, or from the release page: https://github.com/Jumpstile/teknoparrot-manager/releases. The release page shows a SHA-256 check value for the file. To see yours, open PowerShell and run: `Get-FileHash -Algorithm SHA256 "C:\path\to\the\zip"`. The two values must match. If they do not, download the file again.
 - [ ] Right-click the zip file and choose Extract All. Pick a NEW empty folder. Do not pick an old folder.
 - [ ] Learn how to take a screenshot: press the Windows key + Shift + S.
 
@@ -34,7 +34,7 @@ Do the tests in order. After each test, write down one word: Worked, Failed, or 
 ### Test 1: Start the program
 
 1. Open the new folder you made in Step 0.
-2. Double-click TeknoParrot Manager to start it. A black window opens. That is normal.
+2. Double-click `TeknoParrot-Manager.bat` to start it. A black window opens. That is normal.
 3. Read each question. Answer with the key it asks for, then press Enter. If you are not sure, pick the first choice it shows.
 4. Wait until you see a numbered list of choices that ends with the line "Enter number and press Enter".
 5. You passed if you see that list and no red error words.
@@ -50,10 +50,10 @@ Do the tests in order. After each test, write down one word: Worked, Failed, or 
 
 1. Go back to the program window. At the main menu, type 11 and press Enter.
 2. It shows a list of countries. Type the number next to USA and press Enter.
-3. It asks which games to change. Type A for all games, or L to pick games yourself.
+3. It asks which games to change. Type L and pick only ONE game. (Test 5 needs your games to stay as they were.)
 4. It shows a summary. Type Y and press Enter to say yes.
 5. Write down which games changed.
-6. Do steps 1 to 4 again, but this time type A at the country list. That means "Back to automatic". It puts the games back.
+6. Do steps 1 to 4 again, but this time type A at the country list. That means "Back to automatic". It puts the game back to its normal setting. If the game was set to a fixed region before you started, "Back to automatic" may not bring that back. In that case do Test 8 (it restores your whole games settings folder, not one game) and pick the backup made just before step 4. Write down what happened.
 7. You passed if the summary made sense and no game was left in a strange state.
 
 ### Test 4: Health check
@@ -66,7 +66,7 @@ Do the tests in order. After each test, write down one word: Worked, Failed, or 
 
 1. At the main menu, type 18 and press Enter to close the program.
 2. Open the normal TeknoParrot program.
-3. Start your first game the way you always do. Do not change any setting first.
+3. Start your first game the way you always do. Do not change any setting first. (Test 3 was undone in its step 6 or by Test 8.)
 4. Play for 2 minutes. Move around and press the buttons. Check that sound works.
 5. Close the game. Then do steps 3 to 5 again for each other game.
 6. You passed a game if it started, looked right, and the controls worked. It failed if it closed by itself, showed a black screen, or showed an error box.
@@ -75,7 +75,7 @@ Do the tests in order. After each test, write down one word: Worked, Failed, or 
 
 1. Do this while you do Test 5. Watch the screen closely while each game is loading.
 2. Look for a box or banner that mentions ReShade.
-3. It should NOT show up. If it does, write down if it goes away by itself, and how fast.
+3. The ReShade welcome box, counters or messages should NOT show up. A short ReShade version banner for a moment at game start is allowed. It fails if a box or message stays on the screen or needs a click. Write down if it goes away by itself, and how fast.
 4. If you see it, take a screenshot with the Windows key + Shift + S.
 
 ### Test 7: Region in a real game
@@ -101,13 +101,14 @@ Tests 9 to 28 try the rest of the program. Do the ones that fit your games and y
 2. Pick games that are already in their own folders (not zip files).
 3. You passed if those games show up in TeknoParrot, each one once. Skip this test if all your games are zip files.
 
-### Test 10: Copy controls to other games
+### Test 10: Set up games with your controller layout
 
-1. First set up the controls in one game, the way you like them.
-2. At the main menu, type 4 and press Enter (Propagate Controls).
-3. In RC8.2 and later it first shows a PREVIEW of what it would copy. Read it. Then answer the question. Type Y to say yes.
-4. Open a game that got the controls in TeknoParrot and look at its controls.
-5. You passed if the new game got the controls and your first game did not change. (Tests 30 and 31 try the preview and the undo.)
+1. At the main menu, type 4 and press Enter (Controls).
+2. Type 1 (set up games with my controller layout) and press Enter. Pick your layout if it asks. If a pad or arcade stick is connected, that layout is already selected; press Enter to use it or pick another number. When it asks how many games, press Enter to take the default, all my games at once.
+3. It first shows a PREVIEW of what it would set up. Read it. Then answer the question. Type Y to say yes.
+4. Open a game that was set up in TeknoParrot and look at its controls.
+5. You passed if the game now has buttons from your layout. A control whose pad button was already used by another control is skipped and listed as still needing you; the others are set. Volume Up and Volume Down get the left and right stick clicks. AutoSync sets controls only after a layout is saved; an unattended run with no saved layout skips controls. (Tests 30 and 31 try the preview and the undo.)
+6. Then type 5 (change one control by hand), pick a game you just set up and one control, and press X to pick a different pad button. Say Y. Run choice 1 again. You passed if that control kept the button you picked and the screen said "Kept your own setting for 1 control." Press T on that control to put TPM's choice back.
 
 ### Test 11: Crosshairs (light gun games)
 
@@ -184,8 +185,8 @@ Tests 9 to 28 try the rest of the program. Do the ones that fit your games and y
 
 ### Test 21: Move up from an older version (RC7 or RC8)
 
-1. Do this only if you used RC7 or RC8 before. Do not delete the old folder. (If you use RC8.1, RC8.2, RC8.3, RC8.4 or RC9, do Test 29 instead.)
-2. Extract the RC9.3 zip into a NEW empty folder.
+1. Do this only if you used RC7 or RC8 before. Do not delete the old folder. (If you use RC8.1, RC8.2, RC8.3, RC8.4, RC9, RC9.1, RC9.2 or RC9.3, do Test 29 instead.)
+2. Extract the RC9.4 zip into a NEW empty folder.
 3. Start TeknoParrot Manager from the new folder. Answer the first questions the same way you did before.
 4. At the main menu, type 14 and press Enter (Library health check).
 5. You passed if your games and settings are all still there and the health check ends in plain words with no failure.
@@ -206,8 +207,8 @@ Tests 9 to 28 try the rest of the program. Do the ones that fit your games and y
 
 ### Test 24: Games on another drive or folder
 
-1. Put a few game zip files in a folder on another drive, such as D:, or in a folder with a long name.
-2. Start TeknoParrot Manager. When it asks for the games folder, type that folder.
+1. Put a few game zip files in a folder on another drive, such as D:, or in a folder with a long name. This is your Game ZIP folder.
+2. Start TeknoParrot Manager. When it asks for the Game ZIP folder, type that folder. When it asks for the games folder (where games are unpacked), type a different, empty folder. Do not use the Game ZIP folder for both.
 3. Run AutoSync (menu 1).
 4. You passed if the games are set up and start. Write down any message that did not make sense.
 
@@ -243,27 +244,26 @@ These tests try the fixes made in RC8.2.
 
 ### Test 29: Update from RC8.1, RC8.2, RC8.3, RC8.4 or RC9 (menu 16)
 
-1. Do this only if you use RC8.1, RC8.2, RC8.3, RC8.4, RC9, RC9.1 or RC9.2 and RC9.3 is on the release page. Do not delete anything first.
+1. Do this only if you use RC8.1, RC8.2, RC8.3, RC8.4, RC9, RC9.1, RC9.2 or RC9.3 and RC9.4 is on the release page. Do not delete anything first.
 2. In your old version, at the main menu, type 16 and press Enter (Check for Updates).
 3. It should tell you a newer version is ready. It must ASK before it installs. Say yes.
 4. Wait until it says it is done. Close the program and start it again yourself.
-5. You passed if the title at the top now says v1.0 RC9.3, and your games and settings are all still there. Write down any message that did not make sense.
+5. You passed if the title at the top now says v1.0 RC9.4, and your games and settings are all still there. Write down any message that did not make sense.
 
-### Test 30: Preview before copying controls
+### Test 30: Preview before setting up controls
 
-1. Set up the controls in one game of each kind you have, the way you like them.
-2. At the main menu, type 4 and press Enter (Propagate Controls).
-3. You should see a list that says "Preview only. Nothing was saved." Read it.
-4. When it asks "Copy controls ... (Y/N, D = details)", type N and press Enter.
-5. Open TeknoParrot and look at your other games.
-6. You passed if NOTHING changed after you said N. Then run menu 4 again and type Y. You passed that part if it saved the controls and showed you where it put a backup of your settings.
+1. At the main menu, type 4 and press Enter (Controls), then type 1.
+2. You should see a list of what it would set up. Read it.
+3. When it asks if you want to set up these games, type N and press Enter.
+4. Open TeknoParrot and look at your games.
+5. You passed if NOTHING changed after you said N. Then run menu 4, choice 1 again and type Y. You passed that part if it saved the controls and showed you where it put a backup of your settings.
 
-### Test 31: Undo the control copy
+### Test 31: Undo the control setup
 
 1. Do this right after Test 30, when you typed Y.
-2. The program asks: "Undo these changes and put your game settings back as they were? (Y/N)". Type Y and press Enter.
+2. If the program asks "Undo these changes and put your game settings back as they were? (Y/N)", type Y and press Enter. Otherwise choose 15 (Restore backup) in the main menu and pick the backup it made.
 3. Open TeknoParrot and look at the games that were changed.
-4. You passed if they are back the way they were before you copied. If you type N (or just press Enter) nothing is undone. You can also undo later with menu 15 (Restore backup).
+4. You passed if they are back the way they were before. If you type N (or just press Enter) nothing is undone. You can also undo later with menu 15 (Restore backup).
 
 ### Test 32: The Game ZIP folder question
 
@@ -289,9 +289,9 @@ These tests try the fixes made in RC8.2.
 
 ### Test 35: Your controller is found
 
-1. Plug in an Xbox-style controller (wired or wireless) BEFORE you start the program. Then start it.
-2. When it asks about your controls, look for the line "Found: an Xbox-style controller."
-3. You should get ONE question: "Use the Xbox controller for all games?" Type Y. It prints a plan. It changes no game file (it only saves your answer in its own settings folder).
+1. Plug in a gamepad (wired or wireless) BEFORE you start the program. Then start it.
+2. When it asks about your controls, look for the line "Found: a gamepad that Windows sees as a standard (XInput) controller."
+3. You should get ONE question: "Use this controller for all games?" Type Y. It changes no game file (it only saves your answer in its own settings folder).
 4. Now close the program, unplug the controller, and start it again. Answer the control questions.
 5. You passed if step 3 asked one question, and step 4 asked the full list of questions like before. Tell us what controller you have.
 6. Stuck buttons, the standard arcade keys, key suggestions, light colors and "TPM noticed I changed my arcade encoder" need a real arcade encoder. They are in `docs/RC9-OWNER-TEST-PLAN.md`, Part 3 (steps 112 to 128).
@@ -352,9 +352,9 @@ These tests try the new parts of RC8.4. Do them first if you are short on time.
 ### Test 42: The control setup result is easy to read
 
 1. Use this only if some of your games have no controls set up in TeknoParrotUI. Skip this test if every game already has controls.
-2. At the main menu, type 4 and press Enter (Propagate Controls). Say yes when it asks.
+2. At the main menu, type 4 and press Enter (Controls), then type 1. Say yes when it asks.
 3. Read the result screen.
-4. You passed if games that were already set up and games skipped by your own rules are on separate lines, and every control family that has no game with your controls yet is named. You also pass if the next step tells you what to do in TeknoParrotUI and then which menu to run again. Write down anything that was hard to understand.
+4. You passed if games that were already set up and games left alone are on separate lines, and the screen tells you in plain words what to do next. Write down anything that was hard to understand.
 
 ### Test 43: LaunchBox official names and details
 
@@ -375,7 +375,7 @@ These tests try the new parts of RC8.4. Do them first if you are short on time.
 ### Test 45: LEDBlinky lighting
 
 1. Use this only if you use LEDBlinky. Skip this test if you do not.
-2. Run AutoSync (menu 1). When it asks "What should I do next?", choose [A] Check all games. (The lighting step is not shown after [N] New game only.) Go through the LaunchBox step. When it ends, you see "Optional: lighting for your arcade buttons."
+2. Run AutoSync (menu 1). When it asks "What should I do next?", choose [A] Check all games. (The lighting step is not shown after [N] New game only.) Go through the LaunchBox step. When it ends, you see "Optional: lighting for your cabinet."
 3. If it finds LEDBlinky on its own, you see "LEDBlinky was found on this PC." If not, it asks "Do you use LEDBlinky? Show me where it is." Choose [F] to show the folder, or [S] to skip.
 4. Choose [P] Preview first. You passed if it shows what it would add and changes nothing.
 5. Choose [A] Add lighting info to LEDBlinky. You passed if a saved copy of the LEDBlinky file is made first and the result names it.
@@ -383,9 +383,9 @@ These tests try the new parts of RC8.4. Do them first if you are short on time.
 
 ### Test 46: Games that need firmware or a game file
 
-1. Use this only if you have a PlayStation 3 game (RPCS3) or a Play! game. Skip this test if you have neither.
+1. Use this only if you have an arcade game that runs on PlayStation 3 style hardware (RPCS3) or a Play! game. Skip this test if you have neither.
 2. Start the game from TPM, or run Health check (Test 4).
-3. You passed if TPM tells you in plain words what is missing (the firmware or the game file) before the game starts. It failed if the game just closes with no explanation.
+3. You passed if TPM tells you in plain words what is missing (the firmware, which is the console's own system file, or the game file) before the game starts. It failed if the game just closes with no explanation.
 
 ### Test 47: Pick all games with A
 
@@ -428,16 +428,16 @@ These tests try the new parts of RC9. Do them first if you are short on time.
 3. You passed if the line says OK, or if it says "Needs attention" and the details name each game and say what to do. The details can say "Unknown game type", "Not available yet" (TeknoParrot lists the game as development only), "Emulator for type ... is not in your TeknoParrot folder", or "Pick the game file by hand".
 4. You failed if a game you can play is called unknown, or if the screen stops with an error.
 
-### Test 53: System 11 games
+### Test 53: TeknoS11 arcade games
 
-1. Use this only if you have System 11 games. Skip this test if you do not.
-2. Pick a System 11 game that needs two ZIP files (a child and a parent). Put only the child ZIP in your Game ZIP folder, then run AutoSync (menu 1). You passed if that game is not registered. Then put the parent ZIP in the same folder and run AutoSync again. You passed that part if the game is now registered.
-3. If you have the System 11 saved-files set, look for the screen "OPTIONAL: System 11 saved game files". Say yes. You passed if it says it copied and checked the files, and says which games the set has no files for.
+1. Use this only if you have arcade games that use the TeknoS11 loader (System 10, System 11, System 12, Sony ZN, Konami 573, Taito G-NET and similar boards). Skip this test if you do not.
+2. Pick one of these games that needs two ZIP files (a child and a parent). Put only the child ZIP in your Game ZIP folder, then run AutoSync (menu 1). You passed if that game is not registered. Then put the parent ZIP in the same folder and run AutoSync again. You passed that part if the game is now registered.
+3. If you have the saved-files set for these games, look for the screen "OPTIONAL: Saved game files for TeknoS11 arcade games". Say yes. You passed if it says it copied and checked the files, and says which games the set has no files for.
 4. Run AutoSync again. You passed if no file that was already there was replaced, and the screen does not ask you again when the set has nothing new.
 
 ### Test 54: A game set with only its parent ZIP
 
-1. Use this only if you have a game that needs a parent ZIP (a game set). Skip this test if you do not, or if the game is one of the 17 that the Eggman list registers by its parent ZIP (for example Dance Dance Revolution 2nd Mix Link).
+1. Use this only if you have a game that needs a parent ZIP (a game set). Skip this test if you do not, or if the game is one of the 17 that the Eggman list (a community-made list of TeknoParrot games) registers by its parent ZIP (for example Dance Dance Revolution 2nd Mix Link).
 2. Make a new folder that holds ONLY the parent ZIP, not the game's own ZIP. At the main menu, type 2 and press Enter (Register only). Pick that folder.
 3. You passed if no game is registered from that folder. Open TeknoParrot. You passed that part if the game does not show up from that folder.
 
@@ -485,14 +485,14 @@ These tests try the new parts of RC9. Do them first if you are short on time.
 2. Set up ReShade for one game first (Test 12). At the main menu, type 6 and press Enter. Type B (Use my bezel folder) and press Enter. Then choose the pick-bezels choice and give your folder.
 3. Read "Bezel preview. Nothing has been changed yet." You passed if each game shows a bezel and how sure the match is (High, Medium or Low), a Low match says "needs your choice", and a picture for a different sequel number is not picked for you.
 4. Apply it for one game. You passed if the bezel is copied and checked. If you placed a bezel yourself earlier, it must be kept unless you said to replace it.
-5. Start that game. Write down if the bezel shows. It may not show in games that run in exclusive fullscreen.
+5. Start that game. Write down if the bezel shows. It may not show in games that run in exclusive fullscreen (a mode where the game takes over the whole screen).
 6. Type 6, then B, then the undo choice. You passed if the bezel TPM copied is removed and your own bezel is back.
 
-### Test 61: Controls result names a game to set up first
+### Test 61: The controls check
 
-1. Use this only if some kinds of games (for example light gun or driving games) have no game with your controls yet. Skip this test if every kind has one.
-2. At the main menu, type 4 and press Enter (Propagate Controls). Read the result.
-3. You passed if, for each kind with no example game, it names one game to set up first in TeknoParrotUI, and says that choosing a device in the plan does not set up a game.
+1. Use this on any library.
+2. At the main menu, type 4 and press Enter (Controls), then type 3 (check which games have all their controls). Read the result.
+3. You passed if it says nothing was changed and shows how many games have all their controls, some, or none.
 4. Run AutoSync or Register only. You passed if the registration screen ends with "Registration run finished" (not "Done.").
 
 ### Test 62: PostgreSQL setup waits for you
@@ -506,11 +506,11 @@ These tests try the new parts of RC9. Do them first if you are short on time.
 1. Use this only if you are comfortable with PowerShell and you have a controller list such as RetroBat's teknoparrot.yml. Skip this test if not.
 2. In PowerShell, in the TPM folder, run: `.\TeknoParrot-Manager.ps1 -MappingEvidenceFile "C:\path\to\teknoparrot.yml" -ValidationRoot "C:\path\to\TeknoParrot" -ValidationJsonPath "C:\path\to\new-details.json"`.
 3. You passed if it says nothing was changed and prints plain counts, and the only new file is the one you named. Check that no file in GameProfiles or UserProfiles changed.
-4. Run it again with the same names. You passed if the two details files are identical.
+4. Run it again with the same list and TeknoParrot folder, but name a different details file: `-ValidationJsonPath "C:\path\to\second-details.json"`. You passed if the plain counts are the same and the two details files say the same things.
 
-### Test 64: Startup files for Chihiro or PlayStation 3 (ask once, one Y)
+### Test 64: Startup files for Chihiro or PlayStation 3 style arcade games (ask once, one Y)
 
-1. Use this only if you have a registered Chihiro or PlayStation 3 game and your own Supplementary game collection. Skip this test if not.
+1. Use this only if you have a registered Chihiro game or an arcade game that runs on PlayStation 3 style hardware (for example a Tekken 6 arcade game), and your own Supplementary game collection. Skip this test if not.
 2. Run Register only (menu 2), or choose F in the Library health check (menu 14), while the startup files are missing.
 3. If TPM does not find the files, it asks for your Supplementary folder. Choose your real folder. You passed if it asks only once in this run and does not ask again on the next run. (If you press Enter to skip, nothing is saved and it asks again next time.)
 4. Read the list. It should say what it found, what is already in place, what is missing (by file name) and the folders it searched. Press Y once.
@@ -518,13 +518,13 @@ These tests try the new parts of RC9. Do them first if you are short on time.
 
 ### Test 65: Update screen at start (one Y)
 
-1. Do this only on a PC that still runs an older version while RC9.3 is on the release page. Skip this test if not.
+1. Do this only on a PC that still runs an older version while RC9.4 is on the release page. Skip this test if not.
 2. Start TPM. You passed if the Update Available screen shows before the "use saved settings?" question, with the choices Y = Update now, N = Remind me later and V = View release notes.
 3. Press V, read the notes, then choose again. Press Y. You passed if the update starts right away and it does not ask a second Y/N question.
 
 ### Test 66: A game with two versions, or two profiles
 
-1. Use games from the Eggman collection. Good ones: two versions of Chaos Code - New Sign of Catastrophe, and After Burner Climax (a Lindbergh game). Skip this test if you do not have them.
+1. Use games from the Eggman collection (a community-made list of TeknoParrot games). Good ones: two versions of Chaos Code - New Sign of Catastrophe, and After Burner Climax (a Lindbergh game). Skip this test if you do not have them.
 2. Register the games (AutoSync or Register only).
 3. You passed if both versions of the first game were registered or one was reported as a duplicate with a reason. It failed if one version is missing and nothing says why.
 4. Open TeknoParrot. You passed if After Burner Climax shows both its Lindbergh profile and its ElfLdr2 profile. If the ElfLdr2 one is missing, open the log and look for "was left alone because none of its game files is in folder".
@@ -552,7 +552,7 @@ Write these five things in your issue. Reports with all five can be fixed fast.
 | What really happened | Black screen, then it closed |
 | Screenshot or photo | Attach it |
 
-Also make the support report (the help file). Right after the problem, do not close the program. At the main menu, type 17 and press Enter (Create Support Package). It makes a file. Attach that file to your GitHub issue. This is extremely important.
+Also make the support report (the help file). Right after the problem, do not close the program. At the main menu, type 17 and press Enter (Create Support Package). It makes a file. Attach that file to your GitHub issue. This is extremely important. If the program already closed or crashed, start TeknoParrot Manager again and make the support report right away, and write in your issue that it crashed.
 
 Please do not:
 

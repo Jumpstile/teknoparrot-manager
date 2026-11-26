@@ -28,7 +28,7 @@ BeforeAll {
 
     $script:F80RecapArgs = @{
         AutoSyncRan = $true; ZipsExtracted = 7; NewlyRegistered = 3; AlreadyPresent = 10; DatAction = 'Reused'
-        ThumbnailsRequested = $true; BackupPath = 'C:\Backups\Run1'; LogPath = 'C:\Logs\TeknoParrot-Manager.log'
+        ThumbnailsRequested = $true; ThumbnailsDownloaded = 2; BackupPath = 'C:\Backups\Run1'; LogPath = 'C:\Logs\TeknoParrot-Manager.log'
         ControlsStatusPath = 'C:\Reports\controls.txt'
     }
 
@@ -276,11 +276,10 @@ Describe 'FIX80 last screen: Next (audit item 2)' {
         $with.Next | Should -BeExactly 'Open TeknoParrotUI and check that your games appear. Then fix the items under ACTION REQUIRED above.'
         $withoutText = Get-F80BlockText -Blocks $without.DetailBlocks
         $withoutText | Should -Not -Match 'ACTION REQUIRED items'
-        $withoutText | Should -Match 'Step 2: Bind one game of each control type, then re-run and propagate\.'
-        $withoutText | Should -Match 'Step 3: Test one propagated game before trusting the rest\.'
+        $withoutText | Should -Match 'Step 2: Test one game before trusting the rest\.'
         $withText = Get-F80BlockText -Blocks $with.DetailBlocks
         $withText | Should -Match 'Step 2: Work through the ACTION REQUIRED items above\.'
-        $withText | Should -Match 'Step 4: Test one propagated game before trusting the rest\.'
+        $withText | Should -Match 'Step 3: Test one game before trusting the rest\.'
     }
 
     It 'keeps the ReShade and dgVoodoo2 hints under Details, and only when those steps ran' {
@@ -298,6 +297,16 @@ Describe 'FIX80 last screen: Next (audit item 2)' {
             'Run mode 5 (Crosshair setup) to preview and deploy them to lightgun games.'
         )) { $text | Should -Match ([regex]::Escape($fact)) }
         $both.Next | Should -Not -Match 'Home|DLL|PNG'
+    }
+
+    It 'says under Details that the original ZIP files are never deleted and are still needed for a reset' {
+        # Mutation: drop the block -> a user cannot tell what to do with the ZIP files after unpacking.
+        $steps = Get-TpmRegistrationNextSteps -HasActionRequired $false -ReShadeDone $false -DgVoodoo2Done $false
+        $text = Get-F80BlockText -Blocks @($steps.DetailBlocks | Where-Object { $_.Heading -eq 'Your game ZIP files' })
+        $text | Should -Match 'never deletes them'
+        $text | Should -Match 'needs the original ZIP'
+        $text | Should -Match 'archive or delete the ZIP files yourself'
+        $steps.Next | Should -Not -Match 'ZIP'
     }
 
     It 'prints one Next line and then asks only for Details, inside the console at <Width> columns' -TestCases @(
@@ -666,6 +675,25 @@ Describe 'FIX80 LaunchBox step (audit item 16)' {
         (Get-F80Flat) | Should -Not -Match 'same preview'
     }
 
+    It 'shows the plan when only the game names differ from the preview, and still hides an identical one' {
+        # Mutation: compare only the summary text -> a plan with clean names is hidden as "the same preview" after official names were shown.
+        Install-F80Mocks
+        $summary = 'Preview only, nothing was written. A write would add 3 game entries.'
+        $previewed = New-F80LaunchBoxResult -Summary $summary
+        $previewed | Add-Member -NotePropertyName TitleChanges -NotePropertyValue @([pscustomobject]@{ Old = 'ghostsq'; New = 'Ghost Squad Evolution'; Id = '77'; Kind = 'New' }) -Force
+        $plan = New-F80LaunchBoxResult -Summary $summary
+        $plan.Results = @{ TeknoParrot = 3 }
+        $plan.Reason = 'PREVIEW'
+        $plan | Add-Member -NotePropertyName WouldChangeFiles -NotePropertyValue 1 -Force
+        $plan | Add-Member -NotePropertyName TitleChanges -NotePropertyValue @([pscustomobject]@{ Old = 'ghostsq'; New = 'Ghostsq'; Id = ''; Kind = 'New' }) -Force
+        Write-TpmLaunchBoxPlan -Result $plan -AlreadyShownSummary (Get-TpmLaunchBoxPlanSignature -Result $previewed) -Unattended
+        (Get-F80Flat) | Should -Match 'would get 3 games'
+        (Get-F80Flat) | Should -Not -Match 'same preview'
+        Install-F80Mocks
+        Write-TpmLaunchBoxPlan -Result $previewed -AlreadyShownSummary (Get-TpmLaunchBoxPlanSignature -Result $previewed) -Unattended
+        (Get-F80Flat) | Should -Match 'same preview'
+    }
+
     It 'keeps the preview screen inside the console at <Width> columns, with no six lines in a row' -TestCases @(
         @{ Width = 40 }, @{ Width = 60 }, @{ Width = 120 }
     ) {
@@ -748,7 +776,7 @@ Describe 'FIX80 migration question (audit item 17)' {
         @($blocks | ForEach-Object { $_.Heading }) | Should -Be @('Where the files go', 'TeknoParrot-Manager.config.json', 'TeknoParrot-Manager.log', 'CustomThumbnails')
         $general = @($blocks[0].Lines)
         $general | Should -Contain 'Folder: C:\Tpm\TeknoParrot\TeknoParrotManager'
-        $general | Should -Contain 'Not moved: games, ROM ZIP sources, TeknoParrot installation files, LaunchBox data, other frontend data, and unrelated user files.'
+        $general | Should -Contain 'Not moved: games, ROM ZIP sources, TeknoParrot installation files, LaunchBox data, and other frontend data. Everything inside the old SupportPackages folder is moved with it.'
         $general | Should -Contain 'If you choose N: nothing is moved. TeknoParrot Manager starts normally and asks again next time.'
         $general | Should -Contain 'Report, saved only if you choose Y: C:\Tpm\Reports\TPM-migration-1.md'
         @($blocks[2].Lines) | Should -Be @('Group: Logs', 'Goes to: C:\Tpm\TeknoParrot\TeknoParrotManager\Logs\TeknoParrot-Manager.log')

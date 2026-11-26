@@ -117,8 +117,7 @@ Describe 'A dat file set only in the overrides file is known before the start-up
         )) {
             $overridesPath = Join-Path $TestDrive ('psd-ov-' + [guid]::NewGuid().ToString('N') + '.json')
             [System.IO.File]::WriteAllText($overridesPath, (@{ datFile = $case.Dat } | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
-            $noSyncList = @(); $onlySyncList = @(); $noPropagateList = @(); $forceArchetypeMap = @{}; $familyOverrideMap = @{}
-            $canonicalArchetypeMap = @{}; $subFolderMap = @{}; $validFamilies = @('button', 'driving', 'lightgun', 'trackball', 'analog', 'spinner')
+            $noSyncList = @(); $onlySyncList = @(); $subFolderMap = @{}
             $datFilePath = $case.Existing
             function Write-Log { param($Message) }
             function Show-TpmOverridesNotice { param($Counts, $FilePath) }

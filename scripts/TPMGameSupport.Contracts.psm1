@@ -755,7 +755,7 @@ function Test-TPMGameSupportContractRegistryV13 {
             EveryRecordHasReason = (@($d.Contracts | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ClassificationReason) }).Count -eq 0)
             EveryRecordHasProfileEvidenceHash = (@($d.Contracts | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.Evidence.ProfileXmlSha256) }).Count -eq 0)
             SourceIdentityComplete = $sourceComplete
-            ClosureEligible = ($valid -and $sourceComplete)
+            ClosureEligible = ($valid -and $sourceComplete -and @($d.Contracts | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ClassificationReason) -or [string]::IsNullOrWhiteSpace([string]$_.Evidence.ProfileXmlSha256) }).Count -eq 0)
         }
         return [pscustomobject]@{ Valid = $valid; Errors = $errors.ToArray(); ContractCount = $contractCount; ReleaseGate = [pscustomobject]$closure; ClassificationTotals = [pscustomobject]$totals }
     } catch {
@@ -806,7 +806,7 @@ function Test-TPMGameSupportContractRegistryV1 {
         if ($totals.UNCLASSIFIED -gt 0) { [void]$errors.Add('UNCLASSIFIED_RECORDS_PRESENT') }
         $audit = @($d.BackendDerivationAudit); foreach ($row in $audit) { if ([int]$row.MatchedCount -ne @($row.MatchedProfileCodes).Count) { throw 'GAME_SUPPORT_CONTRACT_SCHEMA_INVALID: backend audit count mismatch' } }
         $source = $d.Source; $sourceComplete = (-not [string]::IsNullOrWhiteSpace([string]$source.Repository)) -and (-not [string]::IsNullOrWhiteSpace([string]$source.Commit)); $valid = ($errors.Count -eq 0)
-        $closure = [ordered]@{ ProfileCount = $contractCount; ExpectedProfileCount = $expected; ProfileCountMatches = ($null -eq $expected -or $expected -eq $contractCount); ZeroUnclassified = ($totals.UNCLASSIFIED -eq 0); NoDuplicateProfileCodes = ($profiles.Count -eq $contractCount); EveryRecordHasPosture = $true; EveryRecordHasReason = (@($d.Contracts | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ClassificationReason) }).Count -eq 0); EveryRecordHasProfileEvidenceHash = (@($d.Contracts | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.Evidence.ProfileXmlSha256) }).Count -eq 0); SourceIdentityComplete = $sourceComplete; ClosureEligible = ($valid -and $sourceComplete) }
+        $closure = [ordered]@{ ProfileCount = $contractCount; ExpectedProfileCount = $expected; ProfileCountMatches = ($null -eq $expected -or $expected -eq $contractCount); ZeroUnclassified = ($totals.UNCLASSIFIED -eq 0); NoDuplicateProfileCodes = ($profiles.Count -eq $contractCount); EveryRecordHasPosture = $true; EveryRecordHasReason = (@($d.Contracts | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ClassificationReason) }).Count -eq 0); EveryRecordHasProfileEvidenceHash = (@($d.Contracts | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.Evidence.ProfileXmlSha256) }).Count -eq 0); SourceIdentityComplete = $sourceComplete; ClosureEligible = ($valid -and $sourceComplete -and @($d.Contracts | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ClassificationReason) -or [string]::IsNullOrWhiteSpace([string]$_.Evidence.ProfileXmlSha256) }).Count -eq 0) }
         return [pscustomobject]@{ Valid = $valid; Errors = $errors.ToArray(); ContractCount = $contractCount; ReleaseGate = [pscustomobject]$closure; ClassificationTotals = [pscustomobject]$totals }
     } catch { [void]$errors.Add($_.Exception.Message); return [pscustomobject]@{ Valid = $false; Errors = $errors.ToArray(); ContractCount = $contractCount; ReleaseGate = [pscustomobject]@{ ProfileCount = $contractCount; ExpectedProfileCount = $expected; ProfileCountMatches = $false; ZeroUnclassified = $false; ClosureEligible = $false }; ClassificationTotals = [pscustomobject]@{} } }
 }
@@ -817,6 +817,7 @@ function Get-TPMGameSupportContractRegistryV1 {
     $registry = ConvertFrom-TPMGameSupportOrderedJsonV1 -Json ([System.IO.File]::ReadAllText($Path))
     $validation = Test-TPMGameSupportContractRegistryV1 -Registry $registry
     if (-not $validation.Valid) { throw "GAME_SUPPORT_CONTRACT_INVALID: $($validation.Errors -join '; ')" }
+    if ([bool]$registry.ReleaseGate.ClosureEligible -ne [bool]$validation.ReleaseGate.ClosureEligible) { throw 'GAME_SUPPORT_CONTRACT_INVALID: ReleaseGate.ClosureEligible does not match the registry contents.' }
     return $registry
 }
 
@@ -834,7 +835,12 @@ function Write-TPMGameSupportContractRegistryV1 {
     else { throw "GAME_SUPPORT_CONTRACT_INVALID: unsupported SchemaVersion '$version'" }
     $parent = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($Path)); if ($parent -and -not (Test-Path -LiteralPath $parent -PathType Container)) { [void][System.IO.Directory]::CreateDirectory($parent) }
     $json = ConvertTo-TPMGameSupportCanonicalJsonV1 ($Registry | ConvertTo-Json -Depth 40 -Compress)
-    [System.IO.File]::WriteAllText($Path, ($json + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $temp = $fullPath + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+    try {
+        [System.IO.File]::WriteAllText($temp, ($json + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $temp -Destination $fullPath -Force
+    } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue } }
 }
 
 Export-ModuleMember -Function New-TPMGameSupportContractV1,New-TPMGameSupportContractV13,New-TPMGameSupportExternalSoftwareV13,New-TPMGameSupportContractRegistryV1,New-TPMGameSupportContractRegistryV13,Test-TPMGameSupportContractV1,Test-TPMGameSupportContractRegistryV1,Get-TPMGameSupportContractRegistryV1,Get-TPMGameSupportContractV1,Write-TPMGameSupportContractRegistryV1,Get-TPMGameSupportContractIdV1,Get-TPMGameSupportValueV1,Get-TPMGameSupportHistoricalSortKeyV1,Sort-TPMGameSupportByOrdinalPropertyV1,ConvertTo-TPMGameSupportCanonicalJsonV1

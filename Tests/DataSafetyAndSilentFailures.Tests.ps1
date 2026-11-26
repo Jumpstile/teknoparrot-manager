@@ -277,11 +277,11 @@ Describe 'A ZIP that failed or was refused is never a green AutoSync recap' {
         @($bad.Needs) | Should -Contain '2 ZIP files could not be unpacked, so those games are not set up. The log has the reason.'
     }
 
-    It 'the recap says registration is finished but controls are not when games have no reference' {
-        # Mutation: drop ControlsNoReference -> Done reads as if controls were set up.
-        $recap = Get-TpmRegistrationRecap -AutoSyncRan $false -NewlyRegistered 2 -ControlsNoReference 25
+    It 'the recap says Attention when the controller layout step could not set up some games' {
+        # Mutation: drop ControlsLayoutFailed -> a failed controls step reads as a clean run.
+        $recap = Get-TpmRegistrationRecap -AutoSyncRan $false -NewlyRegistered 2 -ControlsLayoutFailed 3
         $recap.Status | Should -Be 'Attention'
-        (@($recap.Needs) -join ' ') | Should -Match 'Registration is finished, but controls are not: 25 games have no controls yet'
+        (@($recap.Needs) -join ' ') | Should -Match '3 games could not be set up with your controller layout'
     }
 }
 

@@ -86,7 +86,7 @@ ReShade folder together with a copy of the upstream license text where the upstr
 supplies one and a short TeknoParrot notice (Shaders\TPM\Notices\<effect>\). Each effect remains
 under its own license; nothing in this file relicenses it, and the restrictions above apply only to
 the Materials. The files are separate shader files loaded by ReShade; TeknoParrot Manager does not
-edit them. An effect is offered by the program only while its recorded licence evidence (pinned bytes,
+edit them. An effect is offered by the program only while its recorded license evidence (pinned bytes,
 in-file notices or license copies, include closure) is complete and current.
 
 Effect id | Upstream repository @ pinned commit | License | Attribution

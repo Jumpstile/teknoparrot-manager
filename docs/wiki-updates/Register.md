@@ -26,7 +26,7 @@ Register only works on games that are already in your games folder. It does not 
 | `Existing profile files: N` | These games already had a profile. They are left as they are. |
 | Games listed under ACTION REQUIRED | TeknoParrot Manager could not choose safely. You pick the profile yourself in TeknoParrotUI. |
 
-An existing profile is never overwritten by registration.
+An existing profile is never overwritten by registration. Two exceptions, both with a backup first: if you choose `S` for a duplicate (below), the existing profile is changed to point to the other folder; and if an already-added game's saved path points into another game's folder, it is fixed to the game's own folder.
 
 A real run ends with the banner `Registration run finished.` It means the run is over. It does not mean every game's controls are set up.
 
@@ -36,15 +36,15 @@ A real run ends with the banner `Registration run finished.` It means the run is
 
 ## Region question
 
-After new games are registered, you are asked once:
+After new games are registered, you are asked once (only if a new game offers a region choice):
 
 ```
 Which country do you want your games to start in?
 ```
 
-Type the number of a country to set it on the new games that offer it, or `0` to leave every game as it is. Only countries the games really offer are listed. A game never gets a region it does not have. A region you chose earlier is kept. Games with no automatic choice are not changed.
+Type the number of a country to set it on the new games that offer it, or `0` to leave every game as it is. To see which games are in a country first, type `L` and its number (example: `L1`). Only countries the games really offer are listed. A game never gets a region it does not have. A region you chose earlier is kept. Games with no automatic choice are not changed.
 
-The question is not asked in a preview, or when none of the new games offers a region. To set or change the region later, use [[Region Setup]] (menu 11).
+The question is not asked in a preview, in an unattended run, or when none of the new games offers a region. To set or change the region later, use [[Region Setup]] (menu 11).
 
 ---
 
@@ -52,9 +52,9 @@ The question is not asked in a preview, or when none of the new games offers a r
 
 - **Games with a second program.** A few games (for example the Initial D Arcade Stage series) start a second program next to the main one. Register fills in the second game path when that file sits in the same folder as the main one. A second path that already points at a file that exists is kept.
 - **Very long folder paths.** Games in folders longer than 259 characters are found and set up like any other game. Some games still cannot start from a long path. They are listed under ACTION REQUIRED with the short folder name to use.
-- **Startup files.** Some emulators need files before a game can start: PlayStation 3 firmware (RPCS3), PCSX2x6 firmware, Chihiro (CxbxR) firmware, and a settings file for each Play! game. A missing file shows up in ACTION REQUIRED. In a normal run, TeknoParrot Manager then offers to copy the files from your own game collection after checking them against the Eggman DAT list. It never downloads them. See [[Game Startup Files]].
-- **Games that come as a set of ZIPs.** Some games (System 11 games, for example) name two ZIPs: the game's own ZIP and a parent ZIP. A game like this is registered only when both ZIPs are in the same folder. A folder that holds only the parent ZIP does not register the game. Put both ZIPs in one folder, then run again. If a System 11 game also needs a disc image (`.chd`), it is chosen for you when exactly one is there. When there are several, none is guessed.
-- **System 11 saved files.** In a normal run, if a registered System 11 game has no saved files yet, you are offered an optional step to copy them from your own saved-files set. See [[Game Startup Files]].
+- **Startup files.** Some emulators need files before a game can start: firmware for arcade games on PlayStation 3 style hardware (RPCS3), PCSX2x6 firmware, Chihiro (CxbxR) firmware, and a settings file for each Play! game. A missing file shows up in ACTION REQUIRED, which tells you which one applies. In a normal run, TeknoParrot Manager then offers to copy the files from your own game collection after checking them against the Eggman DAT list. It never downloads them. See [[Game Startup Files]].
+- **Games that come as a set of ZIPs.** Some games (TeknoS11 arcade games, for example) name two ZIPs: the game's own ZIP and a parent ZIP. A game like this is registered only when both ZIPs are in the same folder. A folder that holds only the parent ZIP does not register the game. Put both ZIPs in one folder, then run again. If one of these games also needs a disc image (`.chd`), it is chosen for you when exactly one is there. When there are several, none is guessed.
+- **Saved game files for TeknoS11 arcade games.** In a normal run, if a registered arcade game that uses the TeknoS11 loader (System 10, System 11, System 12, Sony ZN, Konami 573, Taito G-NET and similar boards) has no saved files yet, you are offered an optional step to copy them from your own saved-files set. See [[Game Startup Files]].
 
 ---
 
@@ -64,7 +64,8 @@ Next, TeknoParrot Manager goes through these steps. Each one asks first:
 
 1. **Repair game paths.** `Check for and repair broken game paths now? (Y/N)` fixes games whose saved path points to a missing file.
 2. **Pictures.** `Download the missing game pictures? (Y/N, D = use your own pictures)` fetches small icons from the TeknoParrotUIThumbnails project on GitHub. It never downloads games, and never replaces an icon you already have. A missing icon does not mean the game is unsupported. To use your own pictures, put `ProfileCode.png` files in `<your TeknoParrot folder>\TeknoParrotManager\Assets\CustomThumbnails\`.
-3. **Controls.** `Copy controls from N games to your other games of the same type? (Y/N, D = details)` -- see [[Propagate Controls]].
+   After the download, TeknoParrot Manager names the games that still have no picture and asks `Do you want to pick your own pictures for some of them? (Y/N, D = Details)`. If you say Y, you choose the games and pick one PNG file for each.
+3. **Controller layout.** The same screen as [[Controls]], choice 1. It sets up your games with the layout you chose, and shows a preview first. In a Preview run it only shows what would change. In an unattended run it uses your saved layout, or skips if you have not chosen one.
 
 ---
 
@@ -76,7 +77,7 @@ At the end of a normal run (not a preview), TeknoParrot Manager offers to add yo
 
 ## ACTION REQUIRED list
 
-At the end, TeknoParrot Manager prints a list of what needs your attention and saves it as `TeknoParrot-Manager-ActionItems.txt` in `<your TeknoParrot folder>\TeknoParrotManager\Reports\`. A Save window lets you choose another place. A preview saves nothing.
+At the end, TeknoParrot Manager prints a list of what needs your attention and saves it as `TeknoParrot-Manager-ActionItems.txt` in `<your TeknoParrot folder>\TeknoParrotManager\Reports\`. A preview saves nothing.
 
 <details><summary>Details: the sections of the list</summary>
 
@@ -85,7 +86,6 @@ At the end, TeknoParrot Manager prints a list of what needs your attention and s
 | Register these games in TeknoParrotUI | Games it could not pick a profile for, or whose only matching profile is used by another folder. Add each one yourself in TeknoParrotUI. |
 | Fix these game paths in TeknoParrotUI | Broken paths it could not fix. |
 | Extract these games first, then re-run repair | Profiles whose game is not unzipped yet. Use AutoSync, then run again. |
-| Controls skipped by design | Games whose control type has no usable example game yet. Nothing failed. Set up one game of that type yourself, then copy controls. This is shown (and saved) even when it is the only thing left. |
 | Game folders not matched to a TeknoParrot profile | Folders that match no profile. Update TeknoParrot, open TeknoParrotUI once, then run Register again. They may be games TeknoParrot does not support yet, tools, or games whose main file is named differently than TeknoParrot expects. |
 | Path too long -- these games may fail to launch | Raw Thrills games and Yu-Gi-Oh! Duel Terminal 6 have a short path limit. It shows the folder name to use. |
 | File version mismatch -- these games need a specific older file | BlazBlue games (`iDmacDrv32.dll`) and Tekken Tag Tournament 2 (`EBOOT.BIN`) need an older file. It shows the file name and the checksums. |
@@ -112,7 +112,7 @@ TeknoParrot Manager first matches the game's program file name to the profiles. 
 
 A close match (score 0.72 or higher, and clearly better than the next one) is registered and shown as `fuzzy`. Anything less sure goes to ACTION REQUIRED with its best guess.
 
-If a match is wrong, open TeknoParrotUI and set the right profile and game file for that game. The `forceArchetype` setting in the overrides file only changes which game controls are copied from. It does not change registration.
+If a match is wrong, open TeknoParrotUI and set the right profile and game file for that game.
 
 The DAT list is set up at first start (see [[Setup]]). TeknoParrot Manager never saves it inside your TeknoParrot folder.
 

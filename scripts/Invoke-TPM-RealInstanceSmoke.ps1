@@ -93,7 +93,7 @@ if ([string]::IsNullOrWhiteSpace($HarnessRoot)) {
 
 $stamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $reportDir = if ([string]::IsNullOrWhiteSpace($ReportDirectory)) { Join-Path $HarnessRoot "Reports\$stamp" } else { [IO.Path]::GetFullPath($ReportDirectory) }
-$backupDir = Join-Path $HarnessRoot "Backups\$stamp"
+$backupDir = Join-Path $HarnessRoot ('Backups\{0}-{1}' -f $stamp, [guid]::NewGuid().ToString('N').Substring(0, 8))
 # ADR155-0309 round 3: HarnessRoot is this harness's own top-level trusted
 # boundary, but Assert-TPMOwnedDirectoryV1 requires a trusted ROOT to
 # already exist -- HarnessRoot itself may not exist yet on a first run, so
@@ -246,7 +246,7 @@ function Get-TreeHash {
     $resolved = (Resolve-Path -LiteralPath $Path).Path
     $base = $resolved.TrimEnd('\')
     # A folder that cannot be listed is reported as one entry with no name, which Compare-TreeSnapshot counts as skipped.
-    Get-ChildItem -LiteralPath $resolved -Recurse -File -ErrorAction SilentlyContinue -ErrorVariable listErrors |
+    Get-ChildItem -LiteralPath $resolved -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable listErrors |
         Sort-Object FullName |
         ForEach-Object {
             $relative = $_.FullName
@@ -752,7 +752,7 @@ function Invoke-TPMUnattendedRootBinding {
             try {
                 # An unattended TPM start moves a program-folder settings file into the TeknoParrot folder's own State folder without asking.
                 # That copy did not exist before this run and the program-folder file is gone, so it is the override this run wrote: remove it.
-                if ($overrideWritten -and $migratedConfigPath -and -not $migratedExistedBefore -and (Test-Path -LiteralPath $migratedConfigPath -PathType Leaf) -and -not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
+                if ($overrideWritten -and $overrideSha -and $migratedConfigPath -and -not $migratedExistedBefore -and (Test-Path -LiteralPath $migratedConfigPath -PathType Leaf) -and -not (Test-Path -LiteralPath $ConfigPath -PathType Leaf) -and ((Get-TPMBytesSha256 -Bytes ([System.IO.File]::ReadAllBytes($migratedConfigPath))) -ceq $overrideSha)) {
                     Remove-Item -LiteralPath $migratedConfigPath -Force -ErrorAction Stop
                 }
                 # The migration also keeps a backup copy of what it moved. A copy in a backup folder made during this run, with exactly the
@@ -1721,7 +1721,7 @@ function New-CertificationScorecard {
     # item above: unattended mode marks this item Status = 'NotApplicable'
     # rather than reusing smoke-mode wording as if it were evidence.
     $smokeFileSafetyDetails = if ($Results.SmokeMode) {
-        'no unexpected changes in smoke mode'
+        $(if ($snapshotClean) { 'no unexpected changes in smoke mode' } else { 'unexpected file changes were found in smoke mode (see the file safety details)' })
     } else {
         'not applicable in unattended mode -- file-safety diffing is a smoke-mode-only invariant, not asserted against real unattended runs'
     }
@@ -2397,7 +2397,7 @@ try {
     # Issue #151: "live thumbnail evidence" and "live controls evidence"
     # are conditional, "(when displayed)" evidence slots -- this harness
     # does not itself drive TeknoParrot-Manager.ps1's live thumbnail
-    # download (AutoSync) or Propagate Controls flows (both require
+    # download (AutoSync) or Controls menu flows (both require
     # interactive menu choices this read-only/-Unattended harness never
     # makes), so neither is ever genuinely displayed by a certification
     # run today. Recorded as explicitly Skipped, with the real reason, so
@@ -2405,7 +2405,7 @@ try {
     # not applicable to this harness's current scope, rather than silently
     # missing from the evidence list.
     [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'live-thumbnail-evidence' -Skip -SkipReason 'not displayed -- this harness does not drive TeknoParrot-Manager.ps1''s live thumbnail download flow')
-    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'live-controls-evidence' -Skip -SkipReason 'not displayed -- this harness does not drive TeknoParrot-Manager.ps1''s live Propagate Controls flow')
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'live-controls-evidence' -Skip -SkipReason 'not displayed -- this harness does not drive TeknoParrot-Manager.ps1''s live Controls menu flow')
 
     Write-TPMGateHeader -Gate 'Smoke file safety' -Purpose 'Confirms nothing changed in UserProfiles/GameProfiles during this smoke run' -Expected 'no unexpected file changes'
     $postUserProfiles = Get-TreeHash $userProfilesPath

@@ -83,6 +83,7 @@ Describe 'FIX10 BLOCKER 1: CursorHide never closes a failed or unverified stage 
         }
         function Write-Log { param([string]$msg) }
         function Write-Host {}
+        function Get-TpmGameTitle { param([string]$Code) return $Code }
         . ([scriptblock]::Create((Get-Fx10FunctionText -Name @('Invoke-CursorHideSetup', 'ConvertTo-XPathStringLiteral'))))
 
         function New-Fx10CursorProfiles {

@@ -15,7 +15,7 @@ BeforeAll {
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:F125ProductPath, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { throw 'FIX125 tests could not parse the production script.' }
     $script:F125Ast = $ast
-    # FIX129: the quoted-name reader and the redaction helper are part of the judgement path now.
+    # FIX129: the quoted-name reader and the redaction helper are part of the judgment path now.
     foreach ($name in @('Get-PostgresRestoreJudgement', 'Get-PostgresKnownConstraintRestoreWarnings', 'ConvertFrom-PostgresQuotedIdentifier', 'ConvertTo-PostgresRedactedText', 'Invoke-Postgres83RestoreCommandChecked', 'Format-TpmCountNoun', 'Write-TpmPostgresSetupDetails', 'Get-TpmPostgresSetupGames', 'Get-TpmPostgresSetupGameName', 'Get-TpmPostgresSetupGameDetail', 'Get-TpmTransactionField')) {
         $fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
         if ($null -eq $fn) { throw ('FIX125 tests: function {0} not found in the production script.' -f $name) }
@@ -180,9 +180,9 @@ Describe 'FIX125 Get-PostgresRestoreJudgement accepts only a clean restore or th
     }
 
     It 'accepts the known warnings for any database name (there is no name list)' {
-        # Mutation: bring back a list of database names in the judgement path -> a bundled backup under another name rolls everything back.
+        # Mutation: bring back a list of database names in the judgment path -> a bundled backup under another name rolls everything back.
         # FIX129: the old version of this test could not fail, because the Checked function never passed the name on. Now names that
-        # are in no list go through the Checked function, and the three functions of the judgement path are checked for a name list and
+        # are in no list go through the Checked function, and the three functions of the judgment path are checked for a name list and
         # for a name input (Fix129.PostgresToolResults.Tests.ps1 repeats the first part with the real runner).
         foreach ($database in @('GameDBPPL12', 'GameDB06', 'x', ('Db' + [guid]::NewGuid().ToString('N')), 'gamedbppl13', 'ZZZ_unlisted_999')) {
             $script:F125Exit = 1; $script:F125Output = New-F125Output -Blocks (Get-F125FiveBlocks); $script:F125TimedOut = $false
@@ -201,7 +201,7 @@ Describe 'FIX125 Get-PostgresRestoreJudgement accepts only a clean restore or th
     }
 }
 
-Describe 'FIX125 Invoke-Postgres83RestoreCommandChecked uses the judgement' {
+Describe 'FIX125 Invoke-Postgres83RestoreCommandChecked uses the judgment' {
     It 'finishes with the known warnings, keeps the count and the names, and logs the command' {
         # Mutation: set Succeeded without recording AcceptedWarningCount -> the Details line cannot say how many warnings there were.
         $r = Invoke-F125Checked -ExitCode 1 -Output (New-F125Output -Blocks (Get-F125FiveBlocks))

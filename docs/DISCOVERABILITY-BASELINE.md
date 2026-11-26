@@ -2,9 +2,9 @@
 
 This is the evidence record for issue #238. It is an audit artifact, not
 current-release installation guidance. The source-controlled contract is
-`.github/repository-metadata.json`; live GitHub repository settings must be
-checked against it during release preparation and after publication under
-`RELEASE-SAFETY-CHECKLIST.md` and issue #237.
+`.github/repository-metadata.json`; live GitHub repository settings should be
+checked against it during release preparation and after publication (issue #237).
+`RELEASE-SAFETY-CHECKLIST.md` does not list this check yet.
 
 ## Baseline: 2026-08-16, before #238
 
@@ -58,8 +58,8 @@ claimed.
   description/homepage/topic contract.
 - `Tests/QualitySystem.Tests.ps1` validates the contract, the supported topic
   set, and the README's canonical top-of-page identity and links.
-- `RELEASE-SAFETY-CHECKLIST.md` requires a live GitHub metadata comparison
-  before tagging and after publication, which is the #237 integration point.
+- `RELEASE-SAFETY-CHECKLIST.md` does not yet require a live GitHub metadata
+  comparison before tagging and after publication; that is the #237 integration point.
 - No runtime or product code is changed by this task.
 
 ## External reference follow-up (not posted)

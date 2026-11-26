@@ -599,14 +599,6 @@
         }
         @{
             File        = 'TeknoParrot-Manager.ps1'
-            RuleName    = 'InjectionRisk.UnsafeEscaping'
-            Line        = 43976
-            Extent      = '([string]$led.Control).ToUpperInvariant() -replace ''[_\s]'', '''''
-            Disposition = 'FalsePositive'
-            Reasoning   = 'The regex pattern and replacement string are both fixed literals (underscores and spaces are cut from a LEDBlinky control name so it can be compared). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
-        }
-        @{
-            File        = 'TeknoParrot-Manager.ps1'
             RuleName    = 'InjectionRisk.StaticPropertyInjection'
             Line        = 44403
             Extent      = '$record.$Step'
@@ -624,10 +616,42 @@
         @{
             File        = 'TeknoParrot-Manager.ps1'
             RuleName    = 'InjectionRisk.UnsafeEscaping'
-            Line        = 44532
-            Extent      = '@(Get-TpmDeviceQuestions | Where-Object { $_.Class -eq $deviceFor[[string]$control.Kind] })[0].Label -replace ''^an? '', '''''
+            Line        = 47090
+            Extent      = '@(Get-TpmDeviceKinds | Where-Object { $_.Class -eq $deviceClass })[0].Label -replace ''^an? '', '''''
             Disposition = 'FalsePositive'
-            Reasoning   = 'The regex pattern and replacement string are both fixed literals (a leading a or an is cut from a built-in device question label). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (a leading a or an is cut from a built-in device kind label). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 46209
+            Extent      = '$Name.ToUpperInvariant() -replace ''[_\s]'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (underscores and spaces are cut from a LEDBlinky control name so it can be compared). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 47306
+            Extent      = '$_.Role -replace ''\D'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (non-digits are cut from a button role name so the buttons sort by number). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 47676
+            Extent      = '$kinds[$i].Label -replace ''^an? '', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (a leading a or an is cut from a built-in device kind label). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 65296
+            Extent      = '[string]$entry.Cab.Name -replace ''^(P\d_|CONTROL_)'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (the player or CONTROL prefix is cut from a built-in cabinet control name to make a readable label). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
         }
         @{
             File        = 'TeknoParrot-Manager.ps1'
@@ -652,6 +676,30 @@
             Extent      = '$folderName -replace ''\.(teknoparrot|parrot|game)$'', '''''
             Disposition = 'FalsePositive'
             Reasoning   = 'The regex pattern and replacement string are both fixed literals (a .teknoparrot, .parrot or .game ending is cut from a game folder name to compare it with the list). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.AddType'
+            Line        = 37232
+            Extent      = 'Add-Type -AssemblyName System.Net.Http'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'AssemblyName is a fixed string literal, not built from any variable or external input. No attacker-controlled value reaches Add-Type, so there is no assembly-load injection vector here.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 45311
+            Extent      = '(Get-ButtonKey $node) -replace ''\|None$'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (the |None ending is cut from a control key to show the control name on screen). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 51104
+            Extent      = '$data.general_issues -replace ''[\x00-\x08\x0B\x0C\x0E-\x1F]'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (control characters are cut from a note read from the game notes file before it is shown). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
         }
     )
 }

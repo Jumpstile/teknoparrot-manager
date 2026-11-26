@@ -14,7 +14,7 @@ dgVoodoo2 (by Dege) helps a few old games that crash or show a black screen. The
 4. At `Enter A, M, or Q`, press `A` to use the games it found, `M` to pick games yourself, or `Q` to cancel.
 5. Wait for the result. Start the game and check it.
 
-The result screen says `You selected N games: X changed, Y already set up, Z skipped, W failed` (only the counts that apply) and where the backup is. Press `D` to see every game you selected with its result and the reason for each game that was skipped or failed.
+The result screen says how many games were checked and how many need dgVoodoo2, then `You selected N games: X set up now, Y already set up (nothing to change), Z skipped, W failed` (only the counts that apply) and where the backup is. This also happens when nothing needed changing. Press `D` to see every game you selected with its old graphics system, its result and the reason. The same list is in the log.
 
 If no game needs dgVoodoo2, you see `No dgVoodoo2 setup is needed right now.` and nothing is changed. Press `D`, then `M`, if you still want to pick a game yourself.
 
@@ -22,7 +22,7 @@ If no game needs dgVoodoo2, you see `No dgVoodoo2 setup is needed right now.` an
 
 ## What goes into a game folder
 
-Setup adds only the files a game folder is missing. Files that are already there are kept.
+Setup adds only the files a game folder is missing. Files that are already there are kept (except a `dgVoodoo.conf` when you pick a preset for that game; see below).
 
 | What the game uses | Files added |
 |---|---|
@@ -33,7 +33,7 @@ Setup adds only the files a game folder is missing. Files that are already there
 
 For a game you pick yourself that shows no old graphics system, all the dgVoodoo2 DLLs are added.
 
-If your dgVoodoo2 folder has a `dgVoodoo.conf`, a copy is added to each chosen game folder that has none. A `dgVoodoo.conf` that is already in a game folder is kept.
+If your dgVoodoo2 folder has a `dgVoodoo.conf`, a copy is added to each chosen game folder that has none. A `dgVoodoo.conf` that is already in a game folder is kept unless you pick a preset for that game.
 
 <details>
 <summary>Details: how detection works</summary>
@@ -80,6 +80,6 @@ A file whose name matches no registered game is reported as `WRONG NAME` and ign
 
 ## Removing dgVoodoo2
 
-Delete the dgVoodoo2 DLLs and `dgVoodoo.conf` from that game's folder. If you had your own dgVoodoo2 files in a game before, keep those.
+Delete the dgVoodoo2 DLLs and `dgVoodoo.conf` from that game's folder, but only the ones setup added. Setup leaves DLLs that were already there. If you had your own dgVoodoo2 files in a game before, keep those. Careful with `dgVoodoo.conf`: a per-game preset (see above) replaces the game's old `dgVoodoo.conf`, and TeknoParrot Manager keeps no copy of the old file after setup finishes. Deleting the preset does not bring the old file back, so keep your own copy of any `dgVoodoo.conf` you want before you run setup.
 
 [[Health Check]] lists registered games that look like they need dgVoodoo2 and are not set up yet. It only reports and changes nothing.

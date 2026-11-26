@@ -231,9 +231,9 @@ Describe 'FIX129 S1: the raw text is judged, only the stored text is redacted' {
         $command.Output | Should -Match '\[REDACTED\]'
     }
 
-    It 'keeps the password out of everything that is stored: the output, the names and the judgement' {
+    It 'keeps the password out of everything that is stored: the output, the names and the judgment' {
         # Mutation: keep the raw constraint names or the raw text in the command that goes to the log and the receipts. The password
-        # "category" is part of every constraint name, so it is in the raw text the judgement reads.
+        # "category" is part of every constraint name, so it is in the raw text the judgment reads.
         Set-F129Tool -Name pg_restore -Exit 1 -StdErr (New-F129Output -Blocks (Get-F129FiveBlocks))
         $log = New-Object System.Collections.Generic.List[object]
         $command = Invoke-Postgres83RestoreCommandChecked -ToolName 'pg_restore.exe' -Arguments @('-d', 'GameDB19', 'game.backup') -SuperPasswordPlain 'category' -CommandLog $log -DatabaseName 'GameDB19' -AcceptConstraintOnlyRestoreWarnings -CreatedbSucceeded $true
@@ -412,7 +412,7 @@ Describe 'FIX129 S4: a tool call has a real time limit' {
     }
 
     It 'a restore that would have ended in the known warnings after the limit is still a failure' {
-        # Mutation: ignore TimedOut in the judgement or in the runner -> the late "known warnings" text is accepted.
+        # Mutation: ignore TimedOut in the judgment or in the runner -> the late "known warnings" text is accepted.
         Mock Get-PostgresToolTimeoutSeconds { 3 }
         Set-F129Tool -Name pg_restore -Exit 1 -Sleep 20 -StdErr (New-F129Output -Blocks (Get-F129FiveBlocks))
         $log = New-Object System.Collections.Generic.List[object]
@@ -591,7 +591,7 @@ Describe 'FIX129 N3 / N4 / N5: the known-warning parser' {
     }
 
     It 'accepts the known warnings for any database name (there is no name list)' {
-        # Mutation: bring back a list of database names anywhere in the judgement path -> a bundled backup under another name rolls everything back.
+        # Mutation: bring back a list of database names anywhere in the judgment path -> a bundled backup under another name rolls everything back.
         # (The Fix125 version of this test could not fail: the Checked function never passed the name on.) Here the real runner is used with names
         # that are in no list, and the three functions are checked for a name list or a name input.
         Reset-F129Tools

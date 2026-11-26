@@ -58,7 +58,8 @@ BeforeAll {
         'Assert-TpmRegisteredGamePath',
         'Set-TpmRegistrationGamePath', 'Get-DatEntryForZipName', 'Get-TpmZipBaseName', 'Get-TpmBezelNumberText',
         'Get-TpmProfileFileExtensions', 'Get-TpmDatNamedProfileCodes', 'Register-TpmDatSecondProfiles',
-        'Update-TpmProfileToOwnGameFolder', 'Test-TpmPathInOtherGameFolder'
+        'Update-TpmProfileToOwnGameFolder', 'Test-TpmPathInOtherGameFolder', 'Test-PathInside',
+        'Get-TpmGameTitle', 'Get-TpmGameTitleWithCode', 'Get-TpmGameDisplayLabel', 'Split-TpmRunTogetherGameName'
     )
     $functions = @(
         $ast.FindAll({

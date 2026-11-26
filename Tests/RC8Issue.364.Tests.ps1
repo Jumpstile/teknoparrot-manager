@@ -17,6 +17,7 @@ BeforeAll {
     $pending = New-Object 'System.Collections.Generic.Queue[string]'
     $pending.Enqueue('Invoke-DgVoodoo2Setup')
     $pending.Enqueue('Invoke-TpmDgVoodoo2FileTransaction')
+    $pending.Enqueue('Get-TpmDgVoodoo2ResultView')
     while ($pending.Count) {
         $name = $pending.Dequeue()
         if ($selected.ContainsKey($name) -or $external -contains $name) { continue }
@@ -95,8 +96,27 @@ Describe 'RC8 issue #364: empty dgVoodoo2 plans preserve no-op and planning fail
         $result.TransactionResult.Outcome | Should -BeExactly 'NO_OP'
         $result.Deployed | Should -Be 0
         $result.Errors | Should -Be 0
-        ($script:hostLines -join '|') | Should -Match 'No dgVoodoo2 file changes were needed'
+        ($script:hostLines -join '|') | Should -Not -Match 'No dgVoodoo2 file changes were needed'
+        $view = Get-TpmDgVoodoo2ResultView -Result $result
+        $view.Title | Should -Match 'No game needed a new dgVoodoo2 file'
+        ($view.Done -join '|') | Should -Match '1 game checked\. 1 need dgVoodoo2\.'
+        ($view.Done -join '|') | Should -Match 'You selected 1 game: 1 already set up \(nothing to change\)\.'
+        $every = @($view.DetailBlocks | Where-Object { $_.Heading -eq 'Every game you selected' })[0]
+        ($every.Lines -join '|') | Should -Match 'UNCHANGED: Already set up\. API: D3D8\.'
         Get-Issue364Snapshot $script:fixture | Should -BeExactly $before
+    }
+    It 'accounts for every selected game in a mixed run: one set up now, one already set up' {
+        [void](Add-Issue364Game -Code 'ALREADY' -ExistingDll)
+        [void](Add-Issue364Game -Code 'FRESH')
+        $result = Invoke-DgVoodoo2Setup -UserProfilesDir $script:profiles -SourceDir $script:source
+        $result.Succeeded | Should -BeTrue
+        $result.NoOp | Should -BeFalse
+        $view = Get-TpmDgVoodoo2ResultView -Result $result
+        ($view.Done -join '|') | Should -Match '2 games checked\. 2 need dgVoodoo2\.'
+        ($view.Done -join '|') | Should -Match 'You selected 2 games: 1 set up now, 1 already set up \(nothing to change\)\.'
+        $every = @($view.DetailBlocks | Where-Object { $_.Heading -eq 'Every game you selected' })[0]
+        ($every.Lines -join '|') | Should -Match 'FRESH: Set up now\. API: D3D8\.'
+        ($every.Lines -join '|') | Should -Match 'ALREADY: Already set up\.'
     }
     It 'Preserve safe no-op semantics at the wrapper/caller boundary; do not crash merely because every item is unchanged/not applicable. (not applicable caller)' {
         $exe = Add-Issue364Game -Code 'MODERN' -NoApi

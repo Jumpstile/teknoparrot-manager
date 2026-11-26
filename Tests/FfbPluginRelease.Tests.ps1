@@ -138,6 +138,33 @@ Describe 'Force feedback plugin release install' {
         ($script:r92Shown -join "`n") | Should -Match 'does not know which file name'
     }
 
+    It 'tells the two causes apart: the name is known but the download has no folder for the game' {
+        # Mutation: one sentence for both causes -> a known DLL name is reported as unknown.
+        $lib = New-R92Library -Name 'nofolder'
+        $script:r92Map = [ordered]@{ FixtureGame = 'd3d9.dll'; OtherGame = 'd3d9.dll' }
+        $script:r92Zip = @{ OmitFolderFor = @('FixtureGame') }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $lib.Up -CacheDir $lib.Cache
+        $result.Deployed | Should -Be 0
+        $result.SkippedNoName | Should -Be 1
+        $shown = ($script:r92Shown -join "`n")
+        $shown | Should -Match 'download has no plugin files for it'
+        $shown | Should -Not -Match 'does not know which file name'
+    }
+
+    It 'does not say nothing was changed after a decline when the plugin release is saved' {
+        # Mutation: keep "Nothing was changed." -> the saved plugin copy was replaced and the text denies it.
+        $lib = New-R92Library -Name 'declinedsaved'
+        $script:r92Go = 'N'
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $lib.Up -CacheDir $lib.Cache
+        $result.Declined | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $lib.Cache 'TPM-FFB-Plugin-Release.zip') | Should -BeTrue
+        $shown = ($script:r92Shown -join "`n")
+        $shown | Should -Match 'No game was changed'
+        $shown | Should -Match 'plugin release is saved'
+        $shown | Should -Not -Match 'Nothing was changed'
+        $shown | Should -Not -Match 'Nothing has been changed yet'
+    }
+
     It 'changes nothing when the user does not say go ahead' {
         # Mutation: apply the plan before asking -> files change although the user said no.
         $lib = New-R92Library -Name 'declined'

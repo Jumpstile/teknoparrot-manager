@@ -11,7 +11,7 @@ If you are stuck, make a package with **17) Create Support Package** and ask for
 **It needs files TPM does not provide (firmware, BIOS, or settings files).**
 TPM checks for these before you start a game and says which games will not start. It never downloads them. It can copy them from your own game collection after checking them against the DAT list. To let it check, say yes when it offers to get the DAT list.
 
-- **PlayStation 3 (RPCS3) games:** put the PlayStation 3 firmware (`PS3UPDAT.PUP`, in the `[EMU] Sony PlayStation 3 Firmware` ZIP) in your collection. Run TPM again and answer `Y` when it offers to install it. This takes about a minute and no window opens.
+- **Arcade games on PlayStation 3 style hardware (RPCS3):** some arcade games (for example the Tekken 6 arcade games) need this. Put the firmware file (`PS3UPDAT.PUP`, in the `[EMU] Sony PlayStation 3 Firmware` ZIP) in your collection. Run TPM again and answer `Y` when it offers to install it. This takes about a minute and no window opens.
 - **Play! games:** each game needs its own small settings file (`.arcadedef`). Put the `[EMU] Play! working arcadedefs` ZIP in your collection, run TPM again, and answer `Y` when it offers to copy the files.
 - **Chihiro games:** four BIOS files are needed. They come from the `[EMU] CxbxR BIOS Firmware for Sega Chihiro` ZIP.
 - **PCSX2x6 games:** two firmware files are needed. They come from the `[EMU] PCSX2x6 Emulator BIOS Files` ZIP.
@@ -46,7 +46,7 @@ Copy that game's `.xml` from `UserProfiles` to a safe place first. Then choose t
 **A game shows up twice.**
 Two profile files may exist for one game. Compare their paths and settings, keep copies of both, and remove only the one you are sure is a duplicate.
 
-**A System 11 game was not registered.**
+**A TeknoS11 arcade game was not registered.**
 Some games name two ZIPs: the game's own ZIP and a parent ZIP. They must sit in the same folder. A folder that holds only the parent ZIP does not register the game. Put both ZIPs in one folder, then run Register again. See [[Register]].
 
 **TeknoParrot's own first-time setup is not finished.**
@@ -72,25 +72,11 @@ An extraction was cut short. Read the log and check the free space and the ZIP b
 
 ## Controls
 
-**Controls are not copied to a game.**
-There may be no set-up reference game for that control type yet, the game is in `noPropagate` in the overrides file, or the game already has five or more controls set up and counts as a reference game itself. See [[Propagate Controls]].
+**Controls were not set up for a game.**
+The game may not have a controller choice that TPM can set, TeknoParrot's saved settings for it may be an older version (open the game once in TeknoParrotUI), or a button TPM wants is already used by another control in that game. TPM leaves such a game alone and says why on the screen. See [[Controls]].
 
-After a copy run, a skipped type names one game of that type to set up first (`Games to set up first`). Set that game up in TeknoParrotUI, then run Propagate Controls again. Choosing a device in the binding plan does not set up a game.
-
-**A game's controls are wrong after copying.**
-Use **15) Restore backup** and look at the list before you restore. Fix the reference game's controls in TeknoParrotUI, then copy again.
-
-**A game has the wrong control type** (for example a trackball game treated as a lightgun).
-Add a `familyOverride` entry to `TeknoParrot-Manager.overrides.json`:
-
-```json
-{ "familyOverride": { "GameProfileCode": "trackball" } }
-```
-
-Valid values: `button`, `driving`, `lightgun`, `trackball`, `analog`, `spinner`. See [[Setup]].
-
-**Two reference games of the same type disagree on Input API.**
-TPM changes neither by default. Pick the right one with the `canonicalArchetype` override. See [[Setup]].
+**A game's controls are wrong after setting them up.**
+Use **15) Restore backup** and look at the list before you restore. Then pick a different layout in [[Controls]], or fix the game in TeknoParrotUI.
 
 TPM does not promise working controls, full-screen mode, firmware, or a game that starts. Map and test the controls in TeknoParrot and read ACTION REQUIRED.
 
@@ -171,13 +157,13 @@ Some files were not verified or were left in place on purpose. Keep the reported
 That game cannot start yet: its game file, firmware or BepInEx is missing. Fix that (see [[Health Check]] and [[Game Startup Files]]). The note and the playlist entry go away by themselves when the problem is fixed. Notes you wrote yourself stay.
 
 **The Eggman DAT update says the current DAT is protected.**
-TPM will not overwrite a DAT inside your TeknoParrot folder. Choose a folder outside it (for example your ZIP folder) and try again.
+TPM will not save a DAT inside your TeknoParrot folder, your games folder or the folder TeknoParrot Manager runs from. Choose a different folder (for example your ZIP folder) and try again.
 
 **Start-up stops with "needs review" or "the registration evidence ledger is ...".**
 TPM could not safely check one of its own files. Keep every file and path it prints, make a support package, and ask for help. See [[Registration Ledger]].
 
 **The console shows `[UNLOGGED]`.**
-The log file cannot be written. Make sure the TeknoParrot folder is not read-only. Nothing is lost: the lines are shown on screen.
+The log file cannot be written. Make sure the TeknoParrot folder is not read-only. The lines are still shown on screen, but they are not saved to the log, so copy anything you need from the screen first.
 
 **TPM asks for my settings again.**
 You pressed `N` at `Use these settings?`, or the settings file was deleted or damaged (`WARNING: Saved configuration could not be read`). Answer the questions again. To start fresh, see "Resetting" in [[Setup]].

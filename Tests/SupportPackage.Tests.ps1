@@ -396,7 +396,8 @@ Describe 'New-TpmSupportPackage' {
         $r.Succeeded | Should -BeTrue
         @($r.Records | Where-Object Status -eq 'RejectedUnsafeContent').Count | Should -BeGreaterThan 1
         (Get-SupportZipText $r.PackagePath 'MANIFEST.txt') | Should -Match 'RejectedUnsafeContent'
-        @((Get-SupportZipEntries $r.PackagePath) | Where-Object { $_ -like 'diagnostics/*.txt' }).Count | Should -Be 0
+        # windows-events.txt is written by TPM itself from Windows events; it is not a copy of any allowlisted file.
+        @((Get-SupportZipEntries $r.PackagePath) | Where-Object { $_ -like 'diagnostics/*.txt' -and $_ -ne 'diagnostics/windows-events.txt' }).Count | Should -Be 0
     }
 
     It 'redacts every dynamic manifest field before insertion' {
@@ -504,7 +505,7 @@ Describe 'New-TpmSupportPackage' {
         }
         (New-TpmActionRequiredReportText -RunId $runId) | Should -Match ("Run ID: " + $runId)
         $controlsPath = Join-Path $f.Script 'controls-generated.txt'
-        Write-ControlsStatus -userProfilesDir $f.Profiles -pool @() -propagationReports @() -outputPath $controlsPath -RunId $runId | Should -Be 0
+        Write-ControlsStatus -userProfilesDir $f.Profiles -outputPath $controlsPath -RunId $runId | Should -Be 0
         [System.IO.File]::ReadAllText($controlsPath) | Should -Match ("Run ID    : " + $runId)
         Write-Log 'session linkage check'
         [System.IO.File]::ReadAllText($script:logPath) | Should -Match ("RunId=" + $runId)

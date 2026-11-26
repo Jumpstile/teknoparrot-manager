@@ -7,8 +7,8 @@ BeforeAll {
     $script:ProductPath = Join-Path $script:RepoRoot 'TeknoParrot-Manager.ps1'
     $tokens = $null; $parseErrors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ProductPath, [ref]$tokens, [ref]$parseErrors)
-    # FIX125: the checked command uses the one pg_restore judgement, the known-warning parser and the plural helper.
-    # FIX129: and the quoted-name reader, the field reader and the redaction helper (the judgement now runs in memory on the raw text).
+    # FIX125: the checked command uses the one pg_restore judgment, the known-warning parser and the plural helper.
+    # FIX129: and the quoted-name reader, the field reader and the redaction helper (the judgment now runs in memory on the raw text).
     foreach ($name in @('Invoke-Postgres83RestoreCommandChecked', 'Get-PostgresRestoreJudgement', 'Get-PostgresKnownConstraintRestoreWarnings', 'ConvertFrom-PostgresQuotedIdentifier', 'ConvertTo-PostgresRedactedText', 'Get-TpmTransactionField', 'Format-TpmCountNoun')) {
         $fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
         . ([scriptblock]::Create($fn.Extent.Text))

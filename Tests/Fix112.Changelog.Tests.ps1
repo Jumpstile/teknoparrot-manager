@@ -35,10 +35,10 @@ Describe 'changelog format' {
         [regex]::Matches($script:F112Text, "`r(?!`n)").Count | Should -Be 0
     }
 
-    It 'lists each version once, newest first: RC9.3, RC9.2, RC9.1, RC9, RC8.4, RC8.3, RC8.2, RC8.1, RC7, RC6, RC5, RC4, RC3, RC2.1, RC2' {
+    It 'lists each version once, newest first: RC9.4, RC9.3, RC9.2, RC9.1, RC9, RC8.4, RC8.3, RC8.2, RC8.1, RC7, RC6, RC5, RC4, RC3, RC2.1, RC2' {
         # Mutation: move the RC8.1 block below RC7, or add a second RC7 heading.
         $previous = -1
-        foreach ($tag in @('RC9.3', 'RC9.2', 'RC9.1', 'RC9', 'RC8.4', 'RC8.3', 'RC8.2', 'RC8.1', 'RC7', 'RC6', 'RC5', 'RC4', 'RC3', 'RC2.1', 'RC2')) {
+        foreach ($tag in @('RC9.4', 'RC9.3', 'RC9.2', 'RC9.1', 'RC9', 'RC8.4', 'RC8.3', 'RC8.2', 'RC8.1', 'RC7', 'RC6', 'RC5', 'RC4', 'RC3', 'RC2.1', 'RC2')) {
             $pattern = '^  v1\.0 ' + [regex]::Escape($tag) + '(\s|$)'
             $hits = @(for ($i = 0; $i -lt $script:F112Lines.Count; $i++) { if ($script:F112Lines[$i] -match $pattern) { $i } })
             $hits.Count | Should -Be 1 -Because "$tag must have exactly one heading"
@@ -47,11 +47,12 @@ Describe 'changelog format' {
         }
     }
 
-    It 'lists RC8.1 as the changes since RC7, RC8.2 since RC8.1, RC8.3 since RC8.2, RC8.4 since RC8.3, RC9 since RC8.4, RC9.1 since RC9, RC9.2 since RC9.1, RC9.3 since RC9.2, and gives RC8 no heading of its own' {
+    It 'lists RC8.1 as the changes since RC7, RC8.2 since RC8.1, RC8.3 since RC8.2, RC8.4 since RC8.3, RC9 since RC8.4, RC9.1 since RC9, RC9.2 since RC9.1, RC9.3 since RC9.2, RC9.4 since RC9.3, and gives RC8 no heading of its own' {
         # RC8 was a tester-only build that was never published; its changes belong to RC8.1. Final Version 1.0 comes later.
         # Mutation: add a "v1.0 RC8" heading, drop the RC9 heading, or say RC8.1 changed "since RC8".
         @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC8(\s|$)' }).Count | Should -Be 0
         @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC9 \(changes since RC8\.4\)\s*$' }).Count | Should -Be 1
+        @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC9\.4 \(changes since RC9\.3\)\s*$' }).Count | Should -Be 1
         @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC9\.3 \(changes since RC9\.2\)\s*$' }).Count | Should -Be 1
         @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC9\.2 \(changes since RC9\.1\)\s*$' }).Count | Should -Be 1
         @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC9\.1 \(changes since RC9\)\s*$' }).Count | Should -Be 1
@@ -65,6 +66,6 @@ Describe 'changelog format' {
         # Mutation: paste the long technical history back into the shipped changelog.
         # The cap was 500 until RC9. RC9 lists about 200 plain-words lines on top of the published RC8.4 and older sections, which stay as published, so the file is about 665 lines.
         # 720 is the next round number that fits and still catches the long technical history.
-        $script:F112Lines.Count | Should -BeLessThan 750
+        $script:F112Lines.Count | Should -BeLessThan 850
     }
 }

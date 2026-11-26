@@ -330,7 +330,7 @@ Describe 'FIX110B S-10 BepInEx: source-folder reason, no repair-reset, and the r
     }
 
     It 'waits for one Enter after a successful or no-change BepInEx run, before the menu is drawn again' {
-        # Mutation: remove the acknowledgement from either branch -> the menu redraw erases the result.
+        # Mutation: remove the acknowledgment from either branch -> the menu redraw erases the result.
         $block = $script:F110Ast.FindAll({
             param($n)
             $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -ceq '$mode -eq "BepInExUpdate"'

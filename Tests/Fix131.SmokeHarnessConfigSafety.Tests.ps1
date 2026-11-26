@@ -24,7 +24,7 @@ BeforeAll {
         'Get-TPMTemporaryUnattendedConfigText', 'Get-TPMConfigJsonSnapshot', 'Set-TPMConfigJsonRoot', 'New-TPMTemporaryUnattendedConfig',
         'Restore-TPMConfigJsonSnapshot', 'Test-TPMConfigRestored', 'Get-TPMConfigRestoreRecordPath', 'Get-TPMBytesSha256',
         'Write-TPMConfigRestoreRecord', 'Remove-TPMConfigRestoreRecord', 'Restore-TPMInterruptedConfigOverride',
-        'Invoke-TPMUnattendedRootBinding', 'Get-TPMEffectiveRootFromUnattendedLog', 'Test-TPMUnattendedRootMatch'
+        'Invoke-TPMUnattendedRootBinding', 'Get-TPMEffectiveRootFromUnattendedLog', 'Test-TPMUnattendedRootMatch', 'Get-TreeHash'
     )
     $found = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $args[0].Name }, $true))
     if ($found.Count -ne $wanted.Count) { throw ('FIX131 tests expected {0} harness functions, found {1}.' -f $wanted.Count, $found.Count) }
@@ -210,6 +210,24 @@ Describe 'FIX131 N10 the unattended root binding repairs and protects the settin
         @($binding.Checks | Where-Object { $_.Name -ceq 'Unattended TPM config restoration' }).Passed | Should -BeTrue
     }
 
+    It 'keeps the moved settings copy when someone edited it during the run' {
+        # Mutation: delete the moved copy without comparing its bytes to the override -> the edited settings are lost.
+        $folder = New-F131Folder -Name 'bind-edited'
+        $root = New-F131Folder -Name 'bind-edited-root'
+        $path = Join-Path $folder 'TeknoParrot-Manager.config.json'
+        [System.IO.File]::WriteAllText($path, $script:F131ConfigText, $script:F131Utf8NoBom)
+        $log = Join-Path $folder 'unattended.log'
+        $moved = Join-Path $root 'TeknoParrotManager\State\TeknoParrot-Manager.config.json'
+        $script:F131MoveSource = $path; $script:F131MoveTarget = $moved; $script:F131MoveRoot = $root; $script:F131MoveLog = $log
+        $null = Invoke-TPMUnattendedRootBinding -ConfigPath $path -TeknoParrotRoot $root -LogPath $log -InvokeUnattended {
+            [void][System.IO.Directory]::CreateDirectory((Split-Path -Parent $script:F131MoveTarget))
+            Move-Item -LiteralPath $script:F131MoveSource -Destination $script:F131MoveTarget
+            [System.IO.File]::WriteAllText($script:F131MoveTarget, '{ "Theme": "edited by the user" }', $script:F131Utf8NoBom)
+            New-F131UnattendedLog -Path $script:F131MoveLog -Root $script:F131MoveRoot
+        }
+        [System.IO.File]::ReadAllText($moved) | Should -Match 'edited by the user'
+    }
+
     It 'refuses the run and changes nothing when an earlier override cannot be undone safely' {
         # Mutation: carry on after a refused repair -> the run snapshots the edited file, overrides it and "restores" it, hiding the problem.
         $folder = New-F131Folder -Name 'bind-refuse'
@@ -393,5 +411,21 @@ Describe 'FIX131 N10 the UserProfiles backup copy keeps no saved password' {
         # Mutation: report a missing folder as a backup that was made ($true) or as a copy that failed ($false).
         $absent = Copy-IfExists (Join-Path $TestDrive 'no-such-profiles') 'UserProfiles'
         $null -eq $absent | Should -BeTrue
+    }
+}
+
+Describe 'Smoke harness file snapshot' {
+    It 'sees hidden files, so editing one is noticed' {
+        # Mutation: list files without -Force -> a hidden profile can change between snapshots and the safety check still passes.
+        $folder = New-F131Folder -Name 'hidden-snapshot'
+        $hidden = Join-Path $folder 'Hidden.xml'
+        [System.IO.File]::WriteAllText($hidden, 'one', $script:F131Utf8NoBom)
+        (Get-Item -LiteralPath $hidden).Attributes = [System.IO.FileAttributes]::Hidden
+        $before = @(Get-TreeHash -Path $folder)
+        $before.Count | Should -Be 1
+        (Get-Item -LiteralPath $hidden -Force).Attributes = [System.IO.FileAttributes]::Normal
+        [System.IO.File]::WriteAllText($hidden, 'two', $script:F131Utf8NoBom)
+        (Get-Item -LiteralPath $hidden).Attributes = [System.IO.FileAttributes]::Hidden
+        @(Get-TreeHash -Path $folder)[0].Hash | Should -Not -Be $before[0].Hash
     }
 }

@@ -126,7 +126,7 @@ Describe 'FIX110A S-2 the progress module contains drawing failures' {
 
     It 'recognizes cancellation anywhere in the error chain and nothing else' -ForEach @(
         @{ Name = 'stopped pipeline'; Expected = $true; Make = { [System.Activator]::CreateInstance([System.Management.Automation.PipelineStoppedException], $true) } }
-        @{ Name = 'cancelled token'; Expected = $true; Make = { [System.OperationCanceledException]::new('x') } }
+        @{ Name = 'canceled token'; Expected = $true; Make = { [System.OperationCanceledException]::new('x') } }
         @{ Name = 'cancellation wrapped in another exception'; Expected = $true; Make = { [System.InvalidOperationException]::new('outer', [System.OperationCanceledException]::new('inner')) } }
         @{ Name = 'ordinary failure'; Expected = $false; Make = { [System.InvalidOperationException]::new('plain') } }
         @{ Name = 'nothing'; Expected = $false; Make = { $null } }
@@ -280,7 +280,7 @@ Describe 'FIX110A S-2 the product progress wrappers never stop the work' {
         @($global:F110Log | Where-Object { $_ -match 'Progress group could not start' }).Count | Should -Be 1
     }
 
-    It 'does not run the group action when the start is cancelled' {
+    It 'does not run the group action when the start is canceled' {
         # Mutation: swallow cancellation at the group start -> the workflow runs although the user canceled.
         Mock Start-TpmProgressOperation { throw [System.OperationCanceledException]::new('canceled at start') }
         $script:f110Ran = $false

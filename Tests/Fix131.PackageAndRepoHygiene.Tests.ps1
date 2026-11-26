@@ -145,3 +145,14 @@ Describe 'Private engineering documents are not in the public repository' {
         $hits | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Guides carry no leftover merge conflict markers' {
+    It 'has no conflict marker line in a root guide or any guide under docs' {
+        # Mutation: leave a "<<<<<<< path" or ">>>>>>> path" line from a merge in any .md/.txt guide. A reader would see it on the page.
+        $files = @(Get-ChildItem -LiteralPath $script:F131Root -File | Where-Object { $_.Extension -in @('.md', '.txt') })
+        $files += @(Get-ChildItem -LiteralPath (Join-Path $script:F131Root 'docs') -Recurse -File | Where-Object { $_.Extension -in @('.md', '.txt') })
+        $files.Count | Should -BeGreaterThan 20
+        $hits = @($files | Where-Object { [System.IO.File]::ReadAllText($_.FullName) -match '(?m)^(<<<<<<<|>>>>>>>) ' } | ForEach-Object { $_.FullName.Substring($script:F131Root.Length + 1) })
+        $hits | Should -BeNullOrEmpty
+    }
+}

@@ -4,7 +4,7 @@
 # Decline Matrix. Proves state-changing workflows that had zero prior
 # cancel-path coverage genuinely make no changes when a tester backs out --
 # no backup created, no profile touched -- not just that they print a
-# "cancelled" message. Each test documents the human behavior replaced,
+# "canceled" message. Each test documents the human behavior replaced,
 # the defect class it catches, and why existing certification wouldn't
 # already catch it.
 #
@@ -64,7 +64,7 @@ Describe "Virtual Beta Tester: GPU fix setup safe cancel (issue #88 A4)" -Tag 'T
 
         Invoke-GpuFixSetup -UserProfilesDir $userProfilesDir -TpRoot (Join-Path $TestDrive "no-tp-root")
 
-        (Test-Path -LiteralPath (Join-Path $userProfilesDir 'FullBackup')) | Should -Be $false -Because "cancelling before any work begins must never create a backup folder -- a backup implies a write is about to happen"
+        (Test-Path -LiteralPath (Join-Path $userProfilesDir 'FullBackup')) | Should -Be $false -Because "canceling before any work begins must never create a backup folder -- a backup implies a write is about to happen"
         (Get-Content -LiteralPath (Join-Path $userProfilesDir 'ALIENS.xml') -Raw) | Should -Be $originalContent -Because "the profile must be completely untouched"
     }
 

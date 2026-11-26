@@ -26,7 +26,7 @@ Separate PostgreSQL recovery observation (older version, kept as history):
   step: postgres-password.
 - The password prompts must remain inside the already active PostgreSQL
   workflow step. They must not start undeclared nested workflow steps or
-  require a second acknowledgement after a submitted choice.
+  require a second acknowledgment after a submitted choice.
 - The automatic reset has since been removed. Choosing X now explains why
   an automatic reset is not available and shows manual steps under
   Details. Nothing is changed by choosing X.

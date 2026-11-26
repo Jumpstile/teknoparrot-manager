@@ -1,6 +1,6 @@
 # GPU Fix
 
-Some TeknoParrot games have a setting that fixes problems on one kind of graphics card (AMD, NVIDIA or Intel). GPU fix finds your graphics card and sets the right value in every registered game that has this setting. It is main menu item 8, **GPU fix setup**.
+Some TeknoParrot games have a setting that fixes problems on one kind of graphics card (AMD, NVIDIA or Intel). GPU fix finds your graphics card and sets the value for that card in every registered game that has this setting. If your PC has more than one graphics card, it uses the one with the most memory, which may not be the card a game really runs on. There is no menu choice to pick another card; if a game needs a different one, change that game's GPU fix setting by hand in TeknoParrotUI. It is main menu item 8, **GPU fix setup**.
 
 ---
 
@@ -23,7 +23,7 @@ Run it once after your first setup. Run it again whenever you change your graphi
 ## Good to know
 
 - Only your registered games are changed. TeknoParrot's own game templates are never touched.
-- Games with no graphics card setting are left alone. The result says how many (`No GPU fix exists for ...`).
+- Games with no graphics card setting are left alone. The result says how many (shown as `No GPU fix fields`).
 - Before it writes anything, TeknoParrot Manager saves a copy of your UserProfiles in the `FullBackup` folder (a folder starting with `GpuFix_`). To undo, use [[Restore Backup]].
 - The fix only changes saved settings. It does not start the game, so it cannot prove the game now runs well. Start a game to try it.
 - New games TeknoParrot adds later are covered automatically.
@@ -33,7 +33,7 @@ Run it once after your first setup. Run it again whenever you change your graphi
 <details>
 <summary>Details: how it works</summary>
 
-1. The graphics card is read from Windows (WMI). A name with AMD or Radeon is AMD, with NVIDIA, GeForce, RTX or GTX is NVIDIA, with Intel is Intel. With more than one card, the one with the most memory is used.
+1. The graphics card is read from Windows (WMI). A name with AMD or Radeon is AMD, with NVIDIA, GeForce, RTX or GTX is NVIDIA, with Intel is Intel. With more than one card, the one with the most memory is used (not necessarily the one a game runs on). Microsoft, virtual and remote display adapters are ignored.
 2. TeknoParrot's `GameProfiles` folder is scanned each time for fix settings: the yes/no fields `EnableAmdFix`, `AMDCrashFix` and `AMDFix` (and similar AMD fields), and drop-down fields such as `GPU Fix` that offer AMD, NVIDIA or Intel choices.
 3. For each registered game with such a field, the value for your card is set.
 

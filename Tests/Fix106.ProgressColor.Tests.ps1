@@ -294,16 +294,26 @@ Describe 'FIX106 every state in true color' {
         }
     }
 
-    It 'shows the percent in green brackets for running, done, ended early and failed' {
-        # Mutation: the percent run loses its green color, or the failed percent is not the real 120.
+    It 'shows the percent in green brackets for running, done and ended early' {
+        # Mutation: the percent run loses its green color.
         InModuleScope TpmProgress {
-            foreach ($case in @(@{ S = 'Running'; C = 74; P = '[74%]' }, @{ S = 'Final'; C = 100; P = '[100%]' }, @{ S = 'Incomplete'; C = 60; P = '[60%]' }, @{ S = 'Error'; C = 120; P = '[120%]' })) {
+            foreach ($case in @(@{ S = 'Running'; C = 74; P = '[74%]' }, @{ S = 'Final'; C = 100; P = '[100%]' }, @{ S = 'Incomplete'; C = 60; P = '[60%]' })) {
                 $row = New-Fix106Row -State $case.S -Current $case.C -Total 100
                 $runs = @(Get-Fix106Runs -Frame (Get-Fix106Frame -Row $row -ColorMode TrueColor))
                 $percent = @($runs | Where-Object { $_.Text.Trim() -ceq $case.P })
                 $percent.Count | Should -Be 1 -Because $case.P
                 $percent[0].Sgr | Should -BeExactly '92' -Because $case.P
             }
+        }
+    }
+
+    It 'shows no percent on a failed row whose count went past the total' {
+        # Mutation: an overshoot row shows FAILED together with [120%].
+        InModuleScope TpmProgress {
+            $row = New-Fix106Row -State Error -Current 120 -Total 100
+            $text = (@(Get-Fix106Runs -Frame (Get-Fix106Frame -Row $row -ColorMode TrueColor)) | ForEach-Object { $_.Text }) -join ''
+            $text | Should -Match 'FAILED'
+            $text | Should -Not -Match '%'
         }
     }
 
@@ -486,7 +496,7 @@ Describe 'FIX106 plain ASCII for redirected output and consoles that cannot do m
                 @{ State = 'Running'; Current = 74; Total = 100; Pattern = '74/100\s+\[74%\]\s+in 10\.0s \(7\.55/s\)\s+ETA 0:04'; Fill = '#' },
                 @{ State = 'Final'; Current = 100; Total = 100; Pattern = '100/100\s+\[100%\].*done'; Fill = '#' },
                 @{ State = 'Incomplete'; Current = 60; Total = 100; Pattern = '\(!\)\s+60/100\s+\[60%\].*incomplete\s+!'; Fill = '#' },
-                @{ State = 'Error'; Current = 120; Total = 100; Pattern = '\(!\)\s+120/100\s+\[120%\].*FAILED\s+X'; Fill = '#' },
+                @{ State = 'Error'; Current = 120; Total = 100; Pattern = '\(!\)\s+120/100.*FAILED\s+X'; Fill = '#' },
                 @{ State = 'Skipped'; Current = 0; Total = 100; Pattern = '\|-.*in 0\.0s \(0\.00/s\)\s+skipped\s+-'; Fill = '' },
                 @{ State = 'Running'; Current = 4180; Total = 0; Pattern = '4180'; Fill = '>' }
             )

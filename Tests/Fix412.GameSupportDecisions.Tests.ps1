@@ -176,8 +176,11 @@ Describe 'Game Notes names the extra archives, the linked profile and a game tha
         $text | Should -Match 'Guide status: Broken\. It does not work yet\.'
     }
 
-    It 'still skips a game that has nothing to show' {
+    It 'still skips a guide game that has nothing to show, and gives a registered game the guide does not list a plain entry' {
         Mock Get-EggmanGameData { @([pscustomobject]@{ profile_name = 'abc'; game_name = 'Plain'; setup_exe = 'p.exe'; notes = ''; general_issues = '' }) }
-        @(Get-GameSetupNotes -UserProfilesDir (Join-Path $TestDrive 'profiles')).Count | Should -Be 0
+        $notes = @(Get-GameSetupNotes -UserProfilesDir (Join-Path $TestDrive 'profiles'))
+        @($notes | Where-Object { $_.Code -eq 'abc' }).Count | Should -Be 0
+        @($notes | Where-Object { -not $_.Generic }).Count | Should -Be 0
+        @($notes | Where-Object { $_.Code -eq 'lonely' }).Count | Should -Be 1
     }
 }

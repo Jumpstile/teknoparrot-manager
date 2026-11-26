@@ -218,6 +218,27 @@ Describe 'CPS3 supplementary member-name safety' {
     }
 }
 
+Describe 'CPS3 verified copy never deletes a file it did not create' {
+    It 'keeps a file that was already at the destination, and still deletes its own copy when the bytes do not match' {
+        # Mutation: delete the destination in finally whether or not this call created it -> an existing file is lost.
+        $dir = Join-Path $TestDrive ('cps3-stream-' + [guid]::NewGuid().ToString('N'))
+        [void][System.IO.Directory]::CreateDirectory($dir)
+        $bytes = [byte[]](1..20)
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try { $good = (-join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') })).ToUpperInvariant() } finally { $sha.Dispose() }
+        $existing = Join-Path $dir 'existing.nv'
+        [System.IO.File]::WriteAllBytes($existing, [byte[]](9, 9, 9))
+        $stream = New-Object System.IO.MemoryStream -ArgumentList (,$bytes)
+        try { { Invoke-TpmCps3VerifiedStream -Source $stream -DestinationPath $existing -ExpectedLength 20 -ExpectedSha256 $good } | Should -Throw } finally { $stream.Dispose() }
+        [System.IO.File]::ReadAllBytes($existing) | Should -Be ([byte[]](9, 9, 9))
+
+        $own = Join-Path $dir 'own.nv'
+        $stream = New-Object System.IO.MemoryStream -ArgumentList (,$bytes)
+        try { Invoke-TpmCps3VerifiedStream -Source $stream -DestinationPath $own -ExpectedLength 20 -ExpectedSha256 ('0' * 64) | Should -BeFalse } finally { $stream.Dispose() }
+        Test-Path -LiteralPath $own | Should -BeFalse
+    }
+}
+
 Describe 'CPS3 supplementary install' {
     BeforeEach {
         $script:cps3Progress = New-Object System.Collections.Generic.List[object]

@@ -244,3 +244,73 @@ Describe 'Repairing games that were on a missing drive (issue 401, round 2)' {
         $source | Should -Match '\$nf\s+=\s+@\(\$repair \| Where-Object \{ \$_\.Status -eq "not-found" \}\)'
     }
 }
+
+# ---- R94BX: the registration summary offers to point found games at the scanned games folder ----
+
+Describe 'The skipped-games summary offers to point games at the scanned folder (R94BX)' {
+    BeforeEach {
+        $script:r94Screen = New-Object System.Collections.Generic.List[string]
+        $script:r94Choice = 'P'
+        $script:r94Apply = 'N'
+        Mock Write-Log {}
+        Mock Write-Host { [void]$script:r94Screen.Add([string]($Object -join ' ')) }
+        Mock Write-TpmCompactExtractionProgress {}
+        Mock Read-TpmChoice { return $script:r94Choice }
+        Mock Read-TpmYesNo { return $script:r94Apply }
+        if (Get-Variable -Name TpmUnavailableDriveGames -Scope Script -ErrorAction SilentlyContinue) { $script:TpmUnavailableDriveGames.Clear() }
+        $root = Join-Path $TestDrive ('r94-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:r94Profiles = Join-Path $root 'UserProfiles'
+        $script:r94Games = Join-Path $root 'Games'
+        [void][System.IO.Directory]::CreateDirectory($script:r94Profiles)
+        [void][System.IO.Directory]::CreateDirectory((Join-Path $script:r94Games 'Lost'))
+        $script:r94Exe = Join-Path $script:r94Games 'Lost\lostgame.exe'
+        [System.IO.File]::WriteAllText($script:r94Exe, 'game')
+        $script:r94ProfilePath = Join-Path $script:r94Profiles 'LOSTGAME.xml'
+        $script:r94Original = ('<GameProfile><GamePath>{0}:\Old\Lost\lostgame.exe</GamePath><ExecutableName>lostgame.exe</ExecutableName></GameProfile>' -f $script:f407Missing)
+        [System.IO.File]::WriteAllText($script:r94ProfilePath, $script:r94Original)
+        $script:r94Index = @{ 'lostgame.exe' = @('LOSTGAME') }
+        Add-TpmUnavailableDriveGame -Code 'LOSTGAME' -Path ($script:f407Missing + ':\Old\Lost\lostgame.exe')
+    }
+
+    It 'shows the offer when the game file is in the scanned folder, and Preview changes nothing' {
+        Write-TpmUnavailableDriveSummary -SearchFolder $script:r94Games -UserProfilesDir $script:r94Profiles -ProfileIndex $script:r94Index
+
+        $text = ($script:r94Screen -join "`n")
+        $text | Should -Match "saved with an old drive letter in TeknoParrot's own settings"
+        $text | Should -Match '1 of these games was found in '
+        $text | Should -Match '\[Y\] Yes, with a backup  \[P\] Preview first  \[N\] No, leave them'
+        $text | Should -Match 'after : .*lostgame\.exe'
+        [System.IO.File]::ReadAllText($script:r94ProfilePath) | Should -BeExactly $script:r94Original
+        @(Get-ChildItem -LiteralPath $script:r94Profiles -Directory -Force).Count | Should -Be 0
+    }
+
+    It 'does not show the offer when no game file is in the scanned folder' {
+        [System.IO.File]::Delete($script:r94Exe)
+
+        Write-TpmUnavailableDriveSummary -SearchFolder $script:r94Games -UserProfilesDir $script:r94Profiles -ProfileIndex $script:r94Index
+
+        ($script:r94Screen -join "`n") | Should -Not -Match 'Point them there now'
+        Should -Invoke Read-TpmChoice -Times 0 -Exactly
+        [System.IO.File]::ReadAllText($script:r94ProfilePath) | Should -BeExactly $script:r94Original
+    }
+
+    It 'saying N leaves the profile unchanged' {
+        $script:r94Choice = 'N'
+
+        Write-TpmUnavailableDriveSummary -SearchFolder $script:r94Games -UserProfilesDir $script:r94Profiles -ProfileIndex $script:r94Index
+
+        [System.IO.File]::ReadAllText($script:r94ProfilePath) | Should -BeExactly $script:r94Original
+        @(Get-ChildItem -LiteralPath $script:r94Profiles -Directory -Force).Count | Should -Be 0
+    }
+
+    It 'saying Y points the game at the folder and keeps a backup of the old profile' {
+        $script:r94Choice = 'Y'
+
+        Write-TpmUnavailableDriveSummary -SearchFolder $script:r94Games -UserProfilesDir $script:r94Profiles -ProfileIndex $script:r94Index
+
+        (Read-Xml -Path $script:r94ProfilePath).GameProfile.GamePath | Should -BeExactly ([System.IO.Path]::GetFullPath($script:r94Exe))
+        $saved = @(Get-ChildItem -LiteralPath $script:r94Profiles -Recurse -File -Filter 'LOSTGAME.xml' | Where-Object { $_.DirectoryName -ne $script:r94Profiles })
+        $saved.Count | Should -BeGreaterOrEqual 1
+        [System.IO.File]::ReadAllText($saved[0].FullName) | Should -BeExactly $script:r94Original
+    }
+}

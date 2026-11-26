@@ -24,7 +24,7 @@ BeforeAll {
             if(-not ([IO.Path]::GetFullPath($path).StartsWith($root+'\',[StringComparison]::OrdinalIgnoreCase)) -or -not (Test-TpmNoReparsePath $path)){throw 'Fixture containment failed.'}
         }
         $overrides=Join-Path $program 'TeknoParrot-Manager.overrides.json'
-        [IO.File]::WriteAllText($overrides,'{"onlySync":["OWNER_CUSTOM_SENTINEL"],"noSync":[],"noPropagate":[],"forceArchetype":{"ProbeGame":"ProbeReference"},"familyOverride":{},"canonicalArchetype":{},"subFolderMap":{},"datFile":""}',(New-Object Text.UTF8Encoding($false)))
+        [IO.File]::WriteAllText($overrides,'{"onlySync":["OWNER_CUSTOM_SENTINEL"],"noSync":[],"subFolderMap":{"ProbeGame":"ProbeFolder"},"datFile":""}',(New-Object Text.UTF8Encoding($false)))
         if($WithLog){[IO.File]::WriteAllText((Join-Path $program 'TeknoParrot-Manager.log'),'fixture migration log',(New-Object Text.UTF8Encoding($false)))}
         [pscustomobject]@{Root=$root;Program=$program;Layout=$layout;Overrides=$overrides;Sha256=(Get-FileHash -LiteralPath $overrides).Hash}
     }
@@ -43,7 +43,7 @@ BeforeAll {
         $snippet=(($statements[$start..$end]|ForEach-Object {$_.Extent.Text}) -join "`n").Replace('$PSScriptRoot','$fixtureScriptRoot')
         if($snippet -match 'Start-Process|Invoke-WebRequest|Invoke-RestMethod|Remove-Item|Move-Item|Copy-Item'){throw 'Unexpected operation in startup fragment.'}
         . ([scriptblock]::Create($snippet))
-        return [pscustomobject]@{OnlySync=@($onlySyncList);ForceArchetype=$forceArchetypeMap;Path=$overridesPath}
+        return [pscustomobject]@{OnlySync=@($onlySyncList);SubFolderMap=$subFolderMap;Path=$overridesPath}
     }
     function Get-ActualConsumerDefaultFixture {
         param([Parameter(Mandatory)][string]$Name,[Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)]$Layout)
@@ -78,14 +78,14 @@ BeforeAll {
 }
 
 Describe 'Owner 34 active overrides survive owned-state migration' {
-    It 'keeps custom filters and reference overrides available to actual startup after accepted migration' {
+    It 'keeps custom filters and folder overrides available to actual startup after accepted migration' {
         $f=New-OverridesMigrationFixture -WithLog
         $migration=Invoke-TpmOwnedMigration -ScriptRoot $f.Program -Layout $f.Layout -Unattended
         $migration.Outcome | Should -BeExactly 'SUCCEEDED'
         $migration.Backup.Verified | Should -BeTrue
         $loaded=Read-ActualStartupOverridesFixture -Fixture $f
         $loaded.OnlySync | Should -Contain 'OWNER_CUSTOM_SENTINEL'
-        $loaded.ForceArchetype['ProbeGame'] | Should -BeExactly 'ProbeReference'
+        $loaded.SubFolderMap['ProbeGame'] | Should -BeExactly 'ProbeFolder'
         (Get-FileHash -LiteralPath $f.Overrides).Hash | Should -BeExactly $f.Sha256
         Test-Path -LiteralPath (Join-Path $f.Layout.Reports 'TeknoParrot-Manager.overrides.json') | Should -BeFalse
         [IO.File]::ReadAllText((Join-Path $f.Layout.Logs 'TeknoParrot-Manager.log')) | Should -BeExactly 'fixture migration log'

@@ -10,7 +10,7 @@
 - [[AutoSync]] (1)
 - [[Register]] (2)
 - [[LaunchBox Integration]] (3)
-- [[Propagate Controls]] (4)
+- [[Controls]] (4)
 
 **Game Enhancements**
 - [[Crosshairs]] (5)
@@ -36,7 +36,6 @@
 - [[Support Package]] (17)
 
 **More**
-- [[LaunchBox Integration]]
 - [[CPS3 First-Boot Files]]
 - [[Registration Ledger]]
 

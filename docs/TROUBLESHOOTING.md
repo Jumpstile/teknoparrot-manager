@@ -1,4 +1,4 @@
-# Troubleshooting: ten beginner problems
+# Troubleshooting: common beginner problems
 
 Find the problem below that matches what you see. Each problem has a short fix with numbered steps.
 
@@ -227,7 +227,7 @@ Expected result: the game points at the shorter existing path. TeknoParrot Manag
 
 ## 5. LaunchBox or BigBox is open
 
-Symptom: TeknoParrot Manager says `Close LaunchBox and BigBox and keep them closed. TeknoParrot Manager never force-closes either app.`
+Symptom: TeknoParrot Manager says `Keep closed: Close LaunchBox and BigBox and keep them closed. TeknoParrot Manager never force-closes either app.`
 
 It may wait and check again. It may cancel a library operation if an app is still open or opens again.
 
@@ -500,7 +500,7 @@ Fix:
 
    Next: confirm only if you are sure.
 
-7. Type exactly what it asks. For game settings (UserProfiles) and database restores, type **YES**. For LaunchBox, answer **Y** or **N** (default **N**). Any other answer cancels and nothing is changed.
+7. Type exactly what the prompt on your screen shows. If it says **Type UNVERIFIED to use this copy anyway**, type **UNVERIFIED** (you are not asked for YES). If it says **Type YES to confirm**, type **YES**. For LaunchBox, answer **Y** or **N** (default **N**). Any other answer cancels and nothing is changed.
 
    You will see: the restore running, then **Restore complete.**, or **Restore canceled.**
 
@@ -533,7 +533,7 @@ Undoing a required game patch is separate. Choose **13) Required game patches**,
 - A LaunchBox restore first makes a verified backup of the current library.
 - Folders named `INCOMPLETE_...` are interrupted backups and are never offered.
 - A database restore (option 2) also lists its backups newest first. If the restore did not simply succeed, you see a plain line such as `The restore did not finish. Your data is back the way it was. TeknoParrot Manager put everything back and checked it.` Then it asks `Press D for details, or Enter to continue`.
-- The Postgres line on the menu reads in full: `Postgres database backup (only relevant if you've used the Postgres setup mode)`.
+- The Postgres line on the menu reads like this (it shows on two lines): `Postgres database backup (only relevant if you've used the Postgres setup mode)`.
 - Option 4 (Reset and Restore) uses restore points. TeknoParrot Manager saves a checked one when it starts, but only when something changed since the last one. The first restore point that has your games in it is always kept. Game files, saves, and databases are not part of a restore point.
 - Option 4 shows: **1) Reset one game (back to the first restore point)**, **2) Restore one game (choose a restore point)**, **3) Reset all games (back to the first restore point)**, **4) Restore all games (choose a restore point)**, **5) Remove older restore points**, and **B) Back**.
 - Choosing 2 or 4 shows **Restore points, newest first:**. Each row has a date, what kind of restore point it is, and a file count.
@@ -644,7 +644,7 @@ Fix:
 
 2. If the log says the game is already installed at another place, AutoSync is protecting your working copy. It does not make a second copy.
 
-   Next: delete or move the old copy yourself, or run **2) Register only** on the folder that works.
+   Next: run **2) Register only** on the folder that works. Keep the old copy until you have checked that the games start from the replacement. Only then move or delete the old copy yourself.
 
 Expected result: the games are unpacked once, into the games folder you chose, and appear once in TeknoParrot.
 
@@ -677,10 +677,10 @@ Expected result: the line says `OK`, or only the games that cannot be played yet
 
 ### More detail
 
-- A System 11 game is registered only when both of its ZIPs (the game's own ZIP and its parent ZIP) are in the same folder. A folder with only the parent ZIP does not register the game. Put both ZIPs in one folder, then run **2) Register only** again.
-- A System 11 game that has a disc image (`.chd`) gets it chosen for it when there is exactly one. With several, none is guessed.
+- An arcade game that uses the TeknoS11 loader (System 10, System 11, System 12, Sony ZN, Konami 573, Taito G-NET and similar boards) is registered only when both of its ZIPs (the game's own ZIP and its parent ZIP) are in the same folder. A folder with only the parent ZIP does not register the game. Put both ZIPs in one folder, then run **2) Register only** again.
+- A TeknoS11 arcade game that has a disc image (`.chd`) gets it chosen for it when there is exactly one. With several, none is guessed.
 - A LaunchBox game with a `Needs setup` note, or in a `Needs setup` playlist, cannot start yet because its game file, firmware or BepInEx is missing. The note and the playlist entry go away by themselves when that is fixed.
-- A game set to Internal storage (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball) needs no PostgreSQL. The health check shows it as `Game database: OK`. Start the game once so it makes its own database.
+- A game set to Internal storage (Golden Tee Live and PGA Tour games from any year, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball) needs no PostgreSQL. The health check shows it as `Game database: OK`. Start the game once so it makes its own database.
 
 ## A game works in TeknoParrot but not from RetroBat
 
@@ -700,9 +700,31 @@ Fix:
 
    Next: do not delete or reset your games. Nothing here needs it.
 
-Who does what: TeknoParrot Manager adds your games to TeknoParrot and, after you say yes, copies controls you set up to games of the same type, with a backup first. TeknoParrot runs the games and keeps their controls. RetroBat keeps its own game list and starts games its own way.
+Who does what: TeknoParrot Manager adds your games to TeknoParrot and, after you say yes, sets up their buttons from the controller layout you choose, with a backup first. TeknoParrot runs the games and keeps their controls. RetroBat keeps its own game list and starts games its own way.
 
-Mouse and keyboard only for now? Set the controls for one game in TeknoParrotUI and choose its input type there. Test that game before you copy the controls to others with **4) Propagate Controls**. If you add Sinden lightguns later, that setup happens in TeknoParrot and in the gun's own software. TeknoParrot Manager does not set up a lightgun.
+Mouse and keyboard only for now? Set the controls for one game in TeknoParrotUI and choose its input type there, and test that game. If you add Sinden lightguns later, that setup happens in TeknoParrot and in the gun's own software. TeknoParrot Manager does not set up a lightgun.
+
+## You forgot the PostgreSQL password
+
+Symptom: Postgres setup says PostgreSQL rejected the saved password, and nobody knows the right one.
+
+**Why TeknoParrot Manager cannot do this for you.**
+To reset a forgotten PostgreSQL password, the database safety check has to be turned off for a short time.
+While it is off, any program on this PC can open the database without a password.
+If a crash or a power cut happens in the middle, the safety check could be left off.
+TeknoParrot Manager will not take that risk for you.
+You do it yourself, on purpose, with the steps below, and you turn the safety check back on at the end.
+
+1. Stop the Windows service `pgsql-8.3`.
+2. Copy `C:\Program Files (x86)\PostgreSQL\8.3\data\pg_hba.conf` to a safe place.
+3. Open `pg_hba.conf` in Notepad. Add this line above all other lines, then save the file: `host all postgres 127.0.0.1/32 trust`. The safety check is now off.
+4. Start the service. In a Command Prompt, run `"C:\Program Files (x86)\PostgreSQL\8.3\bin\psql.exe" -h 127.0.0.1 -p 5432 -U postgres -d postgres`.
+5. Type `\password postgres` and enter the new password twice. Then type `\q`.
+6. Turn the safety check back on. Stop the service. Put your copy of `pg_hba.conf` back. Start the service.
+7. Open Postgres setup again, choose **F** and type the new password.
+8. Check the safety check is back on. The `trust` line must be gone from `pg_hba.conf`. If it is still there, repeat step 6.
+
+Do step 6 straight away. While the `trust` line is there, any program on this PC can log in as `postgres`. If a step fails, still do step 6 first. The same steps, with more help, are in the User Guide under "Appendix: PostgreSQL password recovery".
 
 ## Still stuck, or the game will not launch?
 
@@ -712,7 +734,7 @@ Check these things first:
 - The game is fully extracted.
 - TeknoParrot is up to date.
 - The required runtimes are installed.
-- Startup files are present. Some games need them from your own collection: PlayStation 3 firmware for RPCS3 games, four files for Chihiro games, or firmware for PCSX2x6 games. If one is missing, the Action Required list names the games that will not start and the next step. Put the matching file in your game collection and run TeknoParrot Manager again. It never downloads these files.
+- Startup files are present. Some games need them from your own collection: firmware for the arcade games that run on PlayStation 3 style hardware (RPCS3), four files for Chihiro games, or firmware for PCSX2x6 games. If one is missing, the Action Required list names the games that will not start and the next step. Put the matching file in your game collection and run TeknoParrot Manager again. It never downloads these files.
 - AutoSync said a game was not updated. It could not save the extra files in the old folder (saves, settings, ReShade files), or no Backups folder is set up. Nothing was changed for that game. Fix the Backups folder or free some space, then run AutoSync again.
 - Check for Updates cannot install in place (you run a build before RC8.1, such as RC8 or RC7). Install the newest release by hand once: download its ZIP from the Releases page and extract all of its files over your TeknoParrot Manager folder. RC8.1 and later can update themselves.
 

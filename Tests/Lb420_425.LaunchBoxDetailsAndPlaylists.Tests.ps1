@@ -145,7 +145,7 @@ Describe 'LB420/421: details and playlists' {
         (Get-Lb420Game $fx 'g3').Developer | Should -BeExactly 'Namco'
         $other = Get-Lb420Game $fx 'g4'
         $other.SelectSingleNode('ReleaseDate') | Should -BeNullOrEmpty
-        @(Get-ChildItem -LiteralPath $fx.Playlists -Filter '*.xml' | Select-Object -ExpandProperty BaseName | Sort-Object) | Should -Be @('Driving games', 'Light gun games', 'Namco Super System 23', 'Sega Lindbergh')
+        @(Get-ChildItem -LiteralPath $fx.Playlists -Filter '*.xml' | Select-Object -ExpandProperty BaseName | Sort-Object) | Should -Be @('TeknoParrot Driving games', 'TeknoParrot Light gun games', 'TeknoParrot Namco Super System 23', 'TeknoParrot Sega Lindbergh')
         $second = Invoke-Lb420 -Fixture $fx
         $second.Outcome | Should -BeExactly 'NO_CHANGES'
     }
@@ -167,12 +167,12 @@ Describe 'LB420/421: details and playlists' {
         # Mutation: guess light gun or driving from the hardware name -> the plain Namco game lands in a wrong list.
         $fx = New-Lb420Fixture
         [void](Invoke-Lb420 -Fixture $fx)
-        function Get-Ids($name) { return @(([xml][System.IO.File]::ReadAllText((Join-Path $fx.Playlists ($name + '.xml')))).SelectNodes('//PlaylistGame/GameId') | ForEach-Object { $_.InnerText } | Sort-Object) }
+        function Get-Ids($name) { return @(([xml][System.IO.File]::ReadAllText((Join-Path $fx.Playlists ('TeknoParrot ' + $name + '.xml')))).SelectNodes('//PlaylistGame/GameId') | ForEach-Object { $_.InnerText } | Sort-Object) }
         (Get-Ids 'Sega Lindbergh') | Should -Be @('g1', 'g2')
         (Get-Ids 'Namco Super System 23') | Should -Be @('g3')
         (Get-Ids 'Light gun games') | Should -Be @('g1')
         (Get-Ids 'Driving games') | Should -Be @('g2')
-        Test-Path -LiteralPath (Join-Path $fx.Playlists 'Needs setup.xml') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $fx.Playlists 'TeknoParrot Needs setup.xml') | Should -BeFalse
     }
 
     It 'updates only playlists it made and leaves the user''s own playlist alone' {
@@ -185,14 +185,36 @@ Describe 'LB420/421: details and playlists' {
         $r = Invoke-Lb420 -Fixture $fx
         $r.Outcome | Should -BeExactly 'SAVED'
         (Get-FileHash -LiteralPath $mine).Hash | Should -BeExactly $hashBefore
-        (@(Format-TpmLaunchBoxEnrichLine -Plan $r.EnrichPlan) -join "`n") | Should -Match 'Light gun games: left alone'
+        (@(Format-TpmLaunchBoxEnrichLine -Plan $r.EnrichPlan) -join "`n") | Should -Match 'Playlist Light gun games: already exists under that name'
+        Test-Path -LiteralPath (Join-Path $fx.Playlists 'TeknoParrot Light gun games.xml') | Should -BeFalse
         # One of its own playlists follows a new game; the other lists stay.
         $platform = [System.IO.File]::ReadAllText($fx.Platform).Replace('</LaunchBox>', ((New-Lb420Game 'g7' 'Ghost Squad 2' 'GhostSquad') + '</LaunchBox>'))
         [System.IO.File]::WriteAllText($fx.Platform, $platform)
         $again = Invoke-Lb420 -Fixture $fx
         $again.Outcome | Should -BeExactly 'SAVED'
-        @(([xml][System.IO.File]::ReadAllText((Join-Path $fx.Playlists 'Sega Lindbergh.xml'))).SelectNodes('//PlaylistGame')).Count | Should -Be 3
+        @(([xml][System.IO.File]::ReadAllText((Join-Path $fx.Playlists 'TeknoParrot Sega Lindbergh.xml'))).SelectNodes('//PlaylistGame')).Count | Should -Be 3
         (Get-FileHash -LiteralPath $mine).Hash | Should -BeExactly $hashBefore
+    }
+
+    It 'keeps an older TPM playlist under its old name and makes no duplicate' {
+        # Mutation: always write the new name -> the user ends up with two playlists for the same games.
+        $fx = New-Lb420Fixture
+        [void][System.IO.Directory]::CreateDirectory($fx.Playlists)
+        $old = Join-Path $fx.Playlists 'Sega Lindbergh.xml'
+        [System.IO.File]::WriteAllText($old, '<LaunchBox><Playlist><PlaylistId>old</PlaylistId><Name>Sega Lindbergh</Name><NestedName>Sega Lindbergh</NestedName><Notes>' + (Get-TpmLaunchBoxPlaylistMarker) + '</Notes></Playlist></LaunchBox>')
+        $hashBefore = (Get-FileHash -LiteralPath $old).Hash
+        [void](Invoke-Lb420 -Fixture $fx)
+        (Get-FileHash -LiteralPath $old).Hash | Should -BeExactly $hashBefore
+        Test-Path -LiteralPath (Join-Path $fx.Playlists 'TeknoParrot Sega Lindbergh.xml') | Should -BeFalse
+    }
+
+    It 'escapes special characters in a nested playlist name' {
+        # Mutation: build the XML by hand -> an ampersand breaks the playlist file.
+        $doc = New-Object System.Xml.XmlDocument
+        $doc.LoadXml('<LaunchBox />')
+        [void](Update-TpmLaunchBoxPlaylistDocument -Doc $doc -Name 'Guns & Cars' -Games @() -Exists $false)
+        $doc.OuterXml | Should -Match '<Name>TeknoParrot Guns &amp; Cars</Name><NestedName>Guns &amp; Cars</NestedName>'
+        ([xml]$doc.OuterXml).LaunchBox.Playlist.NestedName | Should -BeExactly 'Guns & Cars'
     }
 
     It 'undo through the existing restore puts every file back' {
@@ -299,7 +321,7 @@ Describe 'LB425: games that are not ready to play' {
         $notes | Should -Match 'My own note'
         $notes | Should -Match 'not ready to play yet'
         $notes | Should -Match 'game file was not found'
-        @(([xml][System.IO.File]::ReadAllText((Join-Path $fx.Playlists 'Needs setup.xml'))).SelectNodes('//PlaylistGame/GameId') | ForEach-Object { $_.InnerText }) | Should -Be @('g5')
+        @(([xml][System.IO.File]::ReadAllText((Join-Path $fx.Playlists 'TeknoParrot Needs setup.xml'))).SelectNodes('//PlaylistGame/GameId') | ForEach-Object { $_.InnerText }) | Should -Be @('g5')
         # A game that is ready is not marked.
         [string](Get-Lb420Game $fx 'g1').Notes | Should -Not -Match 'not ready'
         (Invoke-Lb420 -Fixture $fx).Outcome | Should -BeExactly 'NO_CHANGES'
@@ -316,7 +338,7 @@ Describe 'LB425: games that are not ready to play' {
         $fixed.Outcome | Should -BeExactly 'SAVED'
         (@(Format-TpmLaunchBoxEnrichLine -Plan $fixed.EnrichPlan) -join "`n") | Should -Match 'Broken: is ready now'
         [string](Get-Lb420Game $fx 'g5').Notes | Should -BeExactly 'My own note'
-        @(([xml][System.IO.File]::ReadAllText((Join-Path $fx.Playlists 'Needs setup.xml'))).SelectNodes('//PlaylistGame')).Count | Should -Be 0
+        @(([xml][System.IO.File]::ReadAllText((Join-Path $fx.Playlists 'TeknoParrot Needs setup.xml'))).SelectNodes('//PlaylistGame')).Count | Should -Be 0
     }
 
     It 'says the profile is missing when a LaunchBox game has no profile any more' {
@@ -334,6 +356,17 @@ Describe 'LB425: games that are not ready to play' {
         $problems = Get-TpmSetupProblems -ProfileFiles @(Get-ChildItem -LiteralPath $fx.Profiles -Filter '*.xml') -TpRoot $fx.Tp
         @($problems['tekken'])[0] | Should -Match 'PlayStation 2 BIOS: bios.bin is missing'
         $problems.ContainsKey('ghostsquad') | Should -BeFalse
+    }
+
+    It 'only takes away the Needs setup block TeknoParrot Manager wrote, never the text the player typed around a copied marker' {
+        # Mutation: strip from the FIRST start marker in the Notes -> the player's text after their own copied marker is deleted with the block.
+        $doc = New-Object System.Xml.XmlDocument
+        $doc.LoadXml('<Game><Notes></Notes></Game>')
+        $mine = "Remember this [TeknoParrot Manager: needs setup] and this too."
+        Set-XmlChildText $doc.DocumentElement 'Notes' $mine
+        Update-TpmLaunchBoxSetupNote -Node $doc.DocumentElement -Problems @('The game file was not found.') | Should -BeExactly 'Flagged'
+        Update-TpmLaunchBoxSetupNote -Node $doc.DocumentElement -Problems @() | Should -BeExactly 'Cleared'
+        (Get-XmlChildText $doc.DocumentElement 'Notes') | Should -BeExactly $mine
     }
 }
 
@@ -387,7 +420,7 @@ Describe 'LB420/421: the real LaunchBox file format' {
         # Mutation: nest PlaylistGame inside Playlist, or leave out the fields -> LaunchBox shows an empty playlist.
         $fx = New-Lb420Fixture -ExtraGameXml (New-Lb420Game 'g9' 'With id' 'GhostSquad' -Extra '<DatabaseID>31460</DatabaseID>')
         [void](Invoke-Lb420 -Fixture $fx)
-        $doc = [xml][System.IO.File]::ReadAllText((Join-Path $fx.Playlists 'Sega Lindbergh.xml'))
+        $doc = [xml][System.IO.File]::ReadAllText((Join-Path $fx.Playlists 'TeknoParrot Sega Lindbergh.xml'))
         $doc.DocumentElement.Name | Should -BeExactly 'LaunchBox'
         @($doc.SelectNodes('/LaunchBox/Playlist')).Count | Should -Be 1
         @($doc.SelectNodes('/LaunchBox/Playlist/PlaylistGame')).Count | Should -Be 0
@@ -396,7 +429,8 @@ Describe 'LB420/421: the real LaunchBox file format' {
         (@($list.ChildNodes | ForEach-Object { $_.Name }) -join '|') | Should -BeExactly ($script:RealPlaylistTags -join '|')
         $list.AutoPopulate | Should -BeExactly 'false'
         $list.IsAutogenerated | Should -BeExactly 'false'
-        $list.SelectSingleNode('Name').InnerText | Should -BeExactly 'Sega Lindbergh'
+        $list.SelectSingleNode('Name').InnerText | Should -BeExactly 'TeknoParrot Sega Lindbergh'
+        $list.SelectSingleNode('NestedName').InnerText | Should -BeExactly 'Sega Lindbergh'
         $list.Notes | Should -BeExactly (Get-TpmLaunchBoxPlaylistMarker)
         $first = $doc.SelectSingleNode("/LaunchBox/PlaylistGame[GameId='g1']")
         (@($first.ChildNodes | ForEach-Object { $_.Name }) -join '|') | Should -BeExactly ('GameId|GameTitle|GameFileName|GamePlatform|ManualOrder')

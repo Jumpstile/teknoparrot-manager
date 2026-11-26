@@ -186,6 +186,22 @@ Describe 'Use my bezel folder (issue 429)' {
         Test-Path -LiteralPath $dest | Should -BeTrue
     }
 
+    It 'puts the user''s saved original back on Undo even when the copy TPM made was already deleted' {
+        # Mutation: skip a game whose copy is gone and clear its record -> the saved original is forgotten while the screen says it was put back.
+        $dir = New-F429Game -Root $script:root -Code 'HOTD4' -Title 'The House of the Dead 4' -ReShade
+        $dest = Join-Path $dir 'reshade-shaders\Textures\bezel.png'
+        New-F429Png $dest 'users-own'
+        $original = (Get-FileHash -LiteralPath $dest).Hash
+        New-F429Png (Join-Path $script:root 'bezels\The House of the Dead 4.png') 'from-folder'
+        $plan = Get-F429Plan -Root $script:root -StateRoot $script:stateRoot
+        (Invoke-TpmBezelApply -Rows $plan.Rows -ReplaceUserBezels -StateRoot $script:stateRoot).Outcome | Should -Be 'SUCCEEDED'
+        Remove-Item -LiteralPath $dest -Force
+        $undo = Invoke-TpmBezelUndo -StateRoot $script:stateRoot
+        $undo.Outcome | Should -BeIn @('SUCCEEDED', 'NO_OP')
+        Test-Path -LiteralPath $dest | Should -BeTrue
+        (Get-FileHash -LiteralPath $dest).Hash | Should -Be $original
+    }
+
     It 'remembers a pick, including "no bezel for this game", so the game is not asked about again' {
         # Mutation: do not read the saved picks -> a game the user said "none" for gets a bezel anyway.
         $null = New-F429Game -Root $script:root -Code 'HOTD4' -Title 'The House of the Dead 4' -ReShade

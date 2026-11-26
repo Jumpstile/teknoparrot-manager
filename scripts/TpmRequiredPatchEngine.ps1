@@ -1,6 +1,8 @@
-$script:TpmRequiredPatchCatalogSha256 = '8A2BB6B4017440653F846042C3DAEC574E07AF03CBBA9E25BB4DF65A8E210BBD'
+$script:TpmRequiredPatchCatalogSha256 = 'EE5BDEBB68424069DF51A8A178D2AEA8A7B7326A9643661F597818FF4B1F405D'
 # Largest single patch file the engine will stage, back up or replace (512 MiB). Files are always streamed and hashed in 64 KiB blocks, never read whole into memory.
 $script:TpmPatchMaxBytes = 536870912
+# Largest receipt.json any reader accepts (256 KiB). One limit for every reader, so a long receipt is never skipped by one and read by another.
+$script:TpmReceiptMaxBytes = 262144
 
 function Get-TpmRegisteredPatchContext {
     param([Parameter(Mandatory)]$Entry,[Parameter(Mandatory)][string]$TpRoot,[Parameter(Mandatory)][string]$UserProfilesDir,[Parameter(Mandatory)][string]$ManagerRoot)
@@ -92,7 +94,7 @@ function Test-TpmResetSnapshot {
             $paths[0].Sha256 -isnot [string] -or -not $paths[0].Exists -or $paths[0].IsDirectory -or $paths[0].Sha256 -notmatch '^[A-Fa-f0-9]{64}$'){throw 'Receipt history target state is invalid.'}
         $target=[IO.Path]::GetFullPath($paths[0].TargetPath)
         if(-not (Test-PathInside $target $backupsRoot) -or -not (Test-TpmNoReparsePath $target) -or
-            -not [IO.File]::Exists($target) -or (Get-Item -LiteralPath $target -ErrorAction Stop).Length -gt 262144 -or
+            -not [IO.File]::Exists($target) -or (Get-Item -LiteralPath $target -ErrorAction Stop).Length -gt $script:TpmReceiptMaxBytes -or
             (Get-FileHash -LiteralPath $target -Algorithm SHA256 -ErrorAction Stop).Hash -ine $paths[0].Sha256){throw 'Receipt history target does not match its captured state.'}
         $result.Verified=$true
         $result.Manifest=$manifest
@@ -119,7 +121,7 @@ function New-TpmResetSnapshot {
         if(-not $boundary.Verified){throw $boundary.Reason}
         $target=[IO.Path]::GetFullPath($TargetPaths[0])
         if(-not (Test-PathInside $target $backups) -or -not (Test-TpmNoReparsePath $target) -or
-            -not [IO.File]::Exists($target) -or (Get-Item -LiteralPath $target -ErrorAction Stop).Length -gt 262144){throw 'Receipt history target is missing, oversized, or outside the backup root.'}
+            -not [IO.File]::Exists($target) -or (Get-Item -LiteralPath $target -ErrorAction Stop).Length -gt $script:TpmReceiptMaxBytes){throw 'Receipt history target is missing, oversized, or outside the backup root.'}
         $targetHash=(Get-FileHash -LiteralPath $target -Algorithm SHA256 -ErrorAction Stop).Hash
         $snapshot=Join-Path (Join-Path $store 'Snapshots') $SnapshotId
         $manifestPath=Join-Path $snapshot 'manifest.json'
@@ -168,7 +170,7 @@ function Get-TpmPatchReceiptRecords {
         $receiptPath=Join-Path $directory.FullName 'receipt.json'
         if (-not (Test-TpmNoReparsePath $receiptPath) -or -not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) { continue }
         try {
-            if ((Get-Item -LiteralPath $receiptPath).Length -gt 16384) { continue }
+            if ((Get-Item -LiteralPath $receiptPath).Length -gt $script:TpmReceiptMaxBytes) { continue }
             $receipt=[IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json -ErrorAction Stop
             # A receipt without its patch, profile and game identity can never match a game, so it is not a record.
             if ($receipt -is [pscustomobject] -and @('PatchId','ProfileId','GameRoot' | Where-Object { $null -eq $receipt.PSObject.Properties[$_] }).Count -eq 0) {
@@ -386,7 +388,7 @@ function Get-TpmPatchPlan {
         if (($catalog.Schema -isnot [int] -and $catalog.Schema -isnot [long]) -or $catalog.Schema -ne 3 -or $catalog.Entries -isnot [array] -or @($catalog.Entries).Count -eq 0) { throw 'Unsupported catalog schema.' }
         $ids = @{}
         $fields = @('Id','ProfileId','Executable','ExecutableSha256','SourceUrl','SourceRevision','Operations','ExclusiveGroup')
-        $optional = @('BuildName','SourceRole','SourceSet','SourceEntry','SourceSize','SourceSha1','SourceSha256','Prerequisites','HardwarePredicate','AllowExecutableSelfPatch')
+        $optional = @('BuildName','SourceRole','SourceSet','SourceEntry','AlternateSources','SourceSize','SourceSha1','SourceSha256','Prerequisites','HardwarePredicate','AllowExecutableSelfPatch')
         foreach ($entry in @($catalog.Entries)) {
             $entryNames = @($entry.PSObject.Properties.Name)
             $unknown = @($entryNames | Where-Object { $_ -notin ($fields + $optional) })
@@ -402,6 +404,15 @@ function Get-TpmPatchPlan {
             if ($entry.PSObject.Properties['SourceSha1'] -and [string]$entry.SourceSha1 -notmatch '^[a-fA-F0-9]{40}$') { throw 'Invalid source SHA-1 pin.' }
             if ($entry.PSObject.Properties['SourceSha256'] -and [string]$entry.SourceSha256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'Invalid source SHA-256 pin.' }
             if ($entry.PSObject.Properties['AllowExecutableSelfPatch'] -and $entry.AllowExecutableSelfPatch -isnot [bool]) { throw 'Invalid executable self-patch opt-in.' }
+            if ($entry.PSObject.Properties['AlternateSources']) {
+                if ($entry.AlternateSources -isnot [array] -or @($entry.AlternateSources).Count -eq 0) { throw 'Invalid alternate source list.' }
+                foreach ($alternate in @($entry.AlternateSources)) {
+                    Assert-TpmPatchFields $alternate @('SourceSet','SourceEntry')
+                    if ($alternate.SourceSet -isnot [string] -or $alternate.SourceEntry -isnot [string] -or
+                        [string]::IsNullOrWhiteSpace($alternate.SourceSet) -or [string]::IsNullOrWhiteSpace($alternate.SourceEntry) -or
+                        [IO.Path]::GetFileName($alternate.SourceSet) -cne $alternate.SourceSet -or $alternate.SourceSet -match '[<>:"|?*\p{Cc}]') { throw 'Invalid alternate source.' }
+                }
+            }
             foreach ($field in @('Id', 'ProfileId', 'Executable', 'ExecutableSha256', 'SourceUrl', 'SourceRevision')) { if ($entry.PSObject.Properties[$field].Value -isnot [string]) { throw 'Invalid catalog string field.' } }
             if ($entry.Id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$' -or $ids.ContainsKey([string]$entry.Id)) { throw 'Duplicate/invalid patch identity.' }
             $ids[[string]$entry.Id] = $true
@@ -475,7 +486,7 @@ $planTargets=@($Plan.Operations|ForEach-Object {$_.RelativeTarget});$rootOps=@($
         if($directory.Name -notmatch '^[a-f0-9]{32}$'){continue}
         $path=Join-Path $directory.FullName 'receipt.json'
         if(-not [IO.File]::Exists($path) -or -not (Test-TpmNoReparsePath $path)){continue}
-        $raw=Read-TpmMultiPatchReceiptBytes -Path $path -MaximumBytes 262144
+        $raw=Read-TpmMultiPatchReceiptBytes -Path $path -MaximumBytes $script:TpmReceiptMaxBytes
         $totalReceiptBytes+=$raw.Length
         if($totalReceiptBytes -gt 16777216){throw 'Exclusive-group receipt census exceeds the 16 MiB bound.'}
         $sha=[Security.Cryptography.SHA256]::Create()
@@ -534,7 +545,7 @@ $planTargets=@($Plan.Operations|ForEach-Object {$_.RelativeTarget});$rootOps=@($
                 if($directory.Name -notmatch '^[a-f0-9]{32}$'){continue}
                 $path=Join-Path $directory.FullName 'receipt.json'
                 if(-not [IO.File]::Exists($path) -or -not (Test-TpmNoReparsePath $path)){continue}
-                $raw=Read-TpmMultiPatchReceiptBytes -Path $path -MaximumBytes 262144
+                $raw=Read-TpmMultiPatchReceiptBytes -Path $path -MaximumBytes $script:TpmReceiptMaxBytes
                 $currentReceiptBytes+=$raw.Length
                 if($currentReceiptBytes -gt 16777216){throw 'Exclusive-group receipt census exceeds the 16 MiB bound.'}
                 $sha=[Security.Cryptography.SHA256]::Create()
@@ -563,7 +574,7 @@ function Assert-TpmMultiPatchExclusive {
     foreach($directory in @(Get-ChildItem -LiteralPath $Plan.RecoveryRoot -Directory -ErrorAction Stop)){
         $path=Join-Path $directory.FullName 'receipt.json'
         if($directory.Name -notmatch '^[a-f0-9]{32}$' -or -not (Test-TpmNoReparsePath $path) -or -not [IO.File]::Exists($path)){continue}
-        if((Get-Item -LiteralPath $path).Length -gt 262144){throw 'Exclusive-group receipt exceeds the supported bound.'}
+        if((Get-Item -LiteralPath $path).Length -gt $script:TpmReceiptMaxBytes){throw 'Exclusive-group receipt exceeds the supported bound.'}
         try{$record=[IO.File]::ReadAllText($path)|ConvertFrom-Json -ErrorAction Stop}catch{throw 'A saved patch receipt could not be read, so no patch can be changed for this game. Move that receipt folder out of the game''s GamePatches backup folder and try again.'}
         if($record.Schema -ne 3 -or $record.GameRoot -ine $Plan.GameRoot){continue}
         if($record.State -ceq 'Prepared'){
@@ -752,7 +763,7 @@ function Assert-TpmMultiPatchTerminalCheckpoint {
         @($check.Manifest.Paths).Count -ne 1){throw 'Grouped terminal receipt history is unavailable or corrupt.'}
     $captured=@($check.Manifest.Paths)[0]
     if($captured.TargetPath -ine $path -or -not $captured.Exists -or $captured.IsDirectory -or
-        (Get-Item -LiteralPath $path).Length -gt 262144 -or
+        (Get-Item -LiteralPath $path).Length -gt $script:TpmReceiptMaxBytes -or
         (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ine $captured.Sha256){throw 'Grouped terminal receipt differs from verified history.'}
 }
 
@@ -761,7 +772,7 @@ function New-TpmMultiPatchTerminalCheckpoint {
     if($Receipt.State -cnotin @('Restored','RolledBack')){throw 'Only a verified completed transaction may retain a terminal receipt.'}
     # Called under the transaction gate only after target verification and history.
     $receiptPath=Join-Path $Directory 'receipt.json'
-    if(-not (Test-TpmNoReparsePath $receiptPath) -or (Get-Item -LiteralPath $receiptPath).Length -gt 262144){throw 'Grouped terminal receipt path/bound changed.'}
+    if(-not (Test-TpmNoReparsePath $receiptPath) -or (Get-Item -LiteralPath $receiptPath).Length -gt $script:TpmReceiptMaxBytes){throw 'Grouped terminal receipt path/bound changed.'}
     $terminalReceipt=[IO.File]::ReadAllText($receiptPath)|ConvertFrom-Json -ErrorAction Stop
     if($terminalReceipt.State -cne $Receipt.State -or $terminalReceipt.TransactionId -cne $Receipt.TransactionId){throw 'Grouped terminal receipt disposition changed.'}
     [void](Assert-TpmMultiPatchReceipt -Plan $Plan -Receipt $terminalReceipt -CatalogSha256 $Receipt.CatalogSha256 -Directory $Directory)
@@ -803,7 +814,7 @@ function Assert-TpmPatchFreeSpace {
 function Invoke-TpmPatchFileBatch {
     param([Parameter(Mandatory)]$Plan,[Parameter(Mandatory)][string]$CatalogSha256,
         [ValidateSet('Apply','Undo')][string]$Action='Apply',[string]$RecoveryDirectory='',$Receipt=$null,[scriptblock]$ValidationAction=$null)
-    $apply=($Action -ceq 'Apply');$run=$RecoveryDirectory;$records=@();$locks=@();$exeGuard=$null;$gate=$null;$committed=$false;$receiptReady=(-not $apply)
+    $apply=($Action -ceq 'Apply');$run=$RecoveryDirectory;$records=@();$locks=@();$exeGuard=$null;$gate=$null;$committed=$false;$receiptReady=$false
     try{
         foreach($parent in @($Plan.Operations|ForEach-Object {[IO.Path]::GetDirectoryName($_.Target)}|Sort-Object -Unique)){
             $locks+=@(Open-TpmPatchDirectoryBoundary $parent)
@@ -854,6 +865,7 @@ function Invoke-TpmPatchFileBatch {
         $gate=New-Object IO.FileStream($gatePath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
         if((Get-TpmSupportFinalPathFromHandle $gate.SafeFileHandle) -ine (Resolve-TpmSupportExpectedFinalPath $gatePath) -or $gate.Length -ne 0){throw 'Grouped transaction gate identity is invalid.'}
         [void][TpmSupportNativeMethods]::PatchFileIdentity($gate.SafeFileHandle)
+        if(-not $apply){$receiptReady=$true}
         if($apply){
             Assert-TpmMultiPatchExclusive $Plan -IncludePrepared
             $run=Join-Path $Plan.RecoveryRoot ([guid]::NewGuid().ToString('N'))
@@ -1125,7 +1137,7 @@ function Read-TpmCatalogPatchReceipt {
     if (-not (Test-PathInside $RecoveryDirectory $plan.RecoveryRoot) -or -not (Test-TpmNoReparsePath $RecoveryDirectory)) { throw 'Invalid recovery directory.' }
     $receiptPath = Join-Path $RecoveryDirectory 'receipt.json'
     if (-not (Test-TpmNoReparsePath $receiptPath)) { throw 'Unsafe receipt.' }
-    if ((Get-Item -LiteralPath $receiptPath -ErrorAction Stop).Length -gt 262144) { throw 'Retained receipt exceeds the supported size.' }
+    if ((Get-Item -LiteralPath $receiptPath -ErrorAction Stop).Length -gt $script:TpmReceiptMaxBytes) { throw 'Retained receipt exceeds the supported size.' }
     $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json -ErrorAction Stop
     return (Assert-TpmMultiPatchReceipt -Plan $Plan -Receipt $receipt -CatalogSha256 $CatalogSha256 -Directory $RecoveryDirectory)
 }
@@ -1218,6 +1230,46 @@ function Read-TpmRequiredPatchCatalog {
     return [pscustomobject]@{ Path=$path; Content=$content; CatalogSha256=$sha256; Entries=@($catalog.Entries); Schema=[int]$catalog.Schema }
 }
 
+# The ZIP files and member names that can supply this recipe's file: the main one first, then any alternates the recipe lists.
+# Every choice is checked against the same size and SHA-256 pins, so an alternate never weakens the check.
+function Get-TpmRequiredPatchSourceChoices {
+    param([Parameter(Mandatory)]$Entry)
+    $choices = New-Object System.Collections.Generic.List[object]
+    [void]$choices.Add([pscustomobject]@{ SourceSet = [string]$Entry.SourceSet; SourceEntry = [string]$Entry.SourceEntry })
+    if ($Entry.PSObject.Properties['AlternateSources']) {
+        foreach ($alternate in @($Entry.AlternateSources)) { [void]$choices.Add([pscustomobject]@{ SourceSet = [string]$alternate.SourceSet; SourceEntry = [string]$alternate.SourceEntry }) }
+    }
+    foreach ($choice in $choices) {
+        if ([IO.Path]::GetFileName($choice.SourceSet) -cne $choice.SourceSet -or
+            $choice.SourceSet -match '[<>:"|?*\p{Cc}]') { throw 'The recipe source set must be one exact ZIP filename.' }
+    }
+    return $choices.ToArray()
+}
+
+# The first choice whose ZIP is a safe file in the folder, or $null.
+function Find-TpmRequiredPatchSourceChoice {
+    param([Parameter(Mandatory)]$Entry, [string]$Folder = '')
+    if ([string]::IsNullOrWhiteSpace($Folder) -or
+        -not (Test-Path -LiteralPath $Folder -PathType Container -ErrorAction SilentlyContinue) -or
+        -not (Test-TpmNoReparsePath $Folder)) { return $null }
+    foreach ($choice in @(Get-TpmRequiredPatchSourceChoices -Entry $Entry)) {
+        $archivePath = Join-Path $Folder $choice.SourceSet
+        if ((Test-Path -LiteralPath $archivePath -PathType Leaf -ErrorAction SilentlyContinue) -and (Test-TpmNoReparsePath $archivePath)) { return $choice }
+    }
+    return $null
+}
+
+# Plain words for a missing ZIP: it is not downloaded by TeknoParrot Manager, and the exact file names that would work.
+function Get-TpmRequiredPatchMissingZipText {
+    param([Parameter(Mandatory)]$Entry)
+    $choices = @(Get-TpmRequiredPatchSourceChoices -Entry $Entry)
+    $names = (@($choices | ForEach-Object { '"' + $_.SourceSet + '"' }) -join ' or ')
+    $text = 'The ZIP file with this patch was not found. TeknoParrot Manager does not download it. Put ' + $names + ' in the folder you choose.'
+    if ($choices.Count -gt 1) { $text += ' Either file works; the second is the ZIP of the game itself.' }
+    elseif ([string]$Entry.SourceRole -ceq 'UserSelected') { $text += ' This is a separate download that TeknoParrot Manager does not provide.' }
+    return $text
+}
+
 function Resolve-TpmRequiredPatchSourceRoot {
     param(
         [Parameter(Mandatory)]$Entry,
@@ -1225,36 +1277,27 @@ function Resolve-TpmRequiredPatchSourceRoot {
         [string]$SupplementarySource = '',
         [string]$RememberedFolder = ''
     )
-    if ([IO.Path]::GetFileName([string]$Entry.SourceSet) -cne [string]$Entry.SourceSet -or
-        [string]$Entry.SourceSet -match '[<>:"|?*\p{Cc}]') { throw 'The recipe source set must be one exact ZIP filename.' }
+    $choices = @(Get-TpmRequiredPatchSourceChoices -Entry $Entry)
     $root = switch ([string]$Entry.SourceRole) {
         'Main' { $MainSource }
         'Supplementary' { $SupplementarySource }
         default { '' }
     }
-    $validRoot = $false
-    if (-not [string]::IsNullOrWhiteSpace($root) -and
-        (Test-Path -LiteralPath $root -PathType Container -ErrorAction SilentlyContinue) -and
-        (Test-TpmNoReparsePath $root)) {
-        $archivePath = Join-Path $root ([string]$Entry.SourceSet)
-        $validRoot = (Test-Path -LiteralPath $archivePath -PathType Leaf -ErrorAction SilentlyContinue) -and
-            (Test-TpmNoReparsePath $archivePath)
-    }
-    if ($validRoot) { return [IO.Path]::GetFullPath($root) }
+    if (Find-TpmRequiredPatchSourceChoice -Entry $Entry -Folder $root) { return [IO.Path]::GetFullPath($root) }
     # The folder the user gave for an earlier patch is tried first, so the question is not asked again when this ZIP is there too.
-    if (-not [string]::IsNullOrWhiteSpace($RememberedFolder) -and
-        (Test-Path -LiteralPath $RememberedFolder -PathType Container -ErrorAction SilentlyContinue) -and
-        (Test-TpmNoReparsePath $RememberedFolder)) {
-        $rememberedArchive = Join-Path $RememberedFolder ([string]$Entry.SourceSet)
-        if ((Test-Path -LiteralPath $rememberedArchive -PathType Leaf -ErrorAction SilentlyContinue) -and (Test-TpmNoReparsePath $rememberedArchive)) { return [IO.Path]::GetFullPath($RememberedFolder) }
-    }
+    if (Find-TpmRequiredPatchSourceChoice -Entry $Entry -Folder $RememberedFolder) { return [IO.Path]::GetFullPath($RememberedFolder) }
     $sourceLabel = switch ([string]$Entry.SourceRole) {
         'Main' { 'Main' }
         'Supplementary' { 'Supplementary' }
         'UserSelected' { 'patch' }
         default { 'required patch' }
     }
-    Write-Host ("  Select the local {0} ZIP folder containing this exact file: {1}" -f $sourceLabel,$Entry.SourceSet) -ForegroundColor Cyan
+    if ($choices.Count -eq 1) {
+        Write-Host ("  Select the local {0} ZIP folder containing this exact file: {1}" -f $sourceLabel,$choices[0].SourceSet) -ForegroundColor Cyan
+    } else {
+        Write-Host ("  Select the local {0} ZIP folder containing one of these exact files:" -f $sourceLabel) -ForegroundColor Cyan
+        foreach ($choice in $choices) { Write-Host ('    ' + $choice.SourceSet) -ForegroundColor Cyan }
+    }
     Write-Host '  TeknoParrot Manager reads only the named file inside the ZIP. It does not download or unpack the whole ZIP.' -ForegroundColor DarkGray
     Write-Host '  Do not have it? Press Enter with nothing typed to skip this patch. Nothing is changed, and you go on to the next one.' -ForegroundColor Yellow
     $selected = Read-PathWithBrowse -Prompt 'Folder containing the exact required local ZIP' -Mode Folder -InitialDirectory $root
@@ -1262,9 +1305,9 @@ function Resolve-TpmRequiredPatchSourceRoot {
         -not (Test-Path -LiteralPath $selected -PathType Container -ErrorAction SilentlyContinue) -or
         -not (Test-TpmNoReparsePath $selected)) { throw 'No safe local source folder was selected.' }
     $selected = [IO.Path]::GetFullPath($selected)
-    $archivePath = Join-Path $selected ([string]$Entry.SourceSet)
-    if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf -ErrorAction SilentlyContinue) -or
-        -not (Test-TpmNoReparsePath $archivePath)) { throw 'The selected folder does not contain the exact required ZIP.' }
+    if (-not (Find-TpmRequiredPatchSourceChoice -Entry $Entry -Folder $selected)) {
+        throw ('The selected folder does not contain the exact required ZIP. ' + (Get-TpmRequiredPatchMissingZipText -Entry $Entry))
+    }
     return $selected
 }
 
@@ -1315,7 +1358,9 @@ function New-TpmRequiredPatchPayloadStage {
         if (-not $script:TpmOwnedLayout -or -not $script:TpmOwnedLayout.Temp -or
             -not (Test-PathInside $script:TpmOwnedLayout.Temp $script:TpmOwnedLayout.Root) -or
             -not (Test-TpmNoReparsePath $script:TpmOwnedLayout.Temp)) { throw 'The TeknoParrot Manager temporary staging root is unavailable.' }
-        $archivePath = [IO.Path]::GetFullPath((Join-Path $SourceRoot ([string]$Entry.SourceSet)))
+        $choice = Find-TpmRequiredPatchSourceChoice -Entry $Entry -Folder $SourceRoot
+        if (-not $choice) { throw ('The exact local source ZIP is unavailable or unsafe. ' + (Get-TpmRequiredPatchMissingZipText -Entry $Entry)) }
+        $archivePath = [IO.Path]::GetFullPath((Join-Path $SourceRoot $choice.SourceSet))
         if (-not (Test-PathInside $archivePath $SourceRoot) -or -not (Test-TpmNoReparsePath $archivePath) -or
             -not (Test-Path -LiteralPath $archivePath -PathType Leaf)) { throw 'The exact local source ZIP is unavailable or unsafe.' }
         if ($Entry.SourceSize -isnot [int] -and $Entry.SourceSize -isnot [long]) { throw 'The recipe has no bounded member size.' }
@@ -1332,14 +1377,14 @@ function New-TpmRequiredPatchPayloadStage {
         $payload = Resolve-TpmPatchPath $stage ([string]$Entry.Operations[0].Payload) -Staging
         [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($payload))
         if ($archivePath -match '\.(7z|rar)$') {
-            $process = Start-TpmSevenZipMember -ArchivePath $archivePath -Member ([string]$Entry.SourceEntry) -Size ([int64]$Entry.SourceSize)
+            $process = Start-TpmSevenZipMember -ArchivePath $archivePath -Member $choice.SourceEntry -Size ([int64]$Entry.SourceSize)
             $memberStream = $process.StandardOutput.BaseStream
         } else {
             # Fixed framework assembly names are required by Windows PowerShell 5.1.
             Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
             Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
             $archive = [IO.Compression.ZipFile]::OpenRead($archivePath)
-            $members = @($archive.Entries | Where-Object { $_.FullName -ieq [string]$Entry.SourceEntry })
+            $members = @($archive.Entries | Where-Object { $_.FullName -ieq $choice.SourceEntry })
             if ($members.Count -ne 1 -or $members[0].Length -ne [int64]$Entry.SourceSize) {
                 throw 'The exact required ZIP member is absent, duplicated, or has a different size.'
             }
@@ -1362,7 +1407,7 @@ function New-TpmRequiredPatchPayloadStage {
         if ($sha256 -ine [string]$Entry.SourceSha256 -or
             $sha256 -ine [string]$Entry.Operations[0].PayloadSha256 -or
             $sha256 -ine [string]$Entry.Operations[0].AfterSha256) { throw 'The streamed local member does not match the payload and target SHA-256 pins.' }
-        return [pscustomobject]@{ Root=$stage; Payload=$payload; Size=$total; Sha256=$sha256; SourceArchive=$archivePath; SourceEntry=[string]$Entry.SourceEntry }
+        return [pscustomobject]@{ Root=$stage; Payload=$payload; Size=$total; Sha256=$sha256; SourceArchive=$archivePath; SourceEntry=$choice.SourceEntry }
     } catch {
         $failure=$_
         try {
@@ -1745,6 +1790,11 @@ function Get-TpmRequiredPatchPlainReason {
     if ($Status -ceq 'INSTALLED' -or $Status -ceq 'ALREADY_APPLIED') { return '' }
     if ($Status -ceq 'UNDONE') { return 'The game files are back the way they were.' }
     if ($Status -ceq 'SKIPPED') { return 'Nothing was changed.' }
+    # A missing-ZIP reason that already carries the plain sentence (with the exact file names) is shown as it is.
+    $missingMarker = 'The ZIP file with this patch was not found.'
+    $missingAt = $Reason.IndexOf($missingMarker, [StringComparison]::Ordinal)
+    if ($missingAt -ge 0) { return $Reason.Substring($missingAt) }
+
     $rules = @(
         @('No game folder was selected', 'You did not choose a game folder, so nothing was changed.'),
         @('Undo was not confirmed', 'You chose not to undo it, so nothing was changed.'),
@@ -1926,7 +1976,13 @@ function Get-TpmRequiredPatchPlanBlocks {
         [void]$lines.Add('Patches: ' + $game.Count)
         [void]$lines.Add('Patch ids: ' + ((@($game.Entries | ForEach-Object { [string]$_.Id })) -join ', '))
         foreach ($zip in @($game.Entries | ForEach-Object { [string]$_.SourceSet } | Where-Object { $_ } | Select-Object -Unique)) { [void]$lines.Add('ZIP file: ' + $zip) }
-        [void]$lines.Add('Checked: the game file and the file inside the ZIP match what the patch expects.')
+        foreach ($zip in @($game.Entries | ForEach-Object { @(Get-TpmRequiredPatchSourceChoices -Entry $_ | Select-Object -Skip 1) | ForEach-Object { [string]$_.SourceSet } } | Where-Object { $_ } | Select-Object -Unique)) { [void]$lines.Add('Or this ZIP file: ' + $zip) }
+        $queuedIds = @($Candidates | Where-Object { -not $_.Plan } | ForEach-Object { [string]$_.Entry.Id })
+        if (@($game.Entries | Where-Object { [string]$_.Id -in $queuedIds }).Count -gt 0) {
+            [void]$lines.Add('Checked: the file inside the ZIP matches what the patch expects. A patch that builds on an earlier patch in this list will match the game file only after the earlier patch is installed.')
+        } else {
+            [void]$lines.Add('Checked: the game file and the file inside the ZIP match what the patch expects.')
+        }
         [void]$lines.Add('Saved copy: TeknoParrot Manager keeps a backup and an undo receipt.')
         [void]$blocks.Add(@{ Heading = $game.BuildName; Lines = $lines.ToArray() })
     }

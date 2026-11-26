@@ -14,9 +14,9 @@ BeforeAll {
     ($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n" | Set-Content -LiteralPath $functionFile -Encoding UTF8
     . $functionFile
     . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
-    $script:DisplayVersion = 'v1.0 RC9.3'
+    $script:DisplayVersion = 'v1.0 RC9.4'
     $script:ScriptVersion = '1.0'
-    $script:ReleaseCandidateLabel = 'RC9.3'
+    $script:ReleaseCandidateLabel = 'RC9.4'
     $script:logPath = Join-Path $TestDrive 'must-not-exist.log'
     $script:logWarnShown = $false
     $script:productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -113,6 +113,25 @@ Describe 'Validation report' {
         $report.Settings.SavedPostgresPassword | Should -BeTrue
         (Get-Content -LiteralPath $json -Raw) | Should -Not -Match 'SECRET-BLOB'
         $report.Manager.ScriptSha256 | Should -Be (Get-FileHash -LiteralPath $productScript -Algorithm SHA256).Hash
+    }
+
+    It 'counts controls only for games with a reviewed controls list and never says Verified without the player''s own record' {
+        $root = New-TpFixture
+        $good = Join-Path $root 'Games\a.exe'
+        New-Item -ItemType Directory -Path (Split-Path $good) -Force | Out-Null
+        Set-Content -LiteralPath $good -Value 'x'
+        Save-Profile -Root $root -Code 'abc' -Doc (New-ProfileXml -GamePath $good)
+        Save-Profile -Root $root -Code 'Game1' -Doc (New-ProfileXml -GamePath $good)
+        Mock Get-ControlReadinessAssessment { [pscustomobject]@{ Code = $Code; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm' } }
+        $json = Join-Path $TestDrive 'controls.json'
+        [void](Invoke-TpmValidationReport -ScriptPath $productScript -ScriptRoot $productRoot -TeknoParrotRoot $root -JsonPath $json)
+        $report = Get-Content -LiteralPath $json -Raw | ConvertFrom-Json
+        $report.ControlsReadiness.Checked | Should -Be 1
+        $report.ControlsReadiness.Verified | Should -Be 0
+        $report.ControlsReadiness.NotVerified | Should -Be 1
+        $report.ControlsReadiness.PlayedByYou | Should -Be 0
+        Should -Invoke Get-ControlReadinessAssessment -Times 1 -Exactly
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*verified: 0; not verified: 1*This report starts no game*' } -Times 1
     }
 
     It 'fails with exit code 4 when the TeknoParrot folder is missing' {

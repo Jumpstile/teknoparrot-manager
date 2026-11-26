@@ -7,6 +7,117 @@
   was never published. Final Version 1.0 comes later.
 
 
+  v1.0 RC9.4 (changes since RC9.3)
+  ----------------------------------------------------------------
+
+  - LaunchBox playlists now sit under TeknoParrot; same-name ones stay as is. The LaunchBox folder is remembered.
+  - The country question: type L and a number (example: L1) to see its games.
+  - The ReShade result now says the Home key opens the ReShade effects menu. Guide wording fixed. ReShade picks its hook from the game's real imports; ReShade, dgVoodoo2, GPU Fix and bezel results now say only what happened.
+  - Menu 4 is now named Controls. AutoSync, Register and menu 4 set up controls
+    only with your controller layout; copying from example games is removed.
+  - After the picture download, TeknoParrot Manager names the games still
+    without a picture and lets you pick your own PNG for each one.
+  - Choose your controller layout now has "My learned arcade controls" for an
+    arcade encoder in keyboard mode. It changes nothing and needs no mode switch.
+  - Controls fit your pad (volume on L3/R3, any slot); choice 5 sets any by hand. A clash skips one. TPM also looks for Wii remotes, guitars, drums and dance pads, and you can say what any device is.
+  - First-run setup now names its two folder questions "TeknoParrot folder"
+    and "Staging folder for game files", with the same type-a-path and
+    B-to-browse choices, and never offers a folder without TeknoParrotUi.exe.
+  - The main menu shows Game Requirements in its own color. In a small window
+    each option shows in its section color, with one line naming the colors.
+  - AutoSync no longer stops when you reach the LaunchBox step.
+  - After Health Check repairs game paths, the result now says how many games
+    were repaired and how many still need you, and what to do next.
+  - Game Path Repair now uses the folder names and file name of a game's old
+    saved path to find it after you move your library. It saves a game only
+    when one file clearly fits, offers to let you pick the file for the rest,
+    and says "Partly done" instead of FAILED when some games need your help.
+  - You can rebuild several games from their ZIP files in one go.
+  - Games that TeknoParrot adds later now register and show up in your Game
+    Notes file without a new TeknoParrot Manager version. Game Notes also
+    shows TeknoParrot's own platform, release year and known issues for
+    games with no notes of their own, marked as coming from TeknoParrot.
+  - When TeknoParrot has been updated, TeknoParrot Manager now tells you at
+    start how many games are new or changed, and if a profile cannot be read.
+  - Game rules (game notes and graphics-card warnings) can now be updated
+    without a new TeknoParrot Manager release. The update is a small signed
+    data file. It never changes your game or TeknoParrot files, and you can
+    turn it off with the GameRulesUpdate setting in
+    TeknoParrot-Manager.config.json. You are told once.
+  - A recovery file already gone, in a folder with square brackets in its
+    name, is now correctly seen as missing on Windows PowerShell 5.1.
+  - The ReShade preview window now stays inside the screen, and the ReShade
+    list names all four groups again.
+  - ReShade setup: pressing B at the first one-by-one question goes back to
+    the previous menu instead of canceling. The install line counts only the
+    games really being changed. The profile question says nothing changes
+    until you choose games; the apply question says it changes game folders.
+  - ReShade setup: when a game already uses TeknoParrot's CRT look, the
+    notice says that look stays on, ReShade adds another effect, and names
+    the game. A game whose 32-bit or 64-bit type cannot be read is left
+    unchanged, with a plain note that it is not damaged.
+  - The ReShade guides now say 32-bit and 64-bit games both work, and list
+    ReShade32.dll next to ReShade64.dll.
+  - ReShade setup for many games now ends with a short summary and groups
+    skipped games by reason. It no longer warns about a failure when every
+    game that could be set up was set up. Press D for the game lists.
+  - dgVoodoo2 setup: the scan line shows how many games were checked out of
+    the total, and explains that kept DLL files are not checked or replaced
+    and that dgVoodoo.conf comes from your dgVoodoo2 folder.
+  - dgVoodoo2 setup: one summary now names how many games were checked,
+    need it, were set up, were already set up or were skipped, with [D]
+    Details for each game, also when nothing needed changing.
+  - In the game list, a game's second profile uses the second executable
+    named in the list when the profile names no game file.
+  - Forgot your PostgreSQL password: a short explanation of why it cannot be
+    reset automatically, then 8 numbered steps to reset it yourself, ending
+    with turning the safety check back on. The Action Required list and the
+    validation report point to those steps and save them. There is also a
+    new User Guide appendix and matching Troubleshooting and Postgres Setup
+    wiki sections.
+  - TeknoParrot Manager no longer looks up a game list online. It reads the
+    profiles in your own TeknoParrot GameProfiles folder.
+  - The license file and a few notes now use American English.
+  - Required game patches: the APM3 patches for several ALLS games (such as
+    Otoshu DX, Dead or Alive 6 and Rolling Gunner) now also accept the
+    game's own ZIP. When a patch ZIP is not found, the screen names the
+    exact files that would work and says TeknoParrot Manager does not
+    download them.
+  - A settings file that cannot be read is now left as it is and not saved
+    over. TeknoParrot Manager tells you how to fix it or rename it.
+  - Undo for a bezel now puts your own saved bezel back even when the copy
+    TeknoParrot Manager made was already deleted. The one-time game rules
+    notice is shown only when the update can really run, and a game rules
+    update that fails halfway keeps the rules you had.
+  - The guides no longer tell you to delete a dgVoodoo.conf you may have
+    edited without copying it first. They also say that the PostgreSQL
+    "start any game" line appears only when every game is ready, and that
+    B does not cancel at the first ReShade menu.
+  - The guides now say a Preview still reads your files and writes the log,
+    that recovery copies are not private on FAT drives, and that LaunchBox
+    must be closed before a restore.
+
+  - Several screens now say only what is true: Undo for a rebuilt game, the
+    LaunchBox preview and results, the PostgreSQL results, the force
+    feedback and BepInEx results, and the library health check, which no
+    longer says everything is fine when a check could not run.
+  - Graphics-card warnings now appear for AMD and Intel players. They were
+    missing, and a red error line showed instead.
+  - Learn my arcade buttons now keeps the keys you saved before and asks only
+    for the controls that have none.
+  - ReShade setup: typing a look's number now shows a short line, not the
+    whole list, and U goes on to choosing games (no second question).
+  - The saved game files offer now says "TeknoS11 arcade games" and lists all
+    its boards equally (System 10, System 11, System 12, Sony ZN, Konami 573, Taito G-NET).
+  - AutoSync no longer skips a game just because another edition of the
+    same title (for example an "APM3 Edition") is in the same run. When a
+    ZIP cannot be unpacked, the screen now names the game, and the log says
+    which file did not match.
+  - The TeknoParrot Manager log no longer grows without limit. At start,
+    a log over 5 MB is kept as one "previous" log and a new log begins.
+    The support package includes both.
+  - Screens, lists and reports now show each game's full title (for example
+    "Tekken 2"), not its profile code, in Controls too. Code stays in log.
   v1.0 RC9.3 (changes since RC9.2)
   ----------------------------------------------------------------
 
@@ -101,7 +212,7 @@
     was added or removed, or it could not check. It is a hint only and never
     changes a saved key or answer. A different USB port is not a change.
   - You can show or print the controls of one game, and your cabinet's
-    controls, as a page: what each control does, your key, and whether
+    controls, as a page with pictures: each control, your key, and whether
     the game has it set up. It suggests your key only for coin, start,
     numbered buttons and plain directions, and says "I'm not sure" for the
     rest. If your own LEDBlinky file gives a control a color, it shows.
@@ -148,12 +259,11 @@
     is listed as "not in TeknoParrot", not as a failed profile.
   - A game set is never registered just because its parent ZIP is in the
     folder, except when the Eggman list names the parent ZIP (17 games,
-    such as Dance Dance Revolution 2nd Mix Link). System 11 games need
+    such as Dance Dance Revolution 2nd Mix Link). TeknoS11 arcade games need
     both ZIPs in one folder. The disc image (CHD) is chosen when there is
     only one, never guessed when there are several. If you have your own
-    System 11 saved files set, TPM can copy the files for your
-    games. It never replaces a file that is there and says which games
-    the set lacks.
+    saved files set, TPM can copy the files for your games. It never
+    replaces a file that is there and says which games the set lacks.
   - Startup files for Chihiro, PlayStation 3 and the other systems that
     need them now work like the CPS3 step. If TPM cannot find
     them, it asks once for your Supplementary folder and remembers it.
@@ -307,7 +417,7 @@
   - ReShade tells you how many games it can change and that it leaves the
     others alone. A game it cannot check is no longer called unsafe or damaged.
   - The dgVoodoo2 scan line says how many games were checked and skipped.
-  - Lists of games show the game name instead of "and 1 more".
+  - Lists of games show the full game name, never a file name, and not "and 1 more".
   - The game picker shows how many games you have picked so far.
   - AutoSync now writes a line to the log for every ZIP it skips and says
     why, so a game that did not get unpacked can be traced.
@@ -644,8 +754,8 @@
   - Choosing ReShade in the check starts ReShade setup.
 
   Support package
-  - Create Support Package makes one cleaned ZIP that leaves out game
-    programs and passwords. Folder names with spaces are hidden.
+  - Create Support Package makes one cleaned ZIP with logs, Windows errors,
+    PC facts and full game names. No game programs, crash dumps or passwords.
   - A package with missing information says "partial" and names what is
     missing. An empty log file is not called a failure. It keeps the newest
     part of a main log over 5 MB, lists each game's real controls and counts a

@@ -53,7 +53,7 @@ Coordinator decision (Main IRC correction): footer families are wrapped in group
 
 ## Cancel (added in this slice; result-driven only)
 - No global cancel flag or Ctrl+C handler exists. Cancel remains workflow-local (prompt choices and result values).
-- A workflow result with a true `Cancelled` flag or Outcome `Cancelled` closes the group bar as Cancelled. `Invoke-CrosshairSetup` now returns that flag when the user declines before deployment; its caller closes workflow status as Aborted without a failure acknowledgement. A leaf with `-Outcome Cancelled` is recorded through `Register-TpmProgressOutcome`.
+- A workflow result with a true `Cancelled` flag or Outcome `Cancelled` closes the group bar as Cancelled. `Invoke-CrosshairSetup` now returns that flag when the user declines before deployment; its caller closes workflow status as Aborted without a failure acknowledgment. A leaf with `-Outcome Cancelled` is recorded through `Register-TpmProgressOutcome`.
 - Ctrl+C: PowerShell runs `finally`, so `Stop-TpmProgressAbandoned` (module 173-180) closes a grouped bar as Error "Abandoned before completion". Not verified at runtime.
 - No new cancel signal was invented. Owner decision needed if a user-cancel key is wanted.
 - Coordinator decision: no user-cancel key is added in this slice. Cancel stays as is.

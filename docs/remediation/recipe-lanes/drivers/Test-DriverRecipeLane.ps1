@@ -18,10 +18,10 @@ function Copy-DriverLaneZipMember {
     param($Archive,[string]$Name,[string]$Destination)
     $members = @($Archive.Entries | Where-Object { $_.FullName -ceq $Name })
     if ($members.Count -ne 1) { throw "Expected one exact ZIP member: $Name" }
-    $input = $members[0].Open()
+    $sourceStream = $members[0].Open()
     $output = [IO.File]::Create($Destination)
-    try { $input.CopyTo($output) }
-    finally { $output.Dispose(); $input.Dispose() }
+    try { $sourceStream.CopyTo($output) }
+    finally { $output.Dispose(); $sourceStream.Dispose() }
 }
 function New-DriverLaneCatalogContent {
     param($Entry)
@@ -95,8 +95,8 @@ try {
         } finally {
             if ($staged.Root -and (Test-Path -LiteralPath $staged.Root)) { Remove-Item -LiteralPath $staged.Root -Recurse -Force -ErrorAction Stop }
         }
-        $input = New-DriverLaneInputs -Content $catalogContent -PatchId $entry.Id -ProfileId $entry.ProfileId -GameRoot $productionGame -PayloadRoot $productionPayload -RecoveryRoot $productionRecovery -ProtectedRoot $productionProtected
-        $plan = Get-TpmPatchPlan @input
+        $planInputs = New-DriverLaneInputs -Content $catalogContent -PatchId $entry.Id -ProfileId $entry.ProfileId -GameRoot $productionGame -PayloadRoot $productionPayload -RecoveryRoot $productionRecovery -ProtectedRoot $productionProtected
+        $plan = Get-TpmPatchPlan @planInputs
         Assert-DriverLane ($plan.Status -ceq 'Ready') "Production recipe failed engine validation/planning ($($entry.Id)): $($plan.Reason)"
         Assert-DriverLane ($plan.Operations.Count -eq 1 -and $plan.Operations[0].Operation -ceq 'CreateFile') "Unexpected operation plan for $($entry.Id)."
     }

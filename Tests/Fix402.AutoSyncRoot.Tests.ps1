@@ -264,4 +264,21 @@ Describe 'First-run TeknoParrot folder question' {
         @(Get-ChildItem -LiteralPath $TestDrive -Recurse -Force).Count | Should -Be $before
         @(Get-ChildItem -LiteralPath $work -Force).Count | Should -Be 0
     }
+
+    It 'names the TeknoParrot folder plainly and shows the shared type / browse choices list' {
+        # Mutation: drop the title or the choices list -> the user sees a bare prompt and must guess to type B.
+        $script:said = [System.Collections.Generic.List[string]]::new()
+        Mock Write-Host { $script:said.Add([string]$Object) }
+        $script:rootAnswers.Enqueue('Q')
+
+        Read-TpmTeknoParrotRoot | Out-Null
+        Write-TpmFolderChoices -Default 'X:\Games'
+
+        $text = $script:said -join "`n"
+        $text | Should -Match 'TeknoParrot folder'
+        $text | Should -Match 'TeknoParrotUi.exe'
+        $text | Should -Match 'Type Q to quit'
+        ([regex]::Matches($text, 'Type B to browse for the folder')).Count | Should -Be 2
+        $text | Should -Match 'Press Enter to use: X:\\Games'
+    }
 }
