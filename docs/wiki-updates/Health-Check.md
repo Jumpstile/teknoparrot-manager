@@ -4,6 +4,8 @@ The health check looks over your registered games and tells you what needs atten
 
 When it ends, it offers follow-up actions (repair a path, set up PostgreSQL, and so on). Those are separate steps. Each one tells you what it will do and asks before it changes anything.
 
+After a game path repair, the result says how many games were repaired and how many still need you, and what to do next. If some are repaired and some are not, it says `Partly done`. When a check could not run, the result says so. It never says everything is fine then.
+
 ---
 
 ## How to run it

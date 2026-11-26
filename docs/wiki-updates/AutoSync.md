@@ -126,6 +126,8 @@ AutoSync goes straight on to registration. See [[Register]].
 
 When new games were unzipped, you are asked `Choice (N/A/B)`. `N` (the default) checks only the new games and skips the whole-library steps. `A` goes on to the repair, pictures and controls steps for all your games. `B` goes back to the menu.
 
+AutoSync no longer stops when it reaches the LaunchBox step. See [[LaunchBox Integration]].
+
 The controls step is Controller Layout, the same screen as [[Controls]], choice 1. It sets up your games with the layout you chose, and you approve it first. In a Preview run it only shows what would change. If AutoSync is run without questions, it applies your saved layout after it makes a backup, or skips if you have not chosen one. (The `-Unattended` flag on its own runs only the Health Check.)
 
 At the end, the ACTION REQUIRED list tells you if a game's controls are missing, not verified, unsupported or unknown. A game can be registered and still need its controls set up. Open TeknoParrot's controls screen, map the controls and test them before you call the game ready. See [[Controls]] to set up more games with your controller layout.

@@ -13,7 +13,7 @@
   show what was done. See docs\ADVANCED-USERS.md.
 
   This guide is for v1.0 RC9.4.
-  Release page: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3
+  Release page: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.4
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after each run. AutoSync backs up UserProfiles before

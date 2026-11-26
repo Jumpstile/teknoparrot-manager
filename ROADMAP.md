@@ -30,8 +30,8 @@ or Version 1.0 scope change.
 ## TPM 1.0 completion boundary
 
 The current commitment is to complete and support the existing TPM 1.0 release
-path. v1.0 RC9.3 is the latest published release today. v1.0 RC9.2 is the
-previous published release and v1.0 RC9.1 is the one before it (the earlier RC8 was a tester build and was never published). Final Version 1.0 comes later.
+path. v1.0 RC9.4 is the latest published release today. v1.0 RC9.3 is the
+previous published release and v1.0 RC9.2 is the one before it (the earlier RC8 was a tester build and was never published). Final Version 1.0 comes later.
 Release safety,
 certification, and any remaining work required for the existing feature set
 take precedence over every phase in this document.

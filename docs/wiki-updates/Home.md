@@ -2,11 +2,11 @@
 
 ![TeknoParrot Manager](banner.png)
 
-TeknoParrot Manager sets up your extracted TeknoParrot games for you. It registers them, sets up their controls from your controller layout, and keeps your library tidy. It backs up your game settings before it changes them.
+TeknoParrot Manager sets up your extracted TeknoParrot games for you. It registers them, sets up their controls from your controller layout, and keeps your library tidy. It backs up your game settings before it changes them. Every game profile in your TeknoParrot is supported, including the ten extra emulator types (Tekno3DO, TeknoCoJag, TeknoEagle, TeknoFL, TeknoG3D, TeknoGRE, TeknoPNet, TeknoPsikyo, TeknoTZ and TeknoVP). Checked with TeknoParrot 1.0.0.2339 (2,572 profiles).
 
 It is made for beginners and is also useful if you already know TeknoParrot. It hides complexity, not detail: repeatable bulk steps save manual work, and Details and the log show what was done.
 
-This page is for v1.0 RC9.4. The latest published release is RC9.3: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3. Versions from RC8.1 on can update themselves in place with Check for Updates.
+This page is for v1.0 RC9.4. RC9.4 is the latest published release: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.4. The previous release was RC9.3. Versions from RC8.1 on can update themselves in place with Check for Updates.
 What is new in v1.0 is listed at the top of the [[Changelog]].
 
 Test one game after each run before you trust the rest.
@@ -33,7 +33,7 @@ Type a number and press Enter. After each task you come back to this menu.
 | 1 | AutoSync | Extracts your game ZIPs, then registers the games | [[AutoSync]] |
 | 2 | Register only | Registers games you already extracted | [[Register]] |
 | 3 | LaunchBox integration | Adds your registered games to LaunchBox, fills in details and playlists, links art, and keeps LaunchBox in step. Opens any time, without registering first | [[LaunchBox Integration]] |
-| 4 | Controls | Set up your controller layout and controls | [[Controls]] |
+| 4 | Controls | Sets up your games' controls from your controller layout. Also checks controls, learns your arcade buttons, and lets you set any control by hand | [[Controls]] |
 | 5 | Crosshair setup | Adds custom crosshairs to lightgun games | [[Crosshairs]] |
 | 6 | ReShade setup | Visual filters: sharper image, CRT-style scanlines, borders | [[ReShade]] |
 | 7 | dgVoodoo2 setup | Fixes some old DX8, DirectDraw, and Glide games | [[dgVoodoo2]] |

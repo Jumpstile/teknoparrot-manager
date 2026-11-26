@@ -114,8 +114,11 @@ Removing ReShade later does not turn TeknoParrot's CRT look back on. To put it b
 After setup, the result screen says what changed and what was left alone. A game is left alone, for example, when:
 
 - it is a 32-bit game and `ReShade32.dll` is not next to `ReShade64.dll`, or its type cannot be read
+- its 32-bit or 64-bit type cannot be read. It is left unchanged, and the screen says it is not damaged.
 - it already has a ReShade that TeknoParrot Manager did not install
 - its game file cannot be found (check its drive is connected, then run [[Health Check]])
+
+When a game already uses TeknoParrot's CRT look, the notice says that look stays on, ReShade adds another effect, and names the game. ReShade picks its hook from the game's real imports. The result says only what happened.
 
 Before it installs anything, ReShade tells you how many of the games you picked it can change now (for example `You selected 4 games. 3 can be changed now.`) and that it leaves the others alone. After a setup for many games, the result is a short summary (selected, set up, failed, skipped) with the skipped games grouped by reason, and no failure warning when every game that could be set up was set up. Press `D` on the result screen to see the game lists and why for each game. If a game only has a leftover ReShade.ini or older ReShade files, press `A` to replace them. You are asked to confirm, and a copy of the old files is saved first so you can undo it.
 

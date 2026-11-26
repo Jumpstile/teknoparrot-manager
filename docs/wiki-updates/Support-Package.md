@@ -38,6 +38,10 @@ You can add its info file first. At the menu, press **D** to see the steps:
 
 - Included: logs and reports from the current run, plus clearly labeled background information about TeknoParrot Manager, TeknoParrot, and your games.
 - Hidden: game files are not included, and TPM hides passwords and other credentials, but hiding is not a guarantee. Folders are never picked at random.
+- The TeknoParrot Manager log is kept under 5 MB. At start, a log over 5 MB is kept as one "previous" log and a new log begins. The support package includes both.
+- The package result starts with `What failed:` and `What TPM did not change:`. The second part says that making a package does not change your game files, profiles, passwords or emulator files.
+- The package holds cleaned copies of the profiles of games that need help, never your original profile files. It also holds a list that says, for each registered profile, whether it was included, and a short file about the running copy of TPM (script path and SHA-256, PowerShell version, Windows and version label).
+- If TPM cannot read the registration record, or the profile list does not finish, the package is marked partial.
 - The registration record is included in a cleaned form. See [[Registration Ledger]].
 - It also says how the last finished job ended (for example a setup that stopped), even if you restarted TeknoParrot Manager since then. Personal folder names are removed.
 - If the ZIP is ready but a temporary folder could not be removed, the result says so. You can delete that folder yourself. Its path is under Details.

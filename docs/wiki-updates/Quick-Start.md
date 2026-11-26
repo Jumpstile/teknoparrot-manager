@@ -1,6 +1,6 @@
 # Quick Start
 
-Get TeknoParrot Manager (TPM) running in a few minutes. This page is for v1.0 RC9.4. See the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases).
+Get TeknoParrot Manager (TPM) running in a few minutes. This page is for v1.0 RC9.4, the latest published release. See the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Test one game after each run.
 
@@ -23,7 +23,7 @@ Registered, launched, and controls-ready are three different things. A game that
 |---|---|
 | **TeknoParrotUi.exe** | TeknoParrot's own window, where you launch games and set them up by hand. TPM edits the same profile files. |
 | **DAT file** | A community list of game names (Eggman/RomVault). TPM uses it to recognize games with odd or renamed files. |
-| **Controller layout** | The controls you pick once (Xbox, PlayStation, Nintendo or arcade stick). TPM sets up your games' buttons from it. |
+| **Controller layout** | Your choice of controller type (Xbox, PlayStation, Nintendo, arcade stick, or your learned arcade controls). TPM sets up your games' controls from it. |
 | **BepInEx** | A plugin framework some games use. See [[BepInEx]]. |
 | **FFB** | Force feedback for wheels and sticks. See [[FFB Setup]]. |
 
@@ -67,8 +67,8 @@ You can also double-click `TeknoParrot-Manager.bat`.
 **3.** First run:
 
 1. You see `Welcome to TeknoParrot Manager`. Press Enter.
-2. TPM looks for `TeknoParrotUi.exe`. You see `Auto-detected TeknoParrot at: ...` and `Use this path? (Y/N)`. Press `Y` to accept. If it finds several, pick a number. If it finds none, it asks for the folder: type it, type `B` to browse, or type `Q` to quit. If you close the browse window or type a wrong folder, it asks again.
-3. You are asked for your games folder (also called the staging folder), folder naming, and the DAT list. The default answers are fine if you are not sure.
+2. TPM asks for the "TeknoParrot folder". It looks for `TeknoParrotUi.exe`. You see `Auto-detected TeknoParrot at: ...` and `Use this path? (Y/N)`. Press `Y` to accept. If it finds several, pick a number. If it finds none, it asks for the folder: type the path, type `B` to browse, or type `Q` to quit. TPM never offers a folder that has no `TeknoParrotUi.exe`. If you close the browse window or type a wrong folder, it asks again.
+3. Next it asks for the "Staging folder for game files" (where unpacked games go). It has the same choices: type a path, or type `B` to browse. Then it asks about folder naming and the DAT list. The default answers are fine if you are not sure.
 
 **Later runs.** You see `TeknoParrot Manager found your saved settings.` and `Use these settings? (Y/N, D = show them)`. Press `Y` to keep them, `D` to look first, or `N` to answer the first-time questions again. `N` deletes nothing.
 
@@ -79,7 +79,7 @@ You can also double-click `TeknoParrot-Manager.bat`.
 | 1 | AutoSync | Your games are ZIP files |
 | 2 | Register only | Your games are already extracted |
 | 3 | LaunchBox integration | You want to add your registered games to LaunchBox. Works any time, without registering first. See [[LaunchBox Integration]] |
-| 4 | Controls | You want to set up your controller layout and controls |
+| 4 | Controls | You want to set up controls from your controller layout |
 | 5 | Crosshair setup | You want custom crosshairs on lightgun games |
 | 6 | ReShade setup | You want visual filters |
 | 7 | dgVoodoo2 setup | An old game crashes or shows a black screen |
@@ -95,7 +95,7 @@ You can also double-click `TeknoParrot-Manager.bat`.
 | 17 | Create Support Package | You need to send diagnostics when asking for help. See [[Support Package]] |
 | 18 | Exit | |
 
-After each item you come back to this menu. In a small window the menu shows a short layout. At the prompt you can also type `H` (help), `L` (view log), or `Q` (quit).
+After each item you come back to this menu. The menu shows Game Requirements in its own color. In a small window the menu shows a short layout, each option shows in its section color, and one line names the colors. At the prompt you can also type `H` (help), `L` (view log), or `Q` (quit).
 
 Many result screens say `Press D for details`. Press `D` for the full technical information. It is also saved in the log.
 
@@ -111,12 +111,15 @@ Many result screens say `Press D for details`. Press `D` for the full technical 
   1) AutoSync        -- Extract your game ZIPs into your games
                         folder, then register the games.
   2) Register only   -- Register games already in the games folder.
-  3) LaunchBox integration -- Open the LaunchBox choices any time: add games,
-                        fill in details, link art, keep LaunchBox in step.
-                        Nothing is registered or extracted first.
-  4) Controls        -- Set up your games with your controller layout
-                        (Xbox, PlayStation, Nintendo or arcade stick)
-                        and check which games have all their controls.
+  3) LaunchBox integration -- Add your registered games to LaunchBox,
+                        fill in details and playlists, link art, keep
+                        LaunchBox in step. Opens the LaunchBox choices
+                        any time, without registering or extracting
+                        anything first.
+  4) Controls        -- Set up your games' controls from your
+                        controller layout, without going through
+                        AutoSync/Register first. Also checks which
+                        games have all their controls.
 
   GAME ENHANCEMENTS (OPTIONAL -- NOT EVERY GAME NEEDS THEM)
   ---------------------------------------------------------
@@ -202,7 +205,7 @@ Enter 1-18:
 | D | Done: go on with the games you picked |
 | B | Back: cancel |
 
-If a new game offers a region choice, TPM asks once after registering which country it should start in. Type `0` to leave them as they are. See [[Region Setup]].
+If a new game offers a region choice, TPM asks once after registering which country it should start in. Type the number of a country, or `0` to leave them as they are. To see a country's games first, type `L` and its number (example: `L1`). See [[Region Setup]].
 
 Remember: `P` (Preview) registers nothing. If you only previewed, run the same item again and choose `R` before you open TeknoParrotUI.
 
@@ -212,10 +215,10 @@ Remember: `P` (Preview) registers nothing. If you only previewed, run the same i
 
 ## Set up your controls (recommended)
 
-Pick your controller layout once, and TPM sets up your games from it.
+TPM sets up your controls from your controller layout. It does not copy controls from example games. Pick your layout once, and TPM uses it for your games.
 
-1. Run TPM and choose item 4 (Controls). It sets up your games with the controller layout you pick: Xbox, PlayStation, Nintendo or arcade stick. See [[Controls]].
-2. Run TPM again (item 1 or 2) any time. At the end it also offers the Controller Layout step.
+1. Run TPM and choose item 4 (Controls). It sets up your games with the controller layout you pick: Xbox, PlayStation, Nintendo, arcade stick or "My learned arcade controls" (for an arcade encoder in keyboard mode). See [[Controls]].
+2. Run TPM again (item 1 or 2) any time. At the end it also offers the Controller Layout step. Pad volume uses the stick clicks (L3 and R3). Choice 5 sets any one control by hand.
 3. Open TeknoParrot and set up by hand any control TPM could not set, such as steering or aim.
 4. Start **one** game and test it before you trust the rest.
 

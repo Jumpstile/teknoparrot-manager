@@ -2,8 +2,8 @@
   TeknoParrot Manager  --  CHANGELOG
   Author: Jumpstile
 ===============================================================================
-  Newest version first. RC9.3 is the latest published version. RC9.2 is the
-  previous published version. RC9.1 came before it. RC8 was a tester build and
+  Newest version first. RC9.4 is the latest published version. RC9.3 is the
+  previous published version. RC9.2 came before it. RC8 was a tester build and
   was never published. Final Version 1.0 comes later.
 
 

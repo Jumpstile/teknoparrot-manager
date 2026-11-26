@@ -62,10 +62,12 @@ The question is not asked in a preview, in an unattended run, or when none of th
 
 Next, TeknoParrot Manager goes through these steps. Each one asks first:
 
-1. **Repair game paths.** `Check for and repair broken game paths now? (Y/N)` fixes games whose saved path points to a missing file.
+1. **Repair game paths.** `Check for and repair broken game paths now? (Y/N)` fixes games whose saved path points to a missing file. TPM uses the folder names and file name of the old saved path to find the game after you move your library. It saves a game only when one file clearly fits. For the rest, it offers to let you pick the file yourself. If some games are fixed and others still need you, the result says `Partly done: N repaired, N still need your help`. Press `D` to see each game and why.
 2. **Pictures.** `Download the missing game pictures? (Y/N, D = use your own pictures)` fetches small icons from the TeknoParrotUIThumbnails project on GitHub. It never downloads games, and never replaces an icon you already have. A missing icon does not mean the game is unsupported. To use your own pictures, put `ProfileCode.png` files in `<your TeknoParrot folder>\TeknoParrotManager\Assets\CustomThumbnails\`.
    After the download, TeknoParrot Manager names the games that still have no picture and asks `Do you want to pick your own pictures for some of them? (Y/N, D = Details)`. If you say Y, you choose the games and pick one PNG file for each.
-3. **Controller layout.** The same screen as [[Controls]], choice 1. It sets up your games with the layout you chose, and shows a preview first. In a Preview run it only shows what would change. In an unattended run it uses your saved layout, or skips if you have not chosen one.
+3. **Controller layout.** The same screen as [[Controls]], choice 1. TPM sets up controls only from your controller layout. It does not copy controls from example games. It sets up your games with the layout you chose, and shows a preview first. In a Preview run it only shows what would change. In an unattended run it uses your saved layout, or skips if you have not chosen one.
+
+Every game profile in your TeknoParrot is supported, including the ten extra emulator types (Tekno3DO, TeknoCoJag, TeknoEagle, TeknoFL, TeknoG3D, TeknoGRE, TeknoPNet, TeknoPsikyo, TeknoTZ and TeknoVP). Games that TeknoParrot adds later register without a new TPM version. Screens, lists and reports show each game's full title, not its profile code.
 
 ---
 
