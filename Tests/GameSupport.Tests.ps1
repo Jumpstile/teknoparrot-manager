@@ -60,6 +60,26 @@ Describe 'Library Health game support' {
         @($summary.NeedsYouNames) | Should -Not -Contain 'Game D'
     }
 
+    It 'flags a game whose BIOS ZIP the guide says to keep beside it is not in the game folder' {
+        $dir = Join-Path $TestDrive 'up2'
+        $games = Join-Path $TestDrive 'roms'
+        New-Item -ItemType Directory -Path $dir, $games | Out-Null
+        $with = Join-Path $games 'withbios.zip'; $without = Join-Path $games 'nobios.zip'
+        Set-Content -LiteralPath $with -Value 'x'; Set-Content -LiteralPath $without -Value 'x'
+        Set-Content -LiteralPath (Join-Path $games 'qsound.zip') -Value 'x'
+        New-GsProfile -Dir $dir -Code 'HasBios' -Emulator 'TeknoCPS' -GamePath $with
+        $other = Join-Path $TestDrive 'other'; New-Item -ItemType Directory -Path $other | Out-Null
+        $lone = Join-Path $other 'nobios.zip'; Set-Content -LiteralPath $lone -Value 'x'
+        New-GsProfile -Dir $dir -Code 'LacksBios' -Emulator 'TeknoCPS' -GamePath $lone
+        $guide = @(
+            [pscustomobject]@{ profile_name = 'HasBios'; game_name = 'Has Bios'; general_issues = 'Select withbios.zip. Keep qsound.zip in the same folder.' }
+            [pscustomobject]@{ profile_name = 'LacksBios'; game_name = 'Lacks Bios'; general_issues = 'Select nobios.zip. Keep qsound.zip in the same folder.' }
+        )
+        $summary = Get-TpmGameSupportSummary -ProfileFiles @(Get-ChildItem -LiteralPath $dir -Filter '*.xml') -ValidCodes @('HasBios', 'LacksBios') -GuideRows $guide
+        @($summary.NeedsYouNames) | Should -Contain 'Game LacksBios'
+        @($summary.NeedsYouNames) | Should -Not -Contain 'Game HasBios'
+    }
+
     It 'says the steps were not counted when there is no saved guide copy' {
         $summary = [pscustomobject]@{ GuideAvailable = $false; Rows = @(); NeedsYouNames = @() }
         (@(Get-TpmGameSupportLines -Summary $summary) -join ' ') | Should -Match 'no saved copy'
@@ -136,5 +156,106 @@ Describe 'Coverage tool' {
         $sum = 0
         foreach ($m in [regex]::Matches($text, '(?m)^\| [^|]+ \| (\d+) \| \d+ \| \d+ \| \d+ \| \d+ \| \d+ \| \d+ \|\s*$')) { $sum += [int]$m.Groups[1].Value }
         $sum | Should -Be $total
+    }
+}
+
+Describe 'Coverage tool guide steps' {
+    It 'keeps Guided only for a step the player must do, not for the ZIP pick, a BIOS ZIP beside it, or information' {
+        $tables = [pscustomobject]@{ PathLimits = @(); VersionPins = @(); GpuIncompatible = @{}; FirmwareEmulators = @() }
+        $guide = @(
+            [pscustomobject]@{ profile_name = 'zip_only'; game_name = 'Zip Only'; tp_loader = 'TeknoCPS'; general_issues = 'Select zip_only.zip.' }
+            [pscustomobject]@{ profile_name = 'with_bios'; game_name = 'With Bios'; tp_loader = 'TeknoCPS'; general_issues = 'Select with_bios.zip. Keep qsound.zip in the same folder.' }
+            [pscustomobject]@{ profile_name = 'info_only'; game_name = 'Info Only'; tp_loader = 'TeknoParrot'; notes = 'Game starts with a Call Attendant message.' }
+            [pscustomobject]@{ profile_name = 'has_step'; game_name = 'Has Step'; tp_loader = 'TeknoParrot'; notes = "Game starts.`nSet the Ip option to your computer address." }
+            [pscustomobject]@{ profile_name = 'controls_only'; game_name = 'Controls Only'; tp_loader = 'TeknoCPS'; general_issues = 'Select a merged ROM ZIP and, where requested, a CHD from the game disc directory. Controls: Select Down and Select Up are operator buttons.' }
+        )
+        $catalog = @{ zip_only = $true; with_bios = $true; info_only = $true; has_step = $true; controls_only = $true }
+        $by = @{}; foreach ($r in @(Get-TpmCoverageRows -Guide $guide -CatalogCodes $catalog -RecipeIds @() -Tables $tables -ProfileInfo @{})) { $by[$r.ProfileId] = $r.Disposition }
+        $by['zip_only'] | Should -Be 'Handled'
+        $by['with_bios'] | Should -Be 'Checked'
+        $by['info_only'] | Should -Be 'Handled'
+        $by['has_step'] | Should -Be 'Guided'
+        $by['controls_only'] | Should -Be 'Handled'
+    }
+}
+
+Describe 'Coverage tool steps TeknoParrot Manager now does' {
+    It 'does not call the game revision, CD image folder or CHD root sentence a step for the player' {
+        $tables = [pscustomobject]@{ PathLimits = @(); VersionPins = @(); GpuIncompatible = @{}; FirmwareEmulators = @() }
+        $guide = @(
+            [pscustomobject]@{ profile_name = 'rev'; game_name = 'Rev'; tp_loader = 'TeknoNaomi'; general_issues = 'Select rev.zip. Select the exact set in Game Revision; merged archives must contain that revision.' }
+            [pscustomobject]@{ profile_name = 'cd'; game_name = 'Cd'; tp_loader = 'TeknoCPS'; general_issues = 'Select cd.zip. CD image: cap-x-1.chd. Set CD Image Folder if stored elsewhere.' }
+            [pscustomobject]@{ profile_name = 'chd'; game_name = 'Chd'; tp_loader = 'TeknoNaomi'; general_issues = 'Select chd.zip. Required CHD: gds-1.chd. Select CHD Root below the ROM ZIP; disks may be in the set/parent subfolder or directly in that folder.' }
+            [pscustomobject]@{ profile_name = 'net'; game_name = 'Net'; tp_loader = 'TeknoParrot'; general_issues = 'Set the Ip option to your computer address.' }
+        )
+        $catalog = @{ rev = $true; cd = $true; chd = $true; net = $true }
+        $by = @{}; foreach ($r in @(Get-TpmCoverageRows -Guide $guide -CatalogCodes $catalog -RecipeIds @() -Tables $tables -ProfileInfo @{})) { $by[$r.ProfileId] = $r.Disposition }
+        $by['rev'] | Should -Be 'Handled'
+        $by['cd'] | Should -Be 'Handled'
+        $by['chd'] | Should -Be 'Checked'
+        $by['net'] | Should -Be 'Guided'
+    }
+}
+
+Describe 'CD Image Folder and CHD below the ZIP' {
+    BeforeAll {
+        function New-CdProfile {
+            param([string]$Path, [string]$Value = '')
+            Set-Content -LiteralPath $Path -Value ('<GameProfile><ConfigValues><FieldInformation><FieldName>CD Image Folder</FieldName><FieldValue>{0}</FieldValue><FieldType>Text</FieldType></FieldInformation></ConfigValues></GameProfile>' -f $Value)
+        }
+    }
+    BeforeEach { Mock Write-Log {} }
+
+    It 'finds the folder only when exactly one matching CHD exists' {
+        $root = Join-Path $TestDrive 'lib'
+        New-Item -ItemType Directory -Path (Join-Path $root 'a\disc'), (Join-Path $root 'b') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root 'a\disc\one.chd') -Value 'x'
+        Find-TpmCdImageFolder -InstallFolder $root -CdImage 'one.chd' | Should -Be (Join-Path $root 'a\disc')
+        Find-TpmCdImageFolder -InstallFolder $root -CdImage 'missing.chd' | Should -Be ''
+        Set-Content -LiteralPath (Join-Path $root 'b\one.chd') -Value 'x'
+        Find-TpmCdImageFolder -InstallFolder $root -CdImage 'one.chd' | Should -Be ''
+    }
+
+    It 'gives the folder above the game folder for a "folder/name.chd" image' {
+        $root = Join-Path $TestDrive 'lib2'
+        New-Item -ItemType Directory -Path (Join-Path $root 'cds\kokoro') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root 'cds\kokoro\cdp-1.chd') -Value 'x'
+        Find-TpmCdImageFolder -InstallFolder $root -CdImage 'kokoro/cdp-1.chd' | Should -Be (Join-Path $root 'cds')
+    }
+
+    It 'sets an empty CD Image Folder, reads it back, and never replaces a folder the player chose' {
+        $empty = Join-Path $TestDrive 'empty.xml'; New-CdProfile -Path $empty
+        $chosen = Join-Path $TestDrive 'chosen.xml'; New-CdProfile -Path $chosen -Value 'D:\mine'
+        $folder = Join-Path $TestDrive 'cds'; New-Item -ItemType Directory -Path $folder | Out-Null
+        $r = Set-TpmProfileCdImageFolders -Items @(
+            [pscustomobject]@{ Path = $empty; Label = 'Empty'; Folder = $folder },
+            [pscustomobject]@{ Path = $chosen; Label = 'Chosen'; Folder = $folder })
+        $r.Changed.Count | Should -Be 1
+        $r.Failed.Count | Should -Be 1
+        ([xml](Get-Content -LiteralPath $empty -Raw)).GameProfile.ConfigValues.FieldInformation.FieldValue | Should -Be $folder
+        ([xml](Get-Content -LiteralPath $chosen -Raw)).GameProfile.ConfigValues.FieldInformation.FieldValue | Should -Be 'D:\mine'
+    }
+
+    It 'writes nothing when the safety backup failed' {
+        $p = Join-Path $TestDrive 'nb.xml'; New-CdProfile -Path $p
+        $r = Set-TpmProfileCdImageFolders -Items @([pscustomobject]@{ Path = $p; Label = 'G'; Folder = $TestDrive }) -BackupError 'no backup'
+        $r.Changed.Count | Should -Be 0
+        ([xml](Get-Content -LiteralPath $p -Raw)).GameProfile.ConfigValues.FieldInformation.FieldValue | Should -Be ''
+    }
+
+    It 'finds a second-file CHD in a folder named after the game below the ZIP, and not when two match' {
+        $dir = Join-Path $TestDrive 'naomi'
+        New-Item -ItemType Directory -Path (Join-Path $dir 'azumanga') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'azumanga.zip') -Value 'x'
+        Set-Content -LiteralPath (Join-Path $dir 'azumanga\gdl-0018.chd') -Value 'x'
+        $doc = New-Object System.Xml.XmlDocument
+        $doc.LoadXml('<GameProfile><ExecutableName>azumanga.zip</ExecutableName><ExecutableName2>gdl-0018.chd</ExecutableName2><HasTwoExecutables>true</HasTwoExecutables><GamePath2 /></GameProfile>')
+        Set-SecondaryExecutablePath $doc (Join-Path $dir 'azumanga.zip') -ProfileCode 'teknonaomi_azumanga' | Should -BeTrue
+        $doc.GameProfile.GamePath2 | Should -Be (Join-Path $dir 'azumanga\gdl-0018.chd')
+        New-Item -ItemType Directory -Path (Join-Path $dir 'teknonaomi_azumanga') | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'teknonaomi_azumanga\gdl-0018.chd') -Value 'x'
+        $doc2 = New-Object System.Xml.XmlDocument
+        $doc2.LoadXml('<GameProfile><ExecutableName>azumanga.zip</ExecutableName><ExecutableName2>gdl-0018.chd</ExecutableName2><HasTwoExecutables>true</HasTwoExecutables><GamePath2 /></GameProfile>')
+        Set-SecondaryExecutablePath $doc2 (Join-Path $dir 'azumanga.zip') -ProfileCode 'teknonaomi_azumanga' | Should -BeFalse
     }
 }
