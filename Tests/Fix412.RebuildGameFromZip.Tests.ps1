@@ -20,9 +20,9 @@ BeforeAll {
     . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $script:DisplayVersion = 'v1.0 RC9.3'
+    $script:DisplayVersion = 'v1.0 RC9.4'
     $script:ScriptVersion = '1.0'
-    $script:ReleaseCandidateLabel = 'RC9.3'
+    $script:ReleaseCandidateLabel = 'RC9.4'
     $script:ActiveTpmWorkflowStatus = $null
     $script:PostgresRecoveryStatus = $null
     $script:PostgresRecoveryResumeState = $null
@@ -297,6 +297,58 @@ Describe 'Undo and clean up a rebuild (FIX412)' {
         [IO.File]::ReadAllText((Join-Path $keptNow[0].FullName 'game.exe')) | Should -BeExactly 'new exe'
     }
 
+    It 'does not name a kept folder when the rebuilt folder was already gone and nothing was moved aside' {
+        $fx = New-F412Fixture
+        $null = Invoke-TpmRebuildOneGame -Game (New-F412Game -Fixture $fx) -InstallFolder $fx.Games -ZipSources @($fx.Zips) -SyncStatePath $fx.SyncState
+        $kept = @(Get-TpmRebuildKeptFolders -InstallFolder $fx.Games)[0]
+        Remove-Item -LiteralPath $fx.Target -Recurse -Force
+
+        $result = Restore-TpmRebuildKeptFolder -Kept $kept -InstallFolder $fx.Games
+
+        $result.Outcome | Should -Be 'SUCCEEDED'
+        $result.Summary | Should -Not -Match 'kept here'
+        $result.Summary | Should -Match 'no rebuilt folder'
+        Test-Path -LiteralPath (Join-Path $fx.Target 'save.dat') | Should -BeTrue
+        @(Get-ChildItem -LiteralPath $fx.KeptRoot -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
+
+    It 'does not claim the game folder is as it was when the second rename failed while the folder exists again' {
+        $fx = New-F412Fixture
+        $null = Invoke-TpmRebuildOneGame -Game (New-F412Game -Fixture $fx) -InstallFolder $fx.Games -ZipSources @($fx.Zips) -SyncStatePath $fx.SyncState
+        $kept = @(Get-TpmRebuildKeptFolders -InstallFolder $fx.Games)[0]
+        $script:f412Moves = 0
+        Mock Invoke-TpmAutoSyncMovePath {
+            $script:f412Moves++
+            if ($script:f412Moves -eq 2) { New-Item -ItemType Directory -Path $Destination -Force | Out-Null; throw 'simulated rename failure' }
+            & $script:f412RealMove -Source $Source -Destination $Destination
+        }
+
+        $result = Restore-TpmRebuildKeptFolder -Kept $kept -InstallFolder $fx.Games
+
+        $result.Outcome | Should -Not -Be 'ROLLED_BACK_VERIFIED'
+        $result.Summary | Should -Not -Match 'as it was before'
+        $result.Summary | Should -Match ([regex]::Escape([string]$kept.Path))
+    }
+
+    It 'still says the game folder is as it was before when the first rename was undone and checked' {
+        $fx = New-F412Fixture
+        $null = Invoke-TpmRebuildOneGame -Game (New-F412Game -Fixture $fx) -InstallFolder $fx.Games -ZipSources @($fx.Zips) -SyncStatePath $fx.SyncState
+        $kept = @(Get-TpmRebuildKeptFolders -InstallFolder $fx.Games)[0]
+        $rebuiltDigest = Get-F412TreeDigest -Path $fx.Target
+        $script:f412Moves = 0
+        Mock Invoke-TpmAutoSyncMovePath {
+            $script:f412Moves++
+            if ($script:f412Moves -eq 2) { throw 'simulated rename failure' }
+            & $script:f412RealMove -Source $Source -Destination $Destination
+        }
+
+        $result = Restore-TpmRebuildKeptFolder -Kept $kept -InstallFolder $fx.Games
+
+        $result.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        (Get-F412TreeDigest -Path $fx.Target) | Should -BeExactly $rebuiltDigest
+        Test-Path -LiteralPath ([string]$kept.Path) | Should -BeTrue
+    }
+
     It 'deletes a kept old folder only when asked, and never a folder outside the kept place' {
         $fx = New-F412Fixture
         $null = Invoke-TpmRebuildOneGame -Game (New-F412Game -Fixture $fx) -InstallFolder $fx.Games -ZipSources @($fx.Zips) -SyncStatePath $fx.SyncState
@@ -365,5 +417,139 @@ Describe 'The DAT list check reads the real DAT and is not offered for folders T
         $notKept = [pscustomobject]@{ Name = 'Something I put here'; Path = $stranger; RecordPath = ($stranger + '.tpm.json'); Record = $null }
         (Remove-TpmRebuildKeptFolder -Kept $notKept -InstallFolder $fx.Games).Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
         Test-Path -LiteralPath (Join-Path $stranger 'mine.txt') | Should -BeTrue
+    }
+}
+
+Describe 'Rebuild several games from their ZIPs' {
+    BeforeEach {
+        Mock Write-Host { }
+        Mock Get-TpmFolderProcesses { @() }
+        Mock Get-TpmDatFilesForGame { $null }
+        $script:f412Answers = New-Object System.Collections.Generic.Queue[string]
+        foreach ($answer in @('YES', 'REBUILD')) { $script:f412Answers.Enqueue($answer) }
+        Mock Read-TpmResetRestoreAnswer { if ($script:f412Answers.Count -gt 0) { $script:f412Answers.Dequeue() } else { '' } }
+        Mock Get-TpmRebuildGames { $script:f412Games }
+        Mock Read-TpmMultiGameChoice { @(0, 1, 2) }
+    }
+    AfterEach { $script:TpmOwnedLayout = $null }
+
+    BeforeAll {
+    function New-F412Batch {
+        $fx = New-F412Fixture
+        $second = Join-Path $fx.Games 'Mama Game'
+        $lost = Join-Path $fx.Games 'Lost Game'
+        New-Item -ItemType Directory -Path $second, $lost -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $second 'game.exe'), 'old mama')
+        [IO.File]::WriteAllText((Join-Path $lost 'game.exe'), 'old lost')
+        New-F412Zip -Path (Join-Path $fx.Zips 'Mama Game.zip') -Entries ([ordered]@{ 'game.exe' = 'new mama' })
+        $script:f412Games = @(
+            [pscustomobject]@{ Code = 'PAPA'; Name = 'Papa Game'; Folder = $fx.Target; GamePath = (Join-Path $fx.Target 'game.exe') },
+            [pscustomobject]@{ Code = 'MAMA'; Name = 'Mama Game'; Folder = $second; GamePath = (Join-Path $second 'game.exe') },
+            [pscustomobject]@{ Code = 'LOST'; Name = 'Lost Game'; Folder = $lost; GamePath = (Join-Path $lost 'game.exe') })
+        return [pscustomobject]@{ Fx = $fx; Second = $second; Lost = $lost }
+    }
+    }
+
+    It 'rebuilds the games that have a ZIP, skips the one without, and keeps every old folder' {
+        $b = New-F412Batch
+        $lostDigest = Get-F412TreeDigest -Path $b.Lost
+
+        $result = Invoke-TpmRebuildSeveralGames -UserProfilesDir $b.Fx.Root -InstallFolder $b.Fx.Games -ZipSources @($b.Fx.Zips) -SyncStatePath $b.Fx.SyncState
+
+        $result.Outcome | Should -Be 'SUCCEEDED'
+        [IO.File]::ReadAllText((Join-Path $b.Fx.Target 'game.exe')) | Should -BeExactly 'new exe'
+        [IO.File]::ReadAllText((Join-Path $b.Second 'game.exe')) | Should -BeExactly 'new mama'
+        (Get-F412TreeDigest -Path $b.Lost) | Should -BeExactly $lostDigest
+        @(Get-ChildItem -LiteralPath $b.Fx.KeptRoot -Directory).Count | Should -Be 2
+        @(Get-F412Leftovers -Fixture $b.Fx).Count | Should -Be 0
+    }
+
+    It 'changes nothing unless both the YES and the typed word are given' -TestCases @(
+        @{ First = 'no'; Second = 'REBUILD' }
+        @{ First = 'YES'; Second = 'yes' }
+    ) {
+        param($First, $Second)
+        $b = New-F412Batch
+        $script:f412Answers.Clear()
+        foreach ($answer in @($First, $Second)) { $script:f412Answers.Enqueue($answer) }
+        $before = Get-F412TreeDigest -Path $b.Fx.Games
+
+        $result = Invoke-TpmRebuildSeveralGames -UserProfilesDir $b.Fx.Root -InstallFolder $b.Fx.Games -ZipSources @($b.Fx.Zips) -SyncStatePath $b.Fx.SyncState
+
+        $result.Outcome | Should -Be 'NO_OP'
+        (Get-F412TreeDigest -Path $b.Fx.Games) | Should -BeExactly $before
+        Test-Path -LiteralPath $b.Fx.KeptRoot | Should -BeFalse
+    }
+
+    It 'a game that cannot be rebuilt does not stop the others and the result says so' {
+        $b = New-F412Batch
+        Remove-Item -LiteralPath (Join-Path $b.Fx.Zips 'Mama Game.zip') -Force
+        [IO.File]::WriteAllText((Join-Path $b.Fx.Zips 'Mama Game.zip'), 'this is not a zip file')
+        $mamaDigest = Get-F412TreeDigest -Path $b.Second
+
+        $result = Invoke-TpmRebuildSeveralGames -UserProfilesDir $b.Fx.Root -InstallFolder $b.Fx.Games -ZipSources @($b.Fx.Zips) -SyncStatePath $b.Fx.SyncState
+
+        $result.Outcome | Should -Be 'ACTION_REQUIRED'
+        [IO.File]::ReadAllText((Join-Path $b.Fx.Target 'game.exe')) | Should -BeExactly 'new exe'
+        (Get-F412TreeDigest -Path $b.Second) | Should -BeExactly $mamaDigest
+    }
+
+    It 'skips a running game without touching it' {
+        $b = New-F412Batch
+        Mock Get-TpmFolderProcesses { if ([string]$Folder -like '*Mama Game') { @('mama') } else { @() } }
+        $mamaDigest = Get-F412TreeDigest -Path $b.Second
+
+        $result = Invoke-TpmRebuildSeveralGames -UserProfilesDir $b.Fx.Root -InstallFolder $b.Fx.Games -ZipSources @($b.Fx.Zips) -SyncStatePath $b.Fx.SyncState
+
+        $result.Outcome | Should -Be 'SUCCEEDED'
+        (Get-F412TreeDigest -Path $b.Second) | Should -BeExactly $mamaDigest
+    }
+}
+
+Describe 'A configured DAT file that is missing is logged and not blamed on the DAT list (FIX412 sweep)' {
+    It 'logs the missing configured DAT path and returns nothing' {
+        $script:logPath = Join-Path $TestDrive ('f412-dat-' + [guid]::NewGuid().ToString('N') + '.log')
+        $missing = Join-Path $TestDrive 'gone\Collection.dat'
+
+        Get-TpmDatFilesForGame -GameName 'Papa Game' -DatFilePath $missing | Should -BeNullOrEmpty
+
+        [IO.File]::ReadAllText($script:logPath) | Should -Match ([regex]::Escape($missing))
+    }
+}
+
+Describe 'The list of old kept folders shows full game names (FIX412 sweep)' {
+    BeforeEach {
+        Mock Write-Host { }
+        Mock Write-TpmResetRestoreHeader { }
+        Mock Read-TpmChoice -MockWith { $script:keptChoices.Dequeue() }
+        Mock Get-TpmGameTitle -MockWith { if ($Code -eq 'GoldenTeeLive2019') { 'Golden Tee Live 2019' } else { $Code } }
+        $script:keptRows = $null
+        Mock Read-TpmNumberedListChoice -MockWith { $script:keptRows = @($Rows); -1 }
+    }
+
+    It 'shows the game name only, and adds the folder name only to tell two old folders of the same game apart' {
+        $install = Join-Path $TestDrive 'games'
+        [void][IO.Directory]::CreateDirectory($install)
+        $script:keptChoices = New-Object System.Collections.Generic.Queue[string]
+        foreach ($answer in @('2', 'B')) { $script:keptChoices.Enqueue($answer) }
+        Mock Get-TpmRebuildKeptFolders -MockWith {
+            @(
+                [pscustomobject]@{ Name = 'GoldenTeeLive2019_2026-10-01_10-00-00'; Path = 'x'; RecordPath = 'x'; Record = [pscustomobject]@{ Code = 'GoldenTeeLive2019'; Name = 'GoldenTeeLive2019' } },
+                [pscustomobject]@{ Name = 'OldFolder_2026-10-02_10-00-00'; Path = 'y'; RecordPath = 'y'; Record = [pscustomobject]@{ Name = 'Some Old Game' } }
+            )
+        }
+        Invoke-TpmRebuildMenu -UserProfilesDir $TestDrive -InstallFolder $install -ZipSources @($install)
+        $script:keptRows | Should -Be @('Golden Tee Live 2019', 'Some Old Game')
+
+        $script:keptChoices = New-Object System.Collections.Generic.Queue[string]
+        foreach ($answer in @('2', 'B')) { $script:keptChoices.Enqueue($answer) }
+        Mock Get-TpmRebuildKeptFolders -MockWith {
+            @(
+                [pscustomobject]@{ Name = 'GoldenTeeLive2019_2026-10-01_10-00-00'; Path = 'x'; RecordPath = 'x'; Record = [pscustomobject]@{ Code = 'GoldenTeeLive2019' } },
+                [pscustomobject]@{ Name = 'GoldenTeeLive2019_rebuilt_2026-10-02_10-00-00'; Path = 'y'; RecordPath = 'y'; Record = [pscustomobject]@{ Code = 'GoldenTeeLive2019' } }
+            )
+        }
+        Invoke-TpmRebuildMenu -UserProfilesDir $TestDrive -InstallFolder $install -ZipSources @($install)
+        $script:keptRows | Should -Be @('Golden Tee Live 2019 - GoldenTeeLive2019_2026-10-01_10-00-00', 'Golden Tee Live 2019 - GoldenTeeLive2019_rebuilt_2026-10-02_10-00-00')
     }
 }

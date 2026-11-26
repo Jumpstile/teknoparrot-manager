@@ -5,8 +5,6 @@
 #
 #  S6  Unattended Health Check: an inspection that could not look at everything says so and exits non-zero (2); a finished
 #      inspection that found problems in the library still exits 0. The progress row is "incomplete", not FAILED.
-#  S7  Controls with no usable reference game for a family are skipped by design: NO_OP alone, done alongside saved games.
-#      Real save/backup failures stay FAILED even beside design skips.
 #  S8  A stall (silent for 60+ seconds) is telemetry. Work that later finishes closes as done. Error, Cancelled and Incomplete
 #      keep priority (Error > Cancelled > Incomplete > Stalled), whatever order they were recorded in.
 #  S9  Registration screens pass the real unattended state and keep their details for the final return prompt (D).
@@ -167,12 +165,10 @@ Describe 'FIX98 S6 and S7 an unfinished run is attention, a failed write stays F
             if (-not $definitions.ContainsKey($node.Name)) { $definitions[$node.Name] = @() }
             $definitions[$node.Name] += $node
         }
-        $external = @('Write-Log', 'Write-TpmCompactExtractionProgress', 'Write-Host', 'Get-DetectedGpuVendor', 'Suspend-TpmProgressLine', 'Resume-TpmProgressLine',
-            'Invoke-ControlPropagationLegacy', 'ConvertTo-TpmLegacyTransactionResult')
+        $external = @('Write-Log', 'Write-TpmCompactExtractionProgress', 'Write-Host', 'Get-DetectedGpuVendor', 'Suspend-TpmProgressLine', 'Resume-TpmProgressLine')
         $selected = @{}
         $pending = New-Object 'System.Collections.Generic.Queue[string]'
-        foreach ($root in @('Invoke-LibraryHealthCheck', 'Get-TpmHealthCheckExitCode', 'Get-TpmProgressCloseState', 'Invoke-ControlPropagation',
-                'Get-TpmControlPropagationSummary', 'Write-ControlPropagationResults')) { $pending.Enqueue($root) }
+        foreach ($root in @('Invoke-LibraryHealthCheck', 'Get-TpmHealthCheckExitCode', 'Get-TpmProgressCloseState', 'Read-HostSafe', 'Test-TpmInteractiveInput', 'Get-ConsoleContentWidth')) { $pending.Enqueue($root) }
         while ($pending.Count) {
             $name = $pending.Dequeue()
             if ($selected.ContainsKey($name) -or $external -contains $name) { continue }
@@ -192,11 +188,6 @@ Describe 'FIX98 S6 and S7 an unfinished run is attention, a failed write stays F
         function Get-DetectedGpuVendor { [pscustomobject]@{ Vendor = 'NVIDIA'; Name = 'isolated fixture' } }
         function Suspend-TpmProgressLine {}
         function Resume-TpmProgressLine {}
-        function Invoke-ControlPropagationLegacy { param([Parameter(ValueFromRemainingArguments = $true)]$Arguments) }
-        # Names every parameter Invoke-ControlPropagation passes: a Pester mock only sees $Outcome and $ReasonCode as variables if the command it replaces declares them.
-        function ConvertTo-TpmLegacyTransactionResult {
-            param($Legacy, $WorkflowKey, $OperationKey, $Items, $ChangedItems, $CompletedItems, $FailedItems, $SkippedItems, $Summary, $ReasonCode, $Backup, $MutationStarted, $Outcome, $ProductState)
-        }
     }
     BeforeEach {
         $script:Fix98Log = New-Object 'System.Collections.Generic.List[string]'
@@ -285,6 +276,24 @@ Describe 'FIX98 S6 and S7 an unfinished run is attention, a failed write stays F
         Get-TpmHealthCheckExitCode -Result $result | Should -Be 2
     }
 
+    It 'a <Check> check that threw is an unfinished check: exit code 2 and a "Could not check" row' -TestCases @(
+        @{ Check = 'game types'; Command = 'Get-TpmGameTypeReport'; Area = 'Game types'; Flag = 'GameTypeCheckFailed' }
+        @{ Check = 'controls'; Command = 'Get-TpmControlCoverageAudit'; Area = 'Controls'; Flag = 'ControlsCheckFailed' }
+    ) {
+        param($Check, $Command, $Area, $Flag)
+        # Mutation: leave the catch blocks without a flag -> the check is silently missing and the outcome stays SUCCEEDED (exit 0).
+        $script:Fix98Throwing = $Command
+        Mock Get-TpmGameTypeReport { if ($script:Fix98Throwing -eq 'Get-TpmGameTypeReport') { throw 'injected game types failure' }; $null }
+        Mock Get-TpmControlCoverageAudit { if ($script:Fix98Throwing -eq 'Get-TpmControlCoverageAudit') { throw 'injected controls failure' }; $null }
+        $result = Invoke-LibraryHealthCheck -UserProfilesDir $script:profiles -TpRoot $script:healthRoot
+        $result.$Flag | Should -BeTrue
+        $result.Outcome | Should -BeExactly 'ACTION_REQUIRED'
+        Get-TpmHealthCheckExitCode -Result $result | Should -Be 2
+        $rows = @(Get-TpmLibraryHealthRows -Result $result)
+        (@($rows | Where-Object Area -eq $Area))[0].Text | Should -BeExactly 'Could not check'
+        $script:Fix98Log -join "`n" | Should -Match 'could not be checked'
+    }
+
     It 'S6: the unattended branch exits with the health exit code, not a fixed 0' {
         # Mutation: put back "exit 0" in the unattended Health Check branch -> an incomplete check still exits success.
         $branches = @($script:Fix98Ast.FindAll({
@@ -298,112 +307,12 @@ Describe 'FIX98 S6 and S7 an unfinished run is attention, a failed write stays F
         $exits[0].Pipeline.Extent.Text | Should -BeExactly '$healthExitCode'
     }
 
-    It 'S7: no usable family reference is skipped by design and all-skipped is NO_OP' {
-        # Mutation: treat a missing reference as ACTION_REQUIRED or omit it from skips -> no-op progress and counts disagree.
-        Mock Invoke-ControlPropagationLegacy { @([pscustomobject]@{ Code = 'ZGame'; Status = 'skipped-no-reference'; ReasonCode = 'NO_USABLE_FAMILY_REFERENCE'; Family = 'lightgun' }, [pscustomobject]@{ Code = 'AGame'; Status = 'skipped-unchanged' }) }
-        Mock ConvertTo-TpmLegacyTransactionResult {
-            [pscustomobject]@{ Outcome = $Outcome; ReasonCode = $ReasonCode; SkippedItems = @($SkippedItems) }
-        }
-        $tx = Invoke-ControlPropagation -userProfilesDir 'unused' -pool @{} -minBound 1 -DryRun $false
-        $tx.Outcome | Should -BeExactly 'NO_OP'
-        $tx.ReasonCode | Should -BeExactly 'NO_CHANGES_NEEDED'
-        $tx.SkippedItems | Should -Contain 'ZGame'
-        Get-TpmProgressCloseState -Result $tx | Should -BeExactly 'No-op'
-        $summary = Get-TpmControlPropagationSummary -Reports @($tx.Reports) -Outcome ([string]$tx.Outcome)
-        $summary.Title | Should -BeExactly 'No game was changed.'
-        $summary.Status | Should -BeExactly 'Ok'
-        $summary.Counts.SkippedCount | Should -Be 2
-        @($summary.Needs).Count | Should -Be 0
-        $summary.NotChanged | Should -Match '1 game skipped: no game of their family has your controls yet'
-        $detail = @($summary.Blocks | Where-Object Heading -eq 'ZGame')
-        $detail.Count | Should -Be 1
-        ($detail.Lines -join ' ') | Should -Match "lightgun.*Add one game of this family with your own controls, then run this again\."
-        ($detail.Lines -join ' ') | Should -Match 'NO_USABLE_FAMILY_REFERENCE'
-        $summary.NotChanged | Should -Not -Match 'NO_USABLE_FAMILY_REFERENCE'
-    }
-
-    It 'S7: the next step names one game to set up for each control type that has no example game' {
-        # Mutation: drop the named games -> the user has to guess which game to open in TeknoParrotUI (issue #342).
-        $reports = @(
-            [pscustomobject]@{ Code = 'ZGame'; Status = 'skipped-no-reference'; Family = 'lightgun' },
-            [pscustomobject]@{ Code = 'AGame'; Status = 'skipped-no-reference'; Family = 'lightgun' },
-            [pscustomobject]@{ Code = 'MGame'; Status = 'skipped-no-reference'; Family = 'driving' }
-        )
-        $summary = Get-TpmControlPropagationSummary -Reports $reports -Outcome 'NO_OP'
-        $summary.Next | Should -Match 'for example driving: MGame; lightgun: AGame\)'
-        (($summary.Blocks | Where-Object Heading -eq 'Games to set up first').Lines -join ' ') | Should -Match 'does not set up a game'
-    }
-
-    It 'S7: the unattended log explains each design skip and agrees with the screen' {
-        # Mutation: log only ACTION_REQUIRED or hide skipped-game details in unattended mode -> the reason and next step disappear.
-        $reports = @([pscustomobject]@{ Code = 'ZGame'; Status = 'skipped-no-reference'; ReasonCode = 'NO_USABLE_FAMILY_REFERENCE'; Family = 'lightgun' })
-        [void](Write-ControlPropagationResults -Reports $reports -Outcome 'NO_OP' -Unattended)
-        ($script:Fix98Host -join "`n") | Should -Match 'No game was changed\.'
-        ($script:Fix98Host -join "`n") | Should -Match '1 game skipped: no game of their family has your controls yet'
-        ($script:Fix98Log -join "`n") | Should -Match "ZGame: Skipped by design:.*'lightgun'.*Add one game of this family with your own controls, then run this again\."
-        ($script:Fix98Log -join "`n") | Should -Match '1 game skipped: no game of their family has your controls yet'
-        ($script:Fix98Log -join "`n") | Should -Not -Match 'NO_ARCHETYPE_MATCH|needs attention, it is not a failed save'
-    }
-
-    It 'S7: a real save failure stays FAILED, with or without a missing example game' -ForEach @(
-        @{ Case = 'only a failed save'; Reports = @(@{ Code = 'AGame'; Status = 'save-failed' }) }
-        @{ Case = 'a failed save and a missing example game'; Reports = @(@{ Code = 'AGame'; Status = 'save-failed' }, @{ Code = 'ZGame'; Status = 'skipped-no-reference'; Family = 'lightgun' }) }
-    ) {
-        # Mutation: map every ACTION_REQUIRED/FAILED_BEFORE_MUTATION control result to Incomplete -> a game that could not be saved no longer shows FAILED.
-        $script:Fix98Reports = @($Reports | ForEach-Object { [pscustomobject]$_ })
-        Mock Invoke-ControlPropagationLegacy { $script:Fix98Reports }
-        Mock ConvertTo-TpmLegacyTransactionResult {
-            [pscustomobject]@{ Outcome = $Outcome; ReasonCode = $ReasonCode }
-        }
-        $tx = Invoke-ControlPropagation -userProfilesDir 'unused' -pool @{} -minBound 1 -DryRun $false
-        $tx.Outcome | Should -BeExactly 'FAILED_BEFORE_MUTATION'
-        $tx.ReasonCode | Should -BeExactly 'PROFILE_SAVE_FAILED'
-        Get-TpmProgressCloseState -Result $tx | Should -BeExactly 'Error'
-    }
-
     It 'S7: other action-required results are not relabeled as attention' {
         # Mutation: return Incomplete for every ACTION_REQUIRED outcome -> an unverified deployment stops showing FAILED.
         Get-TpmProgressCloseState -Result ([pscustomobject]@{ Outcome = 'ACTION_REQUIRED'; ReasonCode = 'DEPLOYMENT_UNVERIFIED' }) | Should -BeExactly 'Error'
         Get-TpmProgressCloseState -Result ([pscustomobject]@{ Outcome = 'FAILED_BEFORE_MUTATION'; ReasonCode = 'PROFILE_BACKUP_FAILED' }) | Should -BeExactly 'Error'
+        Get-TpmProgressCloseState -Result ([pscustomobject]@{ Outcome = 'FAILED_BEFORE_MUTATION'; ReasonCode = 'PROFILE_SAVE_FAILED' }) | Should -BeExactly 'Error'
         Get-TpmProgressCloseState -Result ([pscustomobject]@{ Outcome = 'ACTION_REQUIRED'; ReasonCode = 'BACKUP_RETAINED_NO_PROFILE_CHANGE' }) | Should -BeExactly 'Incomplete'
-    }
-
-    It 'FIX107 S4: saved controls and a family design skip succeed and close done with an honest skipped count' {
-        # Mutation: let a design skip force PARTIAL_APPLIED/Attention -> the otherwise successful run is not done/green.
-        $script:Fix98Reports = @([pscustomobject]@{ Code = 'AGame'; Status = 'bound' }, [pscustomobject]@{ Code = 'ZGame'; Status = 'skipped-no-reference'; ReasonCode = 'NO_USABLE_FAMILY_REFERENCE'; Family = 'lightgun' })
-        Mock Invoke-ControlPropagationLegacy { $script:Fix98Reports }
-        Mock ConvertTo-TpmLegacyTransactionResult {
-            [pscustomobject]@{ Outcome = $Outcome; ReasonCode = $ReasonCode; SkippedItems = @($SkippedItems) }
-        }
-        $tx = Invoke-ControlPropagation -userProfilesDir 'unused' -pool @{} -minBound 1 -DryRun $false
-        $tx.Outcome | Should -BeExactly 'SUCCEEDED'
-        $tx.ReasonCode | Should -BeExactly 'CONTROLS_PROCESSED'
-        Get-TpmProgressCloseState -Result $tx | Should -BeExactly 'Final'
-        $tx.SkippedItems | Should -Contain 'ZGame'
-        $summary = Get-TpmControlPropagationSummary -Reports @($tx.Reports) -Outcome ([string]$tx.Outcome)
-        $summary.Title | Should -Match 'updated'
-        $summary.Status | Should -BeExactly 'Ok'
-        $summary.Counts.SkippedCount | Should -Be 1
-        @($summary.Needs).Count | Should -Be 0
-        $summary.NotChanged | Should -Match '1 game skipped: no game of their family has your controls yet'
-        [void](Write-ControlPropagationResults -Reports $tx.Reports -Outcome $tx.Outcome -Unattended)
-        ($script:Fix98Log -join "`n") | Should -Match "ZGame: Skipped by design:.*lightgun.*Add one game"
-    }
-
-    It 'FIX107 S4: a real save failure next to saved controls stays FAILED: <Case>' -ForEach @(
-        @{ Case = 'saved and failed'; Reports = @(@{ Code = 'AGame'; Status = 'bound' }, @{ Code = 'BGame'; Status = 'save-failed' }) }
-        @{ Case = 'saved, failed and a missing example game'; Reports = @(@{ Code = 'AGame'; Status = 'bound' }, @{ Code = 'BGame'; Status = 'save-failed' }, @{ Code = 'ZGame'; Status = 'skipped-no-reference'; Family = 'lightgun' }) }
-    ) {
-        # Mutation: map every PARTIAL_APPLIED control result to Incomplete (or let the missing example game win the reason code) -> a profile that could not be saved no longer shows FAILED.
-        $script:Fix98Reports = @($Reports | ForEach-Object { [pscustomobject]$_ })
-        Mock Invoke-ControlPropagationLegacy { $script:Fix98Reports }
-        Mock ConvertTo-TpmLegacyTransactionResult {
-            [pscustomobject]@{ Outcome = $Outcome; ReasonCode = $ReasonCode }
-        }
-        $tx = Invoke-ControlPropagation -userProfilesDir 'unused' -pool @{} -minBound 1 -DryRun $false
-        $tx.Outcome | Should -BeExactly 'PARTIAL_APPLIED'
-        $tx.ReasonCode | Should -BeExactly 'PROFILE_SAVE_FAILED'
-        Get-TpmProgressCloseState -Result $tx | Should -BeExactly 'Error'
     }
 
     It 'FIX107 S4: other partial results are not relabeled as incomplete' {

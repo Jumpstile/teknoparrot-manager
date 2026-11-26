@@ -1203,17 +1203,8 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
         $result = New-CertificationScorecard -Results $fake
         $restoreItem = $result.Items | Where-Object { $_.Area -eq 'Unattended TPM config restoration' }
 
-        # Same mark-selection logic used by the harness's own Markdown
-        # renderer (Add-CertificationReport's "## Gates" loop) -- exercised
-        # directly here since that loop is inline top-level script code,
-        # not its own function.
-        $mark = if ($restoreItem.PSObject.Properties.Name -contains 'Status' -and $restoreItem.Status -eq 'NotApplicable') {
-            'N/A'
-        } elseif ($restoreItem.Passed) {
-            'PASS'
-        } else {
-            'FAIL'
-        }
+        # The harness's own shared mark function, not a copy of its logic.
+        $mark = Get-TPMGateMark -Item $restoreItem
 
         $mark | Should -Be 'N/A'
         $mark | Should -Not -Be 'PASS'
@@ -1230,13 +1221,7 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
             $result = New-CertificationScorecard -Results $fake
 
             foreach ($item in $result.Items) {
-                $mark = if ($item.PSObject.Properties.Name -contains 'Status' -and $item.Status -eq 'NotApplicable') {
-                    'N/A'
-                } elseif ($item.Passed) {
-                    'PASS'
-                } else {
-                    'FAIL'
-                }
+                $mark = Get-TPMGateMark -Item $item
                 if (@('Unattended TPM config restoration', 'Unattended TPM root binding') -contains $item.Area -and $smoke) {
                     $mark | Should -Be 'N/A'
                 } elseif ($item.Area -eq 'Smoke File Safety' -and -not $smoke) {
@@ -1424,15 +1409,8 @@ Describe "Smoke File Safety Not Applicable during unattended mode (issue #149)" 
         $result = New-CertificationScorecard -Results $fake
         $item = $result.Items | Where-Object { $_.Area -eq 'Smoke File Safety' }
 
-        # Same mark-selection logic used by the harness's own Markdown
-        # renderer (Add-CertificationReport's "## Gates" loop).
-        $mark = if ($item.PSObject.Properties.Name -contains 'Status' -and $item.Status -eq 'NotApplicable') {
-            'N/A'
-        } elseif ($item.Passed) {
-            'PASS'
-        } else {
-            'FAIL'
-        }
+        # The harness's own shared mark function (also used for the Smoke File Safety evidence), not a copy of its logic.
+        $mark = Get-TPMGateMark -Item $item
 
         $mark | Should -Be 'N/A'
         $mark | Should -Not -Be 'PASS'

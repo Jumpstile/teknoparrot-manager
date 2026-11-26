@@ -249,3 +249,38 @@ Describe 'Undo after the patch list changed (the install was made with an older 
         (Get-FileHash -LiteralPath $case.SettingsTarget -Algorithm SHA256).Hash | Should -BeExactly $case.BeforeHash
     }
 }
+
+Describe 'A saved undo copy larger than 16 KiB (a recipe with many files)' {
+    It 'is still listed and found for Undo, so an installed patch is not reported as having nothing to undo' {
+        $root = Join-Path $TestDrive 'big'
+        $game = Join-Path $root 'g'
+        $payload = Join-Path $root 'p'
+        $recovery = Join-Path $root 'r'
+        $protected = Join-Path $root 'x'
+        foreach ($directory in @($game,$payload,$recovery,$protected,(Join-Path $game 'some-long-folder-name'))) { [void][IO.Directory]::CreateDirectory($directory) }
+        $exeBytes = [Text.Encoding]::ASCII.GetBytes('synthetic executable; never run')
+        [IO.File]::WriteAllBytes((Join-Path $game 's.exe'), $exeBytes)
+        $operations = @(1..120 | ForEach-Object {
+            $bytes = [Text.Encoding]::ASCII.GetBytes('created payload ' + $_)
+            $hash = Get-StaleBytesSha256 $bytes
+            [IO.File]::WriteAllBytes((Join-Path $payload ('c' + $_ + '.bin')), $bytes)
+            [pscustomobject]@{Type='CreateFile'; Target=('some-long-folder-name/created-file-number-' + $_ + '.bin'); BeforeState='Absent'; AfterSha256=$hash; Payload=('c' + $_ + '.bin'); PayloadSha256=$hash}
+        })
+        $entry = [pscustomobject]@{
+            Id='big.receipt.patch'; ProfileId='BigCase'; Executable='s.exe'; ExecutableSha256=(Get-StaleBytesSha256 $exeBytes)
+            SourceUrl='https://example.invalid/big'; SourceRevision=('C' * 40); ExclusiveGroup=''; Operations=$operations
+        }
+        $content = [pscustomobject]@{Schema=3; Entries=@($entry)} | ConvertTo-Json -Depth 8
+        $inputs = @{
+            CatalogContent=$content; CatalogSha256=(Get-TpmPatchTextSha256 $content); PatchId=$entry.Id; ProfileId='BigCase'
+            GameRoot=$game; PayloadRoot=$payload; RecoveryRoot=$recovery; ProtectedRoots=@($protected)
+        }
+        $applied = Invoke-TpmCatalogPatch @inputs -Confirm:$false
+        $applied.Status | Should -BeExactly 'Applied'
+        (Get-Item -LiteralPath (Join-Path $applied.RecoveryDirectory 'receipt.json')).Length | Should -BeGreaterThan 16384
+
+        @(Get-TpmUndoablePatchIds -RecoveryRoot $recovery) | Should -Contain 'big.receipt.patch'
+        $request = [pscustomobject]@{Context=[pscustomobject]@{RecoveryRoot=$recovery; ProfileId='BigCase'; GameRoot=$game}}
+        @(Get-TpmPatchRecoveryDirectories -Request $request -PatchId 'big.receipt.patch').Count | Should -Be 1
+    }
+}

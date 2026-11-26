@@ -79,10 +79,10 @@ Describe 'RC8 issue #371: option-12 cleanup cannot reactivate an unrestored trus
             $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in $withdrawn
         }, $true)).Count | Should -Be 0
     }
-    It 'nothing writes the trust rule: the atomic pg_hba.conf writer is reached only from the backup restore, and no bare trust line exists' {
+    It 'nothing writes the trust rule: the atomic pg_hba.conf writer is reached only from the backup restore, and the bare trust line appears only in the manual steps the user follows' {
         # Mutation: a new call to Set-PostgresHbaPolicyAtomically outside Restore-PostgresHbaFromBackup (as the withdrawn
-        # reset did with its trust bytes), or a bare 'host all postgres 127.0.0.1/32 trust' string to build such a file,
-        # fails these assertions.
+        # reset did with its trust bytes), or a bare 'host all postgres 127.0.0.1/32 trust' string outside the
+        # on-screen manual steps (Get-PostgresPasswordRecoveryLines, text the user types by hand), fails these assertions.
         $writers = @($script:issue371Ast.FindAll({ param($n)
             $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Set-PostgresHbaPolicyAtomically'
         }, $true))
@@ -91,9 +91,14 @@ Describe 'RC8 issue #371: option-12 cleanup cannot reactivate an unrestored trus
         while ($owner -and $owner -isnot [System.Management.Automation.Language.FunctionDefinitionAst]) { $owner = $owner.Parent }
         $owner | Should -Not -BeNullOrEmpty
         $owner.Name | Should -BeExactly 'Restore-PostgresHbaFromBackup'
-        @($script:issue371Ast.FindAll({ param($n)
+        $bare = @($script:issue371Ast.FindAll({ param($n)
             ($n -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $n -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) -and
             $n.Value -match '^\s*host\s+all\s+postgres\s+127\.0\.0\.1/32\s+trust\s*$'
-        }, $true)).Count | Should -Be 0
+        }, $true))
+        foreach ($line in $bare) {
+            $home371 = $line.Parent
+            while ($home371 -and $home371 -isnot [System.Management.Automation.Language.FunctionDefinitionAst]) { $home371 = $home371.Parent }
+            $home371.Name | Should -BeExactly 'Get-PostgresPasswordRecoveryLines'
+        }
     }
 }

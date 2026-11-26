@@ -61,6 +61,20 @@ BeforeAll {
 
     function script:Get-CtlLayout { param([string]$Preset = 'Xbox') return @(Get-TpmBaselineLayout -Baseline (New-TpmBaseline -Preset $Preset)) }
     function script:Get-CtlNode { param($Doc, [string]$Mapping) return @(Get-ButtonNodes $Doc | Where-Object { $_.InputMapping -eq $Mapping })[0] }
+
+    # A game with real-shaped volume controls: the template and the player's saved settings list the same buttons. Coin can carry an Xbox binding.
+    function script:New-CtlVolumeGame {
+        param([string]$Dir, [string]$GameDir, [string]$Name, [string]$UpMap = 'P1Button5', [string]$DownMap = 'P1Button6', [string]$CoinCode = '', [object[]]$Extra = @(), [string]$UpName = 'Volume Up')
+        $controls = @(@('Coin', 'Coin1'), @('Start', 'P1ButtonStart'), @('Button 1', 'P1Button1'), @($UpName, $UpMap), @('Volume Down', $DownMap)) + @($Extra)
+        $wrap = '<?xml version="1.0" encoding="utf-8"?><GameProfile><EmulationProfile>Emu</EmulationProfile><GameProfileRevision>5</GameProfileRevision><ExecutableName>game</ExecutableName><ConfigValues><FieldInformation><CategoryName>General</CategoryName><FieldName>Input API</FieldName><FieldValue>DirectInput</FieldValue><FieldOptions><string>DirectInput</string><string>XInput</string></FieldOptions></FieldInformation></ConfigValues><JoystickButtons>{0}</JoystickButtons></GameProfile>'
+        $template = ($controls | ForEach-Object { '<JoystickButtons><ButtonName>{0}</ButtonName><InputMapping>{1}</InputMapping><AnalogType>None</AnalogType></JoystickButtons>' -f $_[0], $_[1] }) -join ''
+        $saved = ($controls | ForEach-Object { '<JoystickButtons><ButtonName>{0}</ButtonName>{2}<InputMapping>{1}</InputMapping><AnalogType>None</AnalogType></JoystickButtons>' -f $_[0], $_[1], $(if ($_[1] -eq 'Coin1' -and $CoinCode) { $script:XiXml -f $CoinCode } else { '' }) }) -join ''
+        [System.IO.File]::WriteAllText((Join-Path $GameDir ($Name + '.xml')), ($wrap -f $template), (New-Object System.Text.UTF8Encoding $false))
+        $path = Join-Path $Dir ($Name + '.xml')
+        [System.IO.File]::WriteAllText($path, ($wrap -f $saved), (New-Object System.Text.UTF8Encoding $false))
+        return $path
+    }
+    function script:Get-CtlCode { param($Doc, [string]$Mapping) $n = (Get-CtlNode $Doc $Mapping).SelectSingleNode('XInputButton/ButtonCode'); if ($n) { $n.InnerText.Trim() } else { '' } }
 }
 
 Describe 'Controller layout choice' {
@@ -74,8 +88,8 @@ Describe 'Controller layout choice' {
         }
     }
 
-    It 'the four layouts are Xbox, PlayStation, Nintendo and arcade stick, and Test and Service start empty' {
-        @((Get-TpmBaselinePresets).Keys) | Should -Be @('Xbox', 'PlayStation', 'Nintendo', 'ArcadeStick')
+    It 'the layouts are Xbox, PlayStation, Nintendo, arcade stick and learned arcade controls, and Test and Service start empty' {
+        @((Get-TpmBaselinePresets).Keys) | Should -Be @('Xbox', 'PlayStation', 'Nintendo', 'ArcadeStick', 'LearnedArcade')
         $slots = (New-TpmBaseline -Preset 'Xbox').Slots
         $slots['Test'] | Should -Be ''
         $slots['Service1'] | Should -Be ''
@@ -116,6 +130,21 @@ Describe 'Controller layout choice' {
         (New-TpmBaseline -Preset 'ArcadeStick').Slots['P1Button1'] | Should -Be 'X'
     }
 
+    It 'the learned arcade choice is offered and does not tell the user to switch to Xbox mode' {
+        (Get-TpmBaselinePresets)['LearnedArcade'].Title | Should -Match 'learned arcade controls'
+        (Get-TpmBaselinePresets)['LearnedArcade'].Title | Should -Not -Match 'Xbox'
+        @(Test-TpmBaseline -Baseline (New-TpmBaseline -Preset 'LearnedArcade')).Count | Should -Be 0
+        $summary = (Get-TpmBaselineSummaryLines -Baseline (New-TpmBaseline -Preset 'LearnedArcade')) -join ' '
+        $summary | Should -Match 'as they are'
+        $summary | Should -Not -Match 'switched to its XInput mode'
+    }
+
+    It 'the layout list mentions XInput mode for an arcade stick only when a gamepad is found' {
+        ((Get-TpmBaselineChooserNotes -XboxPadFound $false) -join ' ') | Should -Not -Match 'XInput mode'
+        ((Get-TpmBaselineChooserNotes -XboxPadFound $false) -join ' ') | Should -Match 'keyboard or DirectInput mode, choose 5'
+        ((Get-TpmBaselineChooserNotes -XboxPadFound $true) -join ' ') | Should -Match 'XInput mode'
+    }
+
     It 'asks again when there is no saved layout or the file is damaged' {
         Read-TpmBaseline -StateDir $script:State | Should -BeNullOrEmpty
         [void][System.IO.Directory]::CreateDirectory($script:State)
@@ -129,6 +158,17 @@ Describe 'Controller layout choice' {
         (@(Test-TpmBaseline -Baseline $b) -join ' ') | Should -Match 'used for both'
         { Save-TpmBaseline -StateDir $script:State -Baseline $b } | Should -Throw
         Test-Path (Get-TpmBaselinePath -StateDir $script:State) | Should -BeFalse
+    }
+
+    It 'names the duplicate pad button the way the chosen layout does' {
+        foreach ($case in @(@{ Preset = 'PlayStation'; Shown = 'L1'; Hidden = 'LB' }, @{ Preset = 'Xbox'; Shown = 'LB'; Hidden = 'L1' })) {
+            $b = New-TpmBaseline -Preset $case.Preset
+            $b.Slots['Test'] = 'LB'
+            $b.Slots['Service1'] = 'LB'
+            $text = @(Test-TpmBaseline -Baseline $b) -join ' '
+            $text | Should -Match ('^' + $case.Shown + ' is used for both')
+            $text | Should -Not -Match $case.Hidden
+        }
     }
 
     It 'a layout file that a person edited into a duplicate is not used' {
@@ -161,6 +201,20 @@ Describe 'Controller layout apply' {
         [void][System.IO.Directory]::CreateDirectory($script:Game)
         $script:Layout = Get-CtlLayout 'Xbox'
         function script:Invoke-CtlApply { param([string]$Path, [bool]$DryRun = $false, [string]$Signature = '', $Layout = $script:Layout) Invoke-TpmBaselineApply -UserProfilesDir $script:Dir -ProfilePath $Path -GameProfilesDir $script:Game -Layout $Layout -DryRun $DryRun -ExpectedSignature $Signature }
+    }
+
+    It 'the learned arcade layout leaves a DirectInput game exactly as it is, with no Xbox switch and no changed bindings' {
+        [void](New-CtlTemplate -Dir $script:Game -Name 'GameL')
+        $path = New-CtlProfile -Dir $script:Dir -Name 'GameL'
+        $before = [System.IO.File]::ReadAllBytes($path)
+        $layout = @(Get-TpmBaselineLayout -Baseline (New-TpmBaseline -Preset 'LearnedArcade'))
+        $plan = Get-TpmBaselineGamePlan -ProfilePath $path -GameProfilesDir $script:Game -Layout $layout
+        $plan.NeedsApiChange | Should -BeFalse
+        $plan.Status | Should -Be 'NoChange'
+        $r = Invoke-CtlApply -Path $path -Layout $layout
+        $r.Status | Should -Be 'NoChange'
+        [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($path)) | Should -Be ([System.Convert]::ToBase64String($before))
+        (Get-ProfileInputApi (Read-Xml $path)) | Should -Be 'DirectInput'
     }
 
     It 'plans Add for free slots, Keep for an existing Xbox binding and NotInGame for controls the game does not list' {
@@ -208,6 +262,30 @@ Describe 'Controller layout apply' {
         $r.ReasonCode | Should -Be 'NoControls'
         $r.Reason | Should -Match 'does not recognize the names'
         [System.IO.File]::ReadAllBytes($path) | Should -Be $before
+    }
+
+    It 'says the game file lists no controller settings, not that names are unrecognized, when it has no controls at all' {
+        $template = Join-Path $script:Game 'GameEmpty.xml'
+        $xml = '<GameProfile><EmulationProfile>Emu</EmulationProfile><GameProfileRevision>5</GameProfileRevision><ExecutableName>game</ExecutableName><JoystickButtons><JoystickButtons /></JoystickButtons></GameProfile>'
+        [System.IO.File]::WriteAllText($template, $xml)
+        $path = Join-Path $script:Dir 'GameEmpty.xml'
+        [System.IO.File]::WriteAllText($path, $xml)
+        $before = [System.IO.File]::ReadAllBytes($path)
+        $r = Invoke-CtlApply -Path $path
+        $r.Status | Should -Be 'Refused'
+        $r.ReasonCode | Should -Be 'NoControlList'
+        $r.Reason | Should -Match 'lists no controller settings'
+        $r.Reason | Should -Not -Match 'does not recognize'
+        [System.IO.File]::ReadAllBytes($path) | Should -Be $before
+    }
+
+    It 'sets up a game the player already put on MergedInput even when the game''s list of input types does not name it' {
+        [void](New-CtlTemplate -Dir $script:Game -Name 'GameMerged')
+        $path = New-CtlProfile -Dir $script:Dir -Name 'GameMerged' -Api 'MergedInput'
+        $r = Invoke-CtlApply -Path $path -DryRun $true
+        $r.Status | Should -Be 'WouldChange'
+        $r.Plan.CurrentApi | Should -Be 'MergedInput'
+        $r.Plan.NeedsApiChange | Should -BeFalse
     }
 
     It 'a preview changes nothing on disk' {
@@ -334,15 +412,104 @@ Describe 'Controller layout apply' {
         [System.IO.File]::ReadAllBytes($path) | Should -Be $before
     }
 
-    It 'leaves a game alone when an Xbox button the layout wants is already used by another control' {
+    It 'skips only the control whose pad button is already used, writes the rest, and never writes a clashing button' {
         [void](New-CtlTemplate -Dir $script:Game -Name 'Game6')
-        # Coin already uses the A button (4096); the layout wants A for Button 1.
+        # Coin already uses the A button (4096); the layout wants A for Button 1 (Gun Trigger).
         $path = New-CtlProfile -Dir $script:Dir -Name 'Game6' -CoinCode '4096'
-        $before = [System.IO.File]::ReadAllBytes($path)
+        $preview = Invoke-CtlApply -Path $path -DryRun $true
+        $preview.Status | Should -Be 'WouldChange'
+        ($preview.Plan.Rows | Where-Object Mapping -eq 'P1Button1').Action | Should -Be 'Skipped'
+        $preview.StillNeeds | Should -Contain 'Gun Trigger'
+        ((Get-TpmBaselinePlanLines -Plan $preview.Plan) -join ' ') | Should -Match 'already used by another control.*Gun Trigger'
         $r = Invoke-CtlApply -Path $path
-        $r.Status | Should -Be 'Refused'
-        $r.ReasonCode | Should -Be 'Collision'
+        $r.Status | Should -Be 'Changed'
+        $r.Verified | Should -BeTrue
+        $doc = Read-Xml $path
+        (Get-CtlCode $doc 'P1Button1') | Should -Be ''
+        (Get-CtlCode $doc 'Coin1') | Should -Be '4096'
+        (Get-CtlCode $doc 'P1ButtonStart') | Should -Be '16'
+        (Get-CtlCode $doc 'P1Button2') | Should -Be '8192'
+        $codes = @(Get-ButtonNodes $doc | ForEach-Object { $_.SelectSingleNode('XInputButton/ButtonCode') } | Where-Object { $_ } | ForEach-Object { $_.InnerText.Trim() })
+        @($codes | Sort-Object -Unique).Count | Should -Be $codes.Count
+    }
+
+    It 'gives Volume Up and Volume Down the stick clicks, not the slot buttons, when the game file names them Button 5 and Button 6' {
+        $path = New-CtlVolumeGame -Dir $script:Dir -GameDir $script:Game -Name 'GameVol'
+        $r = Invoke-CtlApply -Path $path
+        $r.Status | Should -Be 'Changed'
+        $doc = Read-Xml $path
+        (Get-CtlCode $doc 'P1Button5') | Should -Be '64'
+        (Get-CtlCode $doc 'P1Button6') | Should -Be '128'
+        (Get-CtlCode $doc 'P1Button1') | Should -Be '4096'
+    }
+
+    It 'gives volume controls the stick clicks when the game file names them with other control names' {
+        $path = New-CtlVolumeGame -Dir $script:Dir -GameDir $script:Game -Name 'GameVol2' -UpMap 'P1Button7' -DownMap 'P1Button8'
+        $r = Invoke-CtlApply -Path $path
+        $r.Status | Should -Be 'Changed'
+        $doc = Read-Xml $path
+        (Get-CtlCode $doc 'P1Button7') | Should -Be '64'
+        (Get-CtlCode $doc 'P1Button8') | Should -Be '128'
+    }
+
+    It 'treats a stick click that is already used as a clash: that volume control is skipped and listed, the other is still set' {
+        $path = New-CtlVolumeGame -Dir $script:Dir -GameDir $script:Game -Name 'GameVol3' -CoinCode '64'
+        $r = Invoke-CtlApply -Path $path
+        $r.Status | Should -Be 'Changed'
+        $r.StillNeeds | Should -Contain 'Volume Up'
+        $doc = Read-Xml $path
+        (Get-CtlCode $doc 'P1Button5') | Should -Be ''
+        (Get-CtlCode $doc 'P1Button6') | Should -Be '128'
+    }
+
+    It 'gives Volume Up and Volume Down L3 and R3 when the game file puts them on the D-pad slots, and never writes D-pad Up or Down there' {
+        $path = New-CtlVolumeGame -Dir $script:Dir -GameDir $script:Game -Name 'GameVolPad' -UpMap 'P1ButtonUp' -DownMap 'P1ButtonDown' -Extra @(, @('Left', 'P1ButtonLeft'))
+        $plan = Get-TpmBaselineGamePlan -ProfilePath $path -GameProfilesDir $script:Game -Layout (Get-CtlLayout) -StateRoot $script:State
+        ($plan.Rows | Where-Object Mapping -eq 'P1ButtonUp').Action | Should -Be 'Add'
+        ($plan.Rows | Where-Object Mapping -eq 'P1ButtonUp').Label | Should -Be 'L3'
+        ($plan.Rows | Where-Object Mapping -eq 'P1ButtonDown').Label | Should -Be 'R3'
+        $plan.StillNeeds | Should -Not -Contain 'Volume Up'
+        $r = Invoke-CtlApply -Path $path
+        $r.Status | Should -Be 'Changed'
+        $doc = Read-Xml $path
+        (Get-CtlCode $doc 'P1ButtonUp') | Should -Be '64'
+        (Get-CtlCode $doc 'P1ButtonDown') | Should -Be '128'
+        $codes = @(Get-ButtonNodes $doc | ForEach-Object { $_.SelectSingleNode('XInputButton/ButtonCode') } | Where-Object { $_ } | ForEach-Object { $_.InnerText.Trim() })
+        @($codes | Sort-Object -Unique).Count | Should -Be $codes.Count
+    }
+
+    It 'skips a D-pad slot volume control whose stick click is already used, and lists it as still needed' {
+        $path = New-CtlVolumeGame -Dir $script:Dir -GameDir $script:Game -Name 'GameVolPad2' -UpMap 'P1ButtonUp' -DownMap 'P1ButtonDown' -CoinCode '64'
+        $plan = Get-TpmBaselineGamePlan -ProfilePath $path -GameProfilesDir $script:Game -Layout (Get-CtlLayout) -StateRoot $script:State
+        ($plan.Rows | Where-Object Mapping -eq 'P1ButtonUp').Action | Should -Be 'Skipped'
+        ($plan.Rows | Where-Object Mapping -eq 'P1ButtonDown').Action | Should -Be 'Add'
+        $plan.StillNeeds | Should -Contain 'Volume Up'
+    }
+
+    It 'still leaves a D-pad slot that the game calls Menu Up alone' {
+        $path = New-CtlVolumeGame -Dir $script:Dir -GameDir $script:Game -Name 'GameMenuUp' -UpMap 'P1ButtonUp' -UpName 'Menu Up' -DownMap 'P1ButtonDown'
+        $plan = Get-TpmBaselineGamePlan -ProfilePath $path -GameProfilesDir $script:Game -Layout (Get-CtlLayout) -StateRoot $script:State
+        ($plan.Rows | Where-Object Mapping -eq 'P1ButtonUp').Action | Should -Be 'Ambiguous'
+        ($plan.Rows | Where-Object Mapping -eq 'P1ButtonDown').Label | Should -Be 'R3'
+    }
+
+    It 'does not call a game already set up when its only wanted controls were skipped' {
+        $b = [pscustomobject]@{ Results = @([pscustomobject]@{ Status = 'NoChange'; Skipped = 1; Own = 0 }); Changed = 0; Unchanged = 0 }
+        $text = (Get-TpmBaselineBatchLines -Batch $b -DryRun $true) -join ' '
+        $text | Should -Match 'still need you'
+        $text | Should -Not -Match 'Already set up'
+    }
+
+    It 'the learned arcade layout writes no volume button' {
+        $path = New-CtlVolumeGame -Dir $script:Dir -GameDir $script:Game -Name 'GameVol4'
+        $before = [System.IO.File]::ReadAllBytes($path)
+        $r = Invoke-CtlApply -Path $path -Layout @(Get-TpmBaselineLayout -Baseline (New-TpmBaseline -Preset 'LearnedArcade'))
+        $r.Status | Should -Be 'NoChange'
         [System.IO.File]::ReadAllBytes($path) | Should -Be $before
+    }
+
+    It 'the layout screen says what the stick clicks do' {
+        ((Get-TpmBaselineSummaryLines -Baseline (New-TpmBaseline -Preset 'Xbox')) -join ' ') | Should -Match 'Volume up and down use the left and right stick clicks'
     }
 
     It 'writes nothing when the game files changed after the preview the user approved' {
@@ -406,7 +573,7 @@ Describe 'Library health Controls line' {
         }
         $row = @(Get-TpmLibraryHealthRows -Result $result | Where-Object Area -eq 'Controls')
         $row.Count | Should -Be 1
-        $row[0].Text | Should -Match '^Note - 1 of 4 games have every control the game lists set up \(not tested in a game\)'
+        $row[0].Text | Should -Match '^Note - 1 of 4 games have every required control the game lists set up \(not tested in a game\)'
         $row[0].Text | Should -Match '2 games have some or all missing'
         $row[0].Text | Should -Match 'TPM cannot check 1 game'
         $row[0].Text | Should -Not -Match '^OK'

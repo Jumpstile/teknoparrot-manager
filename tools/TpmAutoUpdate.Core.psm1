@@ -664,7 +664,25 @@ function Invoke-TpmDownloadHttpClient {
     try {
         $client = New-Object System.Net.Http.HttpClient
         $client.Timeout = [TimeSpan]::FromMinutes(30)
-        $response = $client.GetAsync($DownloadUrl, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+        # The same no-progress window applies before the response starts: a server that accepts the connection but never
+        # answers must not hold the update for the 30-minute client timeout. On timeout the throw hands over to the next tier.
+        $headerCts = New-Object System.Threading.CancellationTokenSource
+        try {
+            $headerCts.CancelAfter($noProgressTimeout)
+            $headerTask = $client.GetAsync($DownloadUrl, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead, $headerCts.Token)
+            $headerIndex = [System.Threading.Tasks.Task]::WaitAny([System.Threading.Tasks.Task[]]@($headerTask), $noProgressTimeout)
+            if ($headerIndex -lt 0) {
+                $headerCts.Cancel()
+                throw "HttpClient download made no progress for $($script:TpmDownloadNoProgressTimeoutSeconds) seconds."
+            }
+            try {
+                $response = $headerTask.GetAwaiter().GetResult()
+            } catch [System.OperationCanceledException] {
+                throw "HttpClient download made no progress for $($script:TpmDownloadNoProgressTimeoutSeconds) seconds."
+            }
+        } finally {
+            $headerCts.Dispose()
+        }
         [void]$response.EnsureSuccessStatusCode()
         $totalBytes = Get-TpmResponseContentLength -Response $response
         $inputStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()

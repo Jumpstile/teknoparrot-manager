@@ -1,11 +1,8 @@
 #Requires -Module Pester
 
-# FIX110A (S-23): two results that could misstate what happened to individual games.
-#   1. Manual path repair (Library Health): the result named the FIRST N input games as changed (N = how many were saved), so a skipped game A and a
+# FIX110A (S-23): manual path repair (Library Health): the result named the FIRST N input games as changed (N = how many were saved), so a skipped game A and a
 #      saved game B were reported as A changed. It also called "nothing saved, but errors" a NO_OP. Now the worker returns the exact saved game codes
 #      and the adapter classifies: saved and failed = PARTIAL_APPLIED, only saved = SUCCEEDED, only failed = FAILED_BEFORE_MUTATION, nothing = NO_OP.
-#   2. Control propagation: a profile that could not be read was logged and then dropped from the reports, so incomplete discovery vanished from the final
-#      counts. Now it is a report of its own ("unreadable"), counted as an unfinished item in the authoritative result, and shown on the result screen.
 # These tests drive the real functions with synthetic profile folders in $TestDrive. Nothing outside $TestDrive is touched.
 # What this CANNOT prove: the interactive file browser and the full menu flow (they are replaced by fixtures).
 
@@ -181,62 +178,5 @@ Describe 'FIX110A S-23 manual path repair names the games that were really saved
         $result.Outcome | Should -BeExactly 'FAILED_BEFORE_MUTATION'
         @($result.Mutation.ChangedItems).Count | Should -Be 0
         [System.IO.File]::ReadAllText($fixture.ProfilePaths['AGAME']) | Should -BeExactly $before
-    }
-}
-
-Describe 'FIX110A S-23 control propagation keeps an unreadable profile in the result' {
-    BeforeEach {
-        $script:f110aLog = New-Object System.Collections.Generic.List[string]
-        Mock Write-Log { [void]$script:f110aLog.Add([string]$msg) }
-        Mock Write-Host {}
-        Mock Write-TpmCompactExtractionProgress {}
-    }
-
-    It 'turns a profile that cannot be parsed into an unfinished item instead of dropping it' {
-        # Mutation: restore the old catch (log, then continue without a report) -> the broken profile is missing from Reports and FailedItems and the run is reported as "nothing to do".
-        $root = Join-Path $TestDrive ('controls-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-        [void][System.IO.Directory]::CreateDirectory($root)
-        $brokenPath = Join-Path $root 'BrokenGame.xml'
-        [System.IO.File]::WriteAllText($brokenPath, '<GameProfile><ConfigValues>')
-        $before = [System.IO.File]::ReadAllText($brokenPath)
-        $result = Invoke-ControlPropagation -userProfilesDir $root -pool @() -minBound 1
-        $report = @($result.Reports | Where-Object Code -eq 'BrokenGame')
-        $report.Count | Should -Be 1
-        $report[0].Status | Should -BeExactly 'unreadable'
-        $result.Outcome | Should -BeExactly 'FAILED_BEFORE_MUTATION'
-        $result.ReasonCode | Should -BeExactly 'PROFILE_UNREADABLE'
-        @($result.Mutation.FailedItems) | Should -Contain 'BrokenGame'
-        @($result.Items) | Should -Contain 'BrokenGame'
-        $result.Mutation.Started | Should -BeFalse
-        [System.IO.File]::ReadAllText($brokenPath) | Should -BeExactly $before
-        ($script:f110aLog -join "`n") | Should -Match 'could not parse BrokenGame\.xml'
-    }
-
-    It 'keeps the unreadable profile as failed next to a real change (partial)' {
-        # Mutation: leave 'unreadable' out of the failed list in Invoke-ControlPropagation -> a run that changed one game and could not read another is reported SUCCEEDED.
-        Mock Invoke-ControlPropagationLegacy {
-            $list = New-Object System.Collections.ArrayList
-            [void]$list.Add([pscustomobject]@{ Code = 'GoodGame'; Status = 'bound'; Archetype = 'Reference'; Bound = 2 })
-            [void]$list.Add([pscustomobject]@{ Code = 'BrokenGame'; Status = 'unreadable' })
-            , $list
-        }
-        $result = Invoke-ControlPropagation -userProfilesDir $TestDrive -pool @() -minBound 1
-        $result.Outcome | Should -BeExactly 'PARTIAL_APPLIED'
-        @($result.Mutation.ChangedItems) | Should -Be @('GoodGame')
-        @($result.Mutation.FailedItems) | Should -Be @('BrokenGame')
-        $result.ReasonCode | Should -BeExactly 'PROFILE_UNREADABLE'
-    }
-
-    It 'says on the result screen that the profile could not be read and what to do next' {
-        # Mutation: remove the unreadable line from Get-TpmControlPropagationSummary -> the screen shows "No game needed a change" with no hint.
-        $reports = @([pscustomobject]@{ Code = 'BrokenGame'; Status = 'unreadable' })
-        $summary = Get-TpmControlPropagationSummary -Reports $reports -Outcome 'FAILED_BEFORE_MUTATION'
-        $summary.Status | Should -BeExactly 'Attention'
-        $summary.Title | Should -BeExactly 'No game was changed.'
-        (@($summary.Needs) -join ' ') | Should -Match 'BrokenGame: could not be read, so it was left as it is'
-        $summary.Next | Should -Match 'Check the game that could not be read'
-        $detail = @($summary.Blocks | Where-Object Heading -eq 'BrokenGame')
-        $detail.Count | Should -Be 1
-        (@($detail[0].Lines) -join ' ') | Should -Match 'Could not be read'
     }
 }

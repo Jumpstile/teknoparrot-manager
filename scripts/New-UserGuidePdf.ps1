@@ -57,11 +57,11 @@ a { color: #0b5a63; }
     try {
         [System.IO.File]::WriteAllText($htmlPath, $html, (New-Object System.Text.UTF8Encoding($false)))
         $tempPdf = Join-Path $work 'guide.pdf'
-        $profile = Join-Path $work 'edge-profile'
+        $edgeProfile = Join-Path $work 'edge-profile'
         $uri = ([System.Uri]$htmlPath).AbsoluteUri
         $arguments = @(
             '--headless=new', '--disable-gpu', '--no-first-run', '--no-pdf-header-footer',
-            "--user-data-dir=$profile", "--print-to-pdf=$tempPdf", $uri
+            "--user-data-dir=$edgeProfile", "--print-to-pdf=$tempPdf", $uri
         )
         $process = Start-Process -FilePath $edge -ArgumentList $arguments -PassThru -WindowStyle Hidden
         if (-not $process.WaitForExit(180000)) { try { $process.Kill() } catch {} ; throw 'EDGE_PRINT_TIMEOUT: Edge did not finish printing in 3 minutes' }

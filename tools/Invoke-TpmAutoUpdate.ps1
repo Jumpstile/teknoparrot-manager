@@ -66,7 +66,7 @@ Write-UpdaterInfo "Selected asset  : $($asset.name)"
 
 if ($CheckOnly -and -not $Apply) {
     Write-UpdaterInfo 'Check only. -Apply replaces only TeknoParrot-Manager.ps1 and refuses release packages that contain other files.'
-    Write-UpdaterInfo 'To install a complete release, start TeknoParrot Manager and choose 15 (Check for Updates). It installs the whole release with a backup.'
+    Write-UpdaterInfo 'To install a complete release, start TeknoParrot Manager and choose 16 (Check for Updates). It installs the whole release with a backup.'
     return
 }
 
@@ -91,7 +91,7 @@ if ($Apply) {
             throw $emptyMessage
         }
         if (-not $packageCheck.SingleScript) {
-            $refusalMessage = "This release is a multi-file package. This tool replaces only TeknoParrot-Manager.ps1, so nothing was installed. To install the whole release safely, start TeknoParrot Manager and choose 15 (Check for Updates), or answer Y to the update question when it starts. It backs up every file it replaces and puts everything back if anything goes wrong. Release page: https://github.com/$Owner/$Repository/releases"
+            $refusalMessage = "This release is a multi-file package. This tool replaces only TeknoParrot-Manager.ps1, so nothing was installed. To install the whole release safely, start TeknoParrot Manager and choose 16 (Check for Updates), or answer Y to the update question when it starts. It backs up every file it replaces and puts everything back if anything goes wrong. Release page: https://github.com/$Owner/$Repository/releases"
             Write-UpdaterInfo $refusalMessage
             Write-UpdaterInfo ("Package contains {0} other file(s), for example: {1}" -f $packageCheck.ExtraEntryCount, (@($packageCheck.ExtraEntrySample) -join ', '))
             throw $refusalMessage

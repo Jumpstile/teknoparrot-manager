@@ -28,7 +28,7 @@ BeforeAll {
     # as 'NAME|CODES' strings; -Primary adds main controls. LEDBlinkyInputMap.xml gets one LED per control (except those named in
     # -NoLed) plus -ExtraLeds as 'LABEL|CODE'. -NoInputMap leaves that file out.
     function New-LedFixture {
-        param([switch]$NoTeknoParrotGroup, [int]$Buttons = 8, [string[]]$Extra = @(), [string[]]$Primary = @('CONTROL_JOY8WAY'), [string[]]$NoLed = @(), [string[]]$ExtraLeds = @(), [switch]$NoInputMap)
+        param([switch]$NoTeknoParrotGroup, [int]$Buttons = 8, [string[]]$Extra = @(), [string[]]$Primary = @('CONTROL_JOY8WAY'), [string[]]$NoLed = @(), [string[]]$ExtraLeds = @(), [switch]$NoInputMap, [switch]$WhiteOnly, [string[]]$WhiteLeds = @())
         $root = Join-Path $TestDrive ('led-' + [guid]::NewGuid().ToString('N'))
         $led = Join-Path $root 'LEDBlinky'
         $profiles = Join-Path $root 'UserProfiles'
@@ -60,9 +60,12 @@ BeforeAll {
         if (-not $NoInputMap) {
             $ports = New-Object System.Collections.Generic.List[string]
             $i = 0
-            foreach ($c in $controls) { if ($NoLed -notcontains $c.Name) { $i++; [void]$ports.Add(('    <port number="{0}" label="{1}" type="B" inputCodes="{2}"/>' -f $i, ($c.Name -replace '_', ''), $c.Codes)) } }
-            foreach ($pc in $Primary) { if ($pc -eq 'CONTROL_TRACKBALL') { $i++; [void]$ports.Add(('    <port number="{0}" label="TRACKBALL" type="B" inputCodes="TRACKBALL"/>' -f $i)) } }
-            foreach ($l in $ExtraLeds) { $parts = $l -split '\|'; $i++; [void]$ports.Add(('    <port number="{0}" label="{1}" type="B" inputCodes="{2}"/>' -f $i, $parts[0], $parts[1])) }
+            # Lights are RGB (red, green and blue ports) unless -WhiteOnly, or the control is named in -WhiteLeds (one 'S' port).
+            $addLed = { param($label, $codes, $white) foreach ($t in $(if ($white) { @('S') } else { @('R', 'G', 'B') })) { $script:ledPortNumber++; [void]$ports.Add(('    <port number="{0}" label="{1}" type="{2}" inputCodes="{3}"/>' -f $script:ledPortNumber, $label, $t, $codes)) } }
+            $script:ledPortNumber = 0
+            foreach ($c in $controls) { if ($NoLed -notcontains $c.Name) { & $addLed ($c.Name -replace '_', '') $c.Codes ($WhiteOnly -or $WhiteLeds -contains $c.Name) } }
+            foreach ($pc in $Primary) { if ($pc -eq 'CONTROL_TRACKBALL') { & $addLed 'TRACKBALL' 'TRACKBALL' ([bool]$WhiteOnly) } }
+            foreach ($l in $ExtraLeds) { $parts = $l -split '\|'; & $addLed $parts[0] $parts[1] ([bool]$WhiteOnly) }
             $map = '<?xml version="1.0" encoding="UTF-8"?>' + $nl + '<dat>' + $nl + '  <ledController type="1" id="1" name="LEDWiz">' + $nl + ($ports -join $nl) + $nl + '  </ledController>' + $nl + '</dat>' + $nl
             [System.IO.File]::WriteAllText((Join-Path $led 'LEDBlinkyInputMap.xml'), $map, (New-Object System.Text.UTF8Encoding $false))
         }
@@ -178,16 +181,16 @@ Describe 'LEDBlinky lighting export' {
         $plan.BlockText | Should -Not -Match 'P1_BUTTON9'
         $plan.BlockText | Should -Not -Match 'P1_BUTTON10'
         @($plan.Groups[0].NotOnCabinet) | Should -Contain 'P1Button9 name'
-        (Get-LedDetailText $plan) | Should -Match 'Not on your cabinet'
+        (Get-LedDetailText $plan) | Should -Match 'No light found'
         (Get-LedDetailText $plan) | Should -Match 'P1Button10 name'
     }
 
     It 'a cabinet with 16 buttons and a spinner: the extra buttons and the spinner are written under the names the user chose' {
-        $fx = New-LedFixture -Buttons 16 -Extra @('P1_SPINNER|MOUSECODE_1_ANALOG_X')
+        $fx = New-LedFixture -Buttons 16 -Extra @('P1_SPINNER|MOUSECODE_1_ANALOG_X') -ExtraLeds @('P1SPINNER|MOUSECODE_1_ANALOG_X')
         New-LedProfile -Dir $fx.Profiles -Name 'SpinGame' -Mappings @('P1Button1', 'P1Button14', 'P1Spinner', 'P1ButtonStart')
         $plan = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls
         $plan.BlockText | Should -Match 'name="P1_BUTTON14"'
-        $plan.BlockText | Should -Match 'name="P1_SPINNER" voice="" inputCodes="MOUSECODE_1_ANALOG_X"'
+        $plan.BlockText | Should -Match 'name="P1_SPINNER" voice="" color="White" inputCodes="MOUSECODE_1_ANALOG_X"'
         $plan.BlockText | Should -Not -Match 'P1_BUTTON15'
     }
 
@@ -211,15 +214,15 @@ Describe 'LEDBlinky lighting export' {
         Should -Invoke Write-TpmOutcome -Times 1 -Exactly -ParameterFilter { $Next -match 'Answer Y' -and $Next -notmatch 'Choose A' }
     }
 
-    It 'a control with no LED in the LED map is held back and shown as needing a choice, never written' {
+    It 'a control with no light in the LED map is called "no light found", never written and never asked about' {
         $fx = New-LedFixture -NoLed @('P1_BUTTON2')
         New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana'
         $plan = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls
         $plan.BlockText | Should -Not -Match 'name="P1_BUTTON2"'
         $plan.BlockText | Should -Match 'name="P1_BUTTON1"'
-        @($plan.Pairing.Held | Where-Object { $_.Name -eq 'P1_BUTTON2' -and $_.Reason -eq 'NoLed' }).Count | Should -Be 1
-        @($plan.Groups[0].NeedsChoice | ForEach-Object { $_.Label }) | Should -Contain 'P1Button2 name'
-        (Get-LedDetailText $plan) | Should -Match 'P1_BUTTON2: no LED in your LED map uses it\. Not written\.'
+        @($plan.Groups[0].NeedsChoice).Count | Should -Be 0
+        @($plan.Groups[0].NotOnCabinet) | Should -Contain 'P1Button2 name'
+        (Get-LedDetailText $plan) | Should -Match 'No light found for: P1_BUTTON2'
     }
 
     It 'a control that more than one LED could belong to is not guessed' {
@@ -356,12 +359,13 @@ Describe 'LEDBlinky lighting export' {
         $after | Should -Not -Match 'AkaiKatana'
     }
 
-    It 'new entries use the usual arcade colors: buttons 1 to 4 red, yellow, green, blue; other buttons, Start, Coin and the trackball white; other controls keep their own color' {
+    It 'new entries use the usual arcade colors: buttons 1 to 4 red, yellow, green, blue; other buttons and Coin white; Start green; other controls keep their own color' {
         (Get-TpmLedSchemeColor -Name 'P1_BUTTON1') | Should -Be 'Red'
         (Get-TpmLedSchemeColor -Name 'P1_BUTTON2') | Should -Be 'Yellow'
         (Get-TpmLedSchemeColor -Name 'P2_BUTTON3') | Should -Be 'Green'
         (Get-TpmLedSchemeColor -Name 'P2_BUTTON4') | Should -Be 'Blue'
-        foreach ($n in 'P1_BUTTON5', 'P1_BUTTON6', 'P1_BUTTON7', 'START1', 'COIN2', 'CONTROL_TRACKBALL') { (Get-TpmLedSchemeColor -Name $n) | Should -Be 'White' }
+        foreach ($n in 'P1_BUTTON5', 'P1_BUTTON6', 'P1_BUTTON7', 'COIN2', 'CONTROL_TRACKBALL') { (Get-TpmLedSchemeColor -Name $n) | Should -Be 'White' }
+        (Get-TpmLedSchemeColor -Name 'START1') | Should -Be 'Green'
         (Get-TpmLedSchemeColor -Name 'P1_JOYSTICK_UP') | Should -BeNullOrEmpty
         (Get-TpmLedSchemeColor -Name 'CONTROL_JOY8WAY') | Should -BeNullOrEmpty
         $written = @(
@@ -373,12 +377,41 @@ Describe 'LEDBlinky lighting export' {
         $text | Should -Match 'name="CONTROL_JOY8WAY"[^>]*color="Black"'
     }
 
-    It 'a trackball game gets a trackball light even when the user''s default entry has no trackball control' {
-        $cabinet = [pscustomobject]@{ Held = @(); Controls = @{}; Names = @() }
+    It 'button colors follow what the game does: a driving game, a fighting game and a one-button game differ, and an unknown label uses the number color' {
+        $make = {
+            param($name, $labels)
+            $i = 0
+            $buttons = ($labels | ForEach-Object { $i++; "<JoystickButtons><ButtonName>$_</ButtonName><InputMapping>P1Button$i</InputMapping></JoystickButtons>" }) -join ''
+            [System.IO.File]::WriteAllText((Join-Path $fx.Profiles "$name.xml"), "<GameProfile><GamePath>C:\Games\$name.exe</GamePath><JoystickButtons>$buttons</JoystickButtons></GameProfile>")
+        }
+        $fx = New-LedFixture
+        & $make 'RaceGame' @('Boost', 'Brake', 'Shift')
+        & $make 'FightGame' @('Punch', 'Kick', 'Guard')
+        & $make 'OneButton' @('Fire')
+        & $make 'OddGame' @('Zork', 'Zork', 'Zork')
+        $plan = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls
+        $colors = @{}
+        foreach ($g in $plan.Groups) { $colors[$g.Key] = $g.Colors }
+        $colors['RaceGame'] | Should -Match 'Boost: yellow, Brake: red, Shift: blue'
+        $colors['FightGame'] | Should -Match 'Punch: red, Kick: blue, Guard: yellow'
+        $colors['OneButton'] | Should -Match 'Fire: red'
+        $colors['OddGame'] | Should -Match 'Zork: red, Zork: yellow, Zork: green'
+        $plan.BlockText | Should -Match 'name="P1_BUTTON2" voice="Kick" color="Blue"'
+        # The user's own colors are kept when asked.
+        $own = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls -KeepOwnColors
+        $own.BlockText | Should -Match 'name="P1_BUTTON2" voice="Kick" color="White"'
+    }
+
+    It 'a trackball gets a light only when the LED map has one for it' {
         $profile = [pscustomobject]@{ Family = 'trackball'; Controls = @([pscustomobject]@{ Kind = 'Trackball'; Label = 'Trackball'; Player = 0; Exact = $null; Voice = '' }) }
-        $match = Get-TpmLedGameMatch -ProfileControls $profile -Cabinet $cabinet
+        $lit = [pscustomobject]@{ Held = @(); Controls = @{}; Names = @(); KeyMapFound = $true; LightIsRgb = @{ TRACKBALL = $true } }
+        $match = Get-TpmLedGameMatch -ProfileControls $profile -Cabinet $lit
         @($match.Written | ForEach-Object { $_.Cab.Name }) | Should -Contain 'CONTROL_TRACKBALL'
         @($match.NotOnCabinet) | Should -Not -Contain 'Trackball'
+        $plain = [pscustomobject]@{ Held = @(); Controls = @{}; Names = @(); KeyMapFound = $true; LightIsRgb = @{ P1BUTTON1 = $true } }
+        $match = Get-TpmLedGameMatch -ProfileControls $profile -Cabinet $plain
+        @($match.Written).Count | Should -Be 0
+        @($match.NotOnCabinet) | Should -Contain 'Trackball'
     }
 
     It 'the trackball light takes the main color of the game picture, and a game with no picture keeps white' {
@@ -471,5 +504,217 @@ Describe 'LEDBlinky lighting export' {
         $before = Get-LedHash $fx.Controls
         (Invoke-TpmLedBlinkyUndo -Install $fx.Install -Layout $fx.Layout).Outcome | Should -Be 'FAILED'
         Get-LedHash $fx.Controls | Should -Be $before
+    }
+
+    It 'an add whose undo record cannot be saved is taken back, so LEDBlinky is left as it was and the user is told so' {
+        $fx = New-LedFixture
+        New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana'
+        $before = Get-LedHash $fx.Controls
+        $plan = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls
+        # Only the undo record write fails; the control file write must still reach the real writer.
+        $script:LedRealAtomicWriter = (Get-Command -Name Write-TpmAtomicTextFile -CommandType Function).ScriptBlock
+        Mock Write-TpmAtomicTextFile { if ($Operation -eq 'LEDBlinky undo record') { throw 'The disk is full.' }; & $script:LedRealAtomicWriter -Path $Path -Text $Text -Validate $Validate -Operation $Operation }
+        $result = Invoke-TpmLedBlinkyAdd -Install $fx.Install -Plan $plan -Layout $fx.Layout
+        $result.Outcome | Should -Be 'FAILED'
+        $result.Summary | Should -Match 'taken back'
+        Get-LedHash $fx.Controls | Should -Be $before
+    }
+
+    It 'undo uses the record for the LEDBlinky folder that is selected, not the newest record of another folder' {
+        $first = New-LedFixture
+        $second = New-LedFixture
+        New-LedProfile -Dir $first.Profiles -Name 'AkaiKatana'
+        New-LedProfile -Dir $second.Profiles -Name 'AkaiKatana'
+        $secondInstall = $second.Install
+        $planFirst = Get-TpmLedExportPlan -UserProfilesDir $first.Profiles -ControlsPath $first.Controls
+        (Invoke-TpmLedBlinkyAdd -Install $first.Install -Plan $planFirst -Layout $first.Layout).Outcome | Should -Be 'SAVED'
+        $planSecond = Get-TpmLedExportPlan -UserProfilesDir $second.Profiles -ControlsPath $second.Controls
+        (Invoke-TpmLedBlinkyAdd -Install $secondInstall -Plan $planSecond -Layout $first.Layout).Outcome | Should -Be 'SAVED'
+        (Invoke-TpmLedBlinkyUndo -Install $first.Install -Layout $first.Layout).Outcome | Should -Be 'SAVED'
+        [System.IO.File]::ReadAllText($first.Controls) | Should -Not -Match 'AkaiKatana'
+        [System.IO.File]::ReadAllText($second.Controls) | Should -Match 'AkaiKatana'
+        # Mutation: take the newest record whatever its folder -> the second folder's record is used up while the first is left waiting.
+        $waiting = @(Get-ChildItem -LiteralPath $first.Layout.State -Filter 'LEDBlinky-Undo-*.json' -File | Where-Object { $_.Name -notlike '*.undone.json' })
+        $waiting.Count | Should -Be 1
+        ([System.IO.File]::ReadAllText($waiting[0].FullName) | ConvertFrom-Json).Path | Should -Be $second.Controls
+        (Invoke-TpmLedBlinkyUndo -Install $secondInstall -Layout $first.Layout).Outcome | Should -Be 'SAVED'
+        [System.IO.File]::ReadAllText($second.Controls) | Should -Not -Match 'AkaiKatana'
+    }
+
+    It 'a preview where every game was left out does not say LEDBlinky already has everything' {
+        $cabinet = [pscustomobject]@{ Names = @('P1_BUTTON1'); Source = 'DEFAULT' }
+        $plan = [pscustomobject]@{ HasEmulator = $true; HasCabinet = $true; Cabinet = $cabinet; Pairing = $null; Newline = "`r`n"; Groups = @(); SkippedExisting = @(); SkippedNoControls = @('SomeGame'); Unreadable = @(); BlockText = '' }
+        Write-TpmLedPreview -Plan $plan -Layout ([pscustomobject]@{ Reports = $TestDrive })
+        Should -Invoke Write-TpmOutcome -Times 1 -ParameterFilter { $Title -match 'nothing could be added' -and $Title -notmatch 'already has everything' }
+    }
+
+    It 'the details say which colors are used: the usual arcade colors by default, the user''s own when chosen' {
+        $fx = New-LedFixture
+        New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana'
+        $usual = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls
+        $own = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls -KeepOwnColors
+        Get-LedDetailText $usual | Should -Match 'usual arcade colors'
+        Get-LedDetailText $usual | Should -Not -Match 'colors and input codes are copied'
+        Get-LedDetailText $own | Should -Match 'colors and input codes are copied'
+    }
+
+    It 'a color the player chose beats the usual color, a color for one game beats a color for the kind, and putting it back returns TPM''s color' {
+        $button = [pscustomobject]@{ Name = 'P1_BUTTON1'; Player = 1; Voice = ''; IsPrimary = $false; InputCodes = 'KEYCODE_X'; Color = 'White'; Rgb = $true }
+        $written = @([pscustomobject]@{ Cab = $button; Voice = ''; Label = 'Fire' })
+        $mine = Read-TpmLedMyColors -StateRoot (Join-Path $TestDrive 'mine-a')
+        (New-TpmLedGroupText -Key 'GameA' -Title 'A' -Written $written -Newline "`n" -MyColors $mine) | Should -Match 'color="Red"'
+        Set-TpmLedMyColor -Mine $mine -Kind 'Fire' -Color 'blue'
+        (New-TpmLedGroupText -Key 'GameA' -Title 'A' -Written $written -Newline "`n" -MyColors $mine) | Should -Match 'color="Blue"'
+        Set-TpmLedMyColor -Mine $mine -Kind 'Fire' -Color 'Purple' -GameKey 'GameA'
+        (New-TpmLedGroupText -Key 'GameA' -Title 'A' -Written $written -Newline "`n" -MyColors $mine) | Should -Match 'color="Purple"'
+        (New-TpmLedGroupText -Key 'GameB' -Title 'B' -Written $written -Newline "`n" -MyColors $mine) | Should -Match 'color="Blue"'
+        Set-TpmLedMyColor -Mine $mine -Kind 'Fire' -Color '' -GameKey 'GameA'
+        Set-TpmLedMyColor -Mine $mine -Kind 'Fire' -Color ''
+        (New-TpmLedGroupText -Key 'GameA' -Title 'A' -Written $written -Newline "`n" -MyColors $mine) | Should -Match 'color="Red"'
+    }
+
+    It 'a color LEDBlinky does not know is refused with a plain message and nothing is kept' {
+        $mine = Read-TpmLedMyColors -StateRoot (Join-Path $TestDrive 'mine-b')
+        { Set-TpmLedMyColor -Mine $mine -Kind 'Start' -Color 'Pinkish' } | Should -Throw '*does not know the color "Pinkish"*Red, Orange*'
+        $mine.Kinds.Count | Should -Be 0
+    }
+
+    It 'a chosen color is kept for later runs, changes only TPM''s own state, and LEDBlinky is not written until the normal add' {
+        $fx = New-LedFixture
+        New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana'
+        $stateRoot = Join-Path $TestDrive 'mine-c'
+        $before = Get-LedHash $fx.Controls
+        $script:ledAnswers = [System.Collections.Generic.Queue[string]]::new()
+        foreach ($a in @('1', '2')) { $script:ledAnswers.Enqueue($a) }
+        Mock Write-TpmText { }
+        Mock Read-HostSafe { $script:ledAnswers.Dequeue() }
+        Mock Read-TpmChoice { 'A' }
+        $firstPlan = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls
+        $games = @($firstPlan.Groups.ToArray())
+        Invoke-TpmLedChangeColor -Games $games -StateRoot $stateRoot
+        Get-LedHash $fx.Controls | Should -Be $before
+        $later = Read-TpmLedMyColors -StateRoot $stateRoot
+        $later.Kinds['Start'] | Should -Be 'Orange'
+        $plan = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls -MyColors $later
+        $plan.BlockText | Should -Match 'name="START1"[^>]*color="Orange"'
+        Get-LedHash $fx.Controls | Should -Be $before
+    }
+
+    It 'a cabinet whose lights are all one color sees no color option, and a color picked earlier is not written' {
+        $fx = New-LedFixture -WhiteOnly
+        New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana'
+        $mine = [pscustomobject]@{ Rgb = 'Yes'; Kinds = @{ Start = 'Red' }; Games = @{} }
+        $plan = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls -MyColors $mine
+        $plan.BlockText | Should -Not -Match 'color='
+        (Get-LedDetailText $plan) | Should -Not -Match '(?i)color'
+        $script:ledShown = New-Object System.Collections.Generic.List[string]
+        Mock Write-TpmText { $script:ledShown.Add([string]$Text) }
+        Mock Get-TpmControllerEvidence { $null }
+        Mock Get-TpmControlStatePath { [pscustomobject]@{ Colors = (Join-Path $TestDrive 'white-state\led-colors.json') } }
+        Mock Read-TpmChoice { 'B' }
+        Invoke-TpmLedBlinkyStep -Install $fx.Install -UserProfilesDir $fx.Profiles -Layout $fx.Layout
+        ($script:ledShown -join "`n") | Should -Not -Match '(?i)color'
+        Should -Invoke Read-TpmChoice -Times 0 -ParameterFilter { $Prompt -match 'default L' }
+    }
+
+    It 'a cabinet with color lights offers colors; in a mixed cabinet only the color lights are offered and the others say one color only' {
+        $rgb = New-LedFixture
+        $mixed = New-LedFixture -WhiteLeds @('P1_BUTTON2')
+        (Get-TpmLedColorStateFor -ControlsPath $rgb.Controls).Offered | Should -BeTrue
+        $script:ledShown = New-Object System.Collections.Generic.List[string]
+        Mock Write-TpmText { $script:ledShown.Add([string]$Text) }
+        Mock Read-HostSafe { '' }
+        $cabinet = (Get-TpmLedPairingFor -Cabinet (Get-TpmLedCabinet -ControlsText (Read-TpmLedControlsText -Path $mixed.Controls)) -ControlsPath $mixed.Controls).Usable
+        Invoke-TpmLedChangeColor -Games @() -StateRoot (Join-Path $TestDrive 'mixed-state') -Cabinet $cabinet
+        $shown = $script:ledShown -join "`n"
+        $shown | Should -Match '\d\. Start: '
+        $shown | Should -Match '\d\. Button 1: '
+        $shown | Should -Match 'Button 2: one color only'
+        $shown | Should -Not -Match '\d\. Button 2'
+    }
+
+    It 'a cabinet whose lights are not known is asked once, the answer is remembered, and no color is offered until then' {
+        $fx = New-LedFixture -NoInputMap
+        New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana'
+        $stateFile = Join-Path $TestDrive 'ask-state\led-colors.json'
+        Mock Get-TpmControlStatePath { [pscustomobject]@{ Colors = $stateFile } }
+        Mock Get-TpmControllerEvidence { $null }
+        Mock Write-TpmText { }
+        Mock Read-TpmChoice { if ($Prompt -match 'default L') { 'D' } else { 'B' } }
+        (Get-TpmLedColorStateFor -ControlsPath $fx.Controls -MyColors (Read-TpmLedMyColors)).Offered | Should -BeFalse
+        Invoke-TpmLedBlinkyStep -Install $fx.Install -UserProfilesDir $fx.Profiles -Layout $fx.Layout
+        Invoke-TpmLedBlinkyStep -Install $fx.Install -UserProfilesDir $fx.Profiles -Layout $fx.Layout
+        Should -Invoke Read-TpmChoice -Times 1 -Exactly -ParameterFilter { $Prompt -match 'default L' }
+        (Read-TpmLedMyColors).Rgb | Should -Be 'Yes'
+        (Get-TpmLedColorStateFor -ControlsPath $fx.Controls -MyColors (Read-TpmLedMyColors)).Offered | Should -BeTrue
+    }
+
+    It 'a lit joystick is written like a button: a color when its light is RGB, no color when it is single-color' {
+        $fx = New-LedFixture
+        New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana' -Mappings @('P1ButtonUp', 'P1Button1')
+        $plan = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls
+        $plan.BlockText | Should -Match 'name="P1_JOYSTICK_UP"[^>]*color="White"'
+        $plan.BlockText | Should -Match 'name="P1_BUTTON1"'
+        $plan.Groups[0].Colors | Should -Match 'Joystick: white'
+        $white = New-LedFixture -WhiteOnly
+        New-LedProfile -Dir $white.Profiles -Name 'AkaiKatana' -Mappings @('P1ButtonUp', 'P1Button1')
+        $single = Get-TpmLedExportPlan -UserProfilesDir $white.Profiles -ControlsPath $white.Controls
+        $single.BlockText | Should -Match 'name="P1_JOYSTICK_UP"'
+        $single.BlockText | Should -Not -Match 'color='
+    }
+
+    It 'a plain joystick next to lit buttons gets nothing written and is said to have no light' {
+        $fx = New-LedFixture -NoLed @('P1_JOYSTICK_UP', 'P1_JOYSTICK_DOWN', 'P1_JOYSTICK_LEFT', 'P1_JOYSTICK_RIGHT')
+        New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana' -Mappings @('P1ButtonUp', 'P1ButtonDown', 'P1Button1')
+        $plan = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls
+        $plan.BlockText | Should -Match 'name="P1_BUTTON1"'
+        $plan.BlockText | Should -Not -Match 'JOY'
+        @($plan.Groups[0].NeedsChoice).Count | Should -Be 0
+        (Get-LedDetailText $plan) | Should -Match 'No light found for: .*P1_JOYSTICK_UP'
+        $plan.Groups[0].Colors | Should -Not -Match 'Joystick'
+    }
+
+    It 'a cabinet whose only light is the trackball writes only the trackball' {
+        $fx = New-LedFixture -Buttons 1 -Primary @('CONTROL_TRACKBALL') -NoLed @('P1_BUTTON1', 'P1_JOYSTICK_UP', 'P1_JOYSTICK_DOWN', 'P1_JOYSTICK_LEFT', 'P1_JOYSTICK_RIGHT', 'START1', 'COIN1')
+        New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana' -Mappings @('P1Button1', 'P1ButtonUp', 'Trackball X')
+        $plan = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls
+        $plan.BlockText | Should -Match 'name="CONTROL_TRACKBALL"'
+        $plan.BlockText | Should -Not -Match 'P1_BUTTON1|JOY'
+    }
+
+    It 'a cabinet where nothing has a light in the LED map writes nothing' {
+        $fx = New-LedFixture -Buttons 1 -Primary @() -NoLed @('P1_BUTTON1', 'P1_JOYSTICK_UP', 'P1_JOYSTICK_DOWN', 'P1_JOYSTICK_LEFT', 'P1_JOYSTICK_RIGHT', 'START1', 'COIN1') -ExtraLeds @('SOMETHING|KEYCODE_ZZ')
+        New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana'
+        $plan = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls
+        $plan.HasCabinet | Should -BeFalse
+        $plan.BlockText | Should -Be ''
+    }
+
+    It 'with no LED map, a joystick is asked about once, the answer is kept, and a kind no game has is never asked' {
+        $fx = New-LedFixture -NoInputMap
+        New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana' -Mappings @('P1ButtonUp', 'P1Button1')
+        $stateFile = Join-Path $TestDrive 'kinds-state\led-colors.json'
+        Mock Get-TpmControlStatePath { [pscustomobject]@{ Colors = $stateFile } }
+        Mock Get-TpmControllerEvidence { $null }
+        Mock Write-TpmText { }
+        $script:menuAnswers = [System.Collections.Generic.Queue[string]]::new()
+        Mock Read-TpmChoice { if ($Prompt -match 'Your answer') { 'Y' } elseif ($Prompt -match 'default L') { 'L' } elseif ($script:menuAnswers.Count -gt 0) { $script:menuAnswers.Dequeue() } else { 'B' } }
+        $before = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls -MyColors (Read-TpmLedMyColors)
+        $before.BlockText | Should -Not -Match 'JOY'
+        @($before.UnknownKinds) | Should -Be @('Joystick')
+        $script:menuAnswers.Enqueue('P')
+        Invoke-TpmLedBlinkyStep -Install $fx.Install -UserProfilesDir $fx.Profiles -Layout $fx.Layout
+        $script:menuAnswers.Enqueue('P')
+        Invoke-TpmLedBlinkyStep -Install $fx.Install -UserProfilesDir $fx.Profiles -Layout $fx.Layout
+        Should -Invoke Read-TpmChoice -Times 1 -Exactly -ParameterFilter { $Prompt -match 'Your answer' }
+        Should -Invoke Write-TpmText -Times 0 -ParameterFilter { $Text -match 'trackball|spinner|pedal' }
+        (Read-TpmLedMyColors).Lights['Joystick'] | Should -Be 'Yes'
+        $after = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls -MyColors (Read-TpmLedMyColors)
+        $after.BlockText | Should -Match 'name="P1_JOYSTICK_UP"'
+        $no = Read-TpmLedMyColors
+        $no.Lights['Joystick'] = 'No'
+        $none = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls -MyColors $no
+        $none.BlockText | Should -Not -Match 'JOY'
+        @($none.UnknownKinds).Count | Should -Be 0
     }
 }

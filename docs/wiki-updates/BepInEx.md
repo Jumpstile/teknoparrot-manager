@@ -23,9 +23,9 @@ TeknoParrot Manager installs or updates BepInEx only after you approve. It has n
 - A game with a damaged or incomplete BepInEx shows as `Broken (...)`. Pressing `Y` installs the stable package over it, with the same backup and rollback.
 - A healthy BepInEx is updated only if a newer stable release is out. Up to date games are left alone.
 - There is no repair-reset and no removal choice.
-- If a game's folder is outside your games folder, or contains a link (junction or symlink), that game is skipped before anything is downloaded or written. The screen tells you what to fix. Then run menu 10 again.
+- If a game's folder is outside your games folder, or contains a link to another folder (a junction or symlink), that game is skipped before anything is downloaded or written. The screen tells you what to fix. Then run menu 10 again.
 
-If something goes wrong, the failure screen offers `R` to try again, `D` for details and `B` to go back. If it says the rollback could not be verified, do not retry. Keep the files it names and have the game folder checked first.
+If something goes wrong, the failure screen offers `R` to try again, `D` for details, `O` to open help and log guidance and `B` to go back. If a path is the problem, `H` opens the Library health check (menu 14). If it says the rollback could not be verified, do not retry. Keep the files it names and have the game folder checked first.
 
 <details>
 <summary>Details: backup and rollback</summary>
@@ -42,6 +42,6 @@ If the update fails, TeknoParrot Manager puts back only what it changed itself. 
 
 The official guide: https://docs.bepinex.dev/articles/user_guide/troubleshooting.html
 
-If you remove BepInEx by hand, first copy the game's `BepInEx` folder somewhere safe, because it holds your plugins and settings. Then delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt` and the `BepInEx` folder from the game's folder.
+If you remove BepInEx by hand, first copy the game's `BepInEx` folder somewhere safe, because it holds your plugins and settings. Then delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version` and the `BepInEx` folder from the game's folder. Delete `changelog.txt` only after you open it and see that it is BepInEx's own change list; the game may have its own file with that name.
 
 [[Health Check]] shows how many registered games have BepInEx installed.

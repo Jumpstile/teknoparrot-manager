@@ -11,11 +11,17 @@
   "Scope": {
     "Rows": "Every top-level guide entry whose loader is not in ExcludedLoaders.",
     "ExcludedLoaders": [
+      "Tekno3DO",
       "TeknoAGX",
       "TeknoAir",
       "TeknoCPS",
+      "TeknoCoJag",
       "TeknoCobra",
+      "TeknoEagle",
+      "TeknoFL",
+      "TeknoG3D",
       "TeknoG4",
+      "TeknoGRE",
       "TeknoGClub",
       "TeknoHDrive",
       "TeknoHNG64",
@@ -23,6 +29,8 @@
       "TeknoM2",
       "TeknoMVS",
       "TeknoNaomi",
+      "TeknoPNet",
+      "TeknoPsikyo",
       "TeknoS11",
       "TeknoS21",
       "TeknoS22",
@@ -30,13 +38,21 @@
       "TeknoSS32",
       "TeknoSTV",
       "TeknoTPJC",
+      "TeknoTZ",
       "TeknoTZero",
+      "TeknoVP",
       "TeknoVUnit",
       "TeknoVegas",
       "TeknoViper",
       "TeknoZeus"
     ],
     "ExcludedBecause": "ROM-set loaders: the guide text for these is \"which ROM or disc to select\", covered by the ROM family decisions.",
+    "RegisterOnlyLoaders": [
+      "TeknoDOS",
+      "TeknoRender0",
+      "TeknoTJC"
+    ],
+    "RegisterOnlyBecause": "Added in TeknoParrot 1.0.0.2337. TPM registers these games like any other game and adds no patch, file check or setup step for them. TeknoDOS mixes .EXE programs and ROM-set files, so these loaders are not put in the ROM-set list above. No per-game decision is recorded.",
     "Versions": "The guide has nested versions only under the excluded loaders, so no row here has a parent."
   },
   "Dispositions": {

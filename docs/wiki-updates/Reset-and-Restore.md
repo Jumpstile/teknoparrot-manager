@@ -11,7 +11,7 @@ Open it with **15** (Restore backup) in the main menu, then option **4**. The ot
 - Your game settings (the profile files in `UserProfiles`).
 - TeknoParrot Manager's own settings.
 
-It does not have game files, saves, databases, or LaunchBox. A new restore point is made at start-up only when your settings changed. The first one is always kept.
+It does not have game files, saves, databases, or LaunchBox. A new restore point is made at start-up only when your settings changed. The first one that has games in it is kept.
 
 ---
 
@@ -45,7 +45,7 @@ Before anything changes, a new restore point of your current settings is saved a
 <summary>Details</summary>
 
 - Restore points live in `TeknoParrotManager\Backups\RestorePoints`.
-- Option 5 keeps the first restore point and the newest 10. TeknoParrot Manager never removes restore points by itself. It shows what would go and asks you to type **YES**.
+- Option 5 keeps the first restore point that has games and the newest 10. TeknoParrot Manager never removes restore points by itself. It shows what would go and asks you to type **YES**.
 - Restore points made for another TeknoParrot folder are listed read-only. Press **D** in the menu to see them.
 
 </details>
@@ -62,5 +62,7 @@ This is option **5** in **15) Restore backup**. Use it when one game is broken a
 - If anything goes wrong, your old folder is put back. The TeknoParrot settings for the game are not changed.
 - If the ZIP is not found, there is not enough free space, the ZIP does not match the DAT list, or the game is running, it says so and changes nothing.
 - In the same menu, **2** puts the old folder back (the rebuilt folder is kept instead) and **3** deletes an old folder after you type **YES**. Old folders use disk space until you delete them.
+- **4** rebuilds several games at once. You pick the games (numbers like `1,3,6`, a range like `1-8`, `A` for all, or `B` for none). Each game is checked first. A game that is running, has no ZIP, or has more than one ZIP that fits is skipped, and you see the reason. You then type **YES** and the word **REBUILD** to start. Any other answer cancels and nothing changes.
+- Each game is rebuilt on its own, so one failure does not stop the others. Every old folder is kept, so **2** can still put it back. If you press Ctrl+C, TPM tells you what was done so far.
 
 Back to [[Home]].

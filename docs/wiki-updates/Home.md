@@ -2,11 +2,11 @@
 
 ![TeknoParrot Manager](banner.png)
 
-TeknoParrot Manager sets up your extracted TeknoParrot games for you. It registers them, copies controls between games of the same type, and keeps your library tidy. It backs up your game settings before it changes them.
+TeknoParrot Manager sets up your extracted TeknoParrot games for you. It registers them, sets up their controls from your controller layout, and keeps your library tidy. It backs up your game settings before it changes them.
 
 It is made for beginners and is also useful if you already know TeknoParrot. It hides complexity, not detail: repeatable bulk steps save manual work, and Details and the log show what was done.
 
-This page is for v1.0 RC9.3: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3. Versions from RC8.1 on can update themselves in place with Check for Updates.
+This page is for v1.0 RC9.4. The latest published release is RC9.3: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3. Versions from RC8.1 on can update themselves in place with Check for Updates.
 What is new in v1.0 is listed at the top of the [[Changelog]].
 
 Test one game after each run before you trust the rest.
@@ -17,9 +17,9 @@ Test one game after each run before you trust the rest.
 
 1. Read [[Quick Start]]. It takes a few minutes.
 2. Run `TeknoParrotUi.exe` once so it downloads its game profiles.
-3. Run TeknoParrot Manager and choose **AutoSync** (games are ZIP files) or **Register only** (games are already extracted).
-4. Open TeknoParrotUI. Your games are there.
-5. In TeknoParrotUI, set up the controls for one game of each type you use. Run TeknoParrot Manager again. It copies those controls to the other games of the same type.
+3. Run TeknoParrot Manager and choose **AutoSync** (games are ZIP files) or **Register only** (games are already extracted). It first asks `P`, `R` or `B`. `P` (Preview, the default) only shows what would change and registers nothing, so press **`R`** (Run now) to really set up your games.
+4. Open TeknoParrotUI. Your games are there (if you pressed `R`).
+5. Run TeknoParrot Manager again and choose **Controls**. Pick your controller layout (Xbox, PlayStation, Nintendo or arcade stick). It sets up your games with that layout.
 6. Test one game before you trust the rest.
 
 ---
@@ -33,7 +33,7 @@ Type a number and press Enter. After each task you come back to this menu.
 | 1 | AutoSync | Extracts your game ZIPs, then registers the games | [[AutoSync]] |
 | 2 | Register only | Registers games you already extracted | [[Register]] |
 | 3 | LaunchBox integration | Adds your registered games to LaunchBox, fills in details and playlists, links art, and keeps LaunchBox in step. Opens any time, without registering first | [[LaunchBox Integration]] |
-| 4 | Propagate Controls | Copies controls from a game you set up to games of the same type | [[Propagate Controls]] |
+| 4 | Controls | Set up your controller layout and controls | [[Controls]] |
 | 5 | Crosshair setup | Adds custom crosshairs to lightgun games | [[Crosshairs]] |
 | 6 | ReShade setup | Visual filters: sharper image, CRT-style scanlines, borders | [[ReShade]] |
 | 7 | dgVoodoo2 setup | Fixes some old DX8, DirectDraw, and Glide games | [[dgVoodoo2]] |
@@ -57,7 +57,7 @@ Items 5 to 11 are optional. Items 12 and 13 are only for some games.
 
 - [[Setup]] -- first run, folders, and saved settings
 - [[LaunchBox Integration]] -- add your games to LaunchBox
-- [[Game Startup Files]] -- firmware, System 11 saved files and other files some games need
+- [[Game Startup Files]] -- firmware, saved files for TeknoS11 arcade games and other files some games need
 - [[CPS3 First-Boot Files]] -- optional files that speed up the first start of CPS3 games
 - [[Registration Ledger]] -- the record of what AutoSync and Register did
 - [[Troubleshooting]] -- common problems and fixes
@@ -67,7 +67,7 @@ Items 5 to 11 are optional. Items 12 and 13 are only for some games.
 
 ## Who is it for?
 
-- Large TeknoParrot libraries and NAS-based collections
+- Large TeknoParrot libraries and NAS-based (network storage) collections
 - LaunchBox users
 - RetroBat and Batocera users
 

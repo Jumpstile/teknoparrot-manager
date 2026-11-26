@@ -562,7 +562,7 @@ Describe 'FIX132 what the player reads' {
     }
 
     It 'tells the player which archive to put in their collection when no source is found' -ForEach @(
-        @{ Type = 'RPCS3'; Missing = 'liblv2.sprx'; Say = 'PlayStation 3 firmware archive' }
+        @{ Type = 'RPCS3'; Missing = 'liblv2.sprx'; Say = 'PlayStation 3 style hardware' }
         @{ Type = 'Play'; Missing = 'bad.arcadedef'; Say = 'Play! working arcadedefs' }
     ) {
         # Mutation: restore the old "put the missing files in it" sentence -> neither text names the archive.

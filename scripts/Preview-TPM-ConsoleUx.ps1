@@ -12,7 +12,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$script:DisplayVersion = 'v1.0 RC9.3'
+$script:DisplayVersion = 'v1.0 RC9.4'
 
 function Get-ViewportInfo {
     $rawWindowWidth = $null
@@ -175,7 +175,7 @@ function Get-PreviewSections {
             Items = @(
                 [pscustomobject]@{ Number = 1; Label = 'AutoSync'; Desc = 'Extract ZIPs (NAS or local) to a local folder, register games, repair metadata, and preserve backups automatically.' }
                 [pscustomobject]@{ Number = 2; Label = 'Register Existing Games'; Desc = 'Register games that are already extracted without copying or moving any files.' }
-                [pscustomobject]@{ Number = 3; Label = 'Propagate Controls'; Desc = 'Re-copy control bindings from reference games to other compatible games without running AutoSync.' }
+                [pscustomobject]@{ Number = 3; Label = 'Controls'; Desc = 'Set up games with your controller layout and check which games have all their controls, without running AutoSync.' }
             )
         }
         [pscustomobject]@{

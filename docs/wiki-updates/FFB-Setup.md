@@ -16,7 +16,7 @@ There are two ways to get it. You can use one or both. They cover different game
 3. You are asked whether to set up the free plugin: `[Y] Set up the free FFB plugin (the newest version; each game gets its own settings file)` or `[N] Skip the optional plugin`. The default is `N`.
 4. If you said `Y`, you are asked about your wheel. Pick it from the list of game controllers, or skip (see "Your wheel" below).
 5. If a game is covered by both, you are asked which one to use (see below).
-6. You see what will be installed or updated and are asked `Go ahead?` Nothing changes until you say `Y`.
+6. If you chose the plugin, you see what will be installed or updated and are asked `Go ahead?` The plugin is not installed until you say `Y`. The FFB Blaster step (step 2) is already finished by then.
 7. Read the result. Start a game to try it.
 
 ---
@@ -65,7 +65,7 @@ TeknoParrot Manager lists the games covered by both. Then you answer once for al
 ## Undo
 
 - **FFB Blaster:** set the field back to `0` in the game's `UserProfiles\*.xml`, or use [[Restore Backup]] to go back to the saved copy. A restore also puts back anything else changed after that copy was made.
-- **Plugin:** TeknoParrot Manager only ever removes plugin files it recorded as its own (the plugin, the settings file and `SDL2.dll`), and only if they are unchanged. If you are not sure a file is part of the plugin, leave it.
+- **Plugin:** to start the undo, open main menu item 9 (**Force feedback (FFB) setup**). Answer `Y` to the membership question, and `Y` to setting up the free plugin (the default is `N`; with `N` you never reach the next question). When asked about games covered by both, answer `Y` (keep native FFB Blaster). TeknoParrot Manager then backs up and removes only plugin files it recorded as its own (the plugin, the settings file and `SDL2.dll`), and only if they are unchanged. This works for games covered by both. For a game only the plugin covers, there is no menu choice to remove it. If you are not sure a file is part of the plugin, leave it.
 
 [[Health Check]] shows which registered games could use FFB Blaster but do not have it on yet. It does not check the plugin, because that needs a look at the newest release online.
 
@@ -74,6 +74,6 @@ TeknoParrot Manager lists the games covered by both. Then you answer once for al
 
 The result lists how many games were installed, already up to date, kept on native FFB, skipped because a file already exists, skipped because the plugin does not support them, skipped because the plugin file name is not known, or skipped because the plugin file does not fit the game. Games whose saved path or drive cannot be found are named. Fix them with [[Health Check]] (menu 14), then run setup again.
 
-If GitHub cannot be reached, or does not return a usable release, nothing is changed and you can try again. A download is also refused, with nothing changed, if it does not match the checksum GitHub published for it or if its contents do not pass the safety checks. If GitHub publishes no checksum, the screen says so. There is no publisher signature check.
+If GitHub cannot be reached, or does not return a usable release, the plugin is not installed or changed and you can try again (if a saved copy is on your PC, you are asked whether to use it). A download is also refused, with the plugin left as it was, if it does not match the checksum GitHub published for it or if its contents do not pass the safety checks. If GitHub publishes no checksum, the screen says so. There is no publisher signature check.
 
 </details>

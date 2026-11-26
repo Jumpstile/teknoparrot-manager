@@ -113,7 +113,7 @@ Describe 'Force feedback ending says what was set and the next step (fix 17)' {
         $view.Next | Should -Match '^Start a game'
         ($view.Done -join ' ') | Should -Not -Match 'GameA'
         $detail = ($view.DetailBlocks | ForEach-Object { $_.Heading; $_.Lines }) -join ' '
-        $detail | Should -Match 'GameA, GameB'
+        $detail | Should -Match 'GameA and GameB'
         $detail | Should -Match 'C:\\Safety\\copy'
         $detail | Should -Match 'abc123'
     }

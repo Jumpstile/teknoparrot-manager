@@ -18,7 +18,7 @@ Want to undo it? Choose **A** (back to automatic) in the country list. It shows 
 
 ## The question after you register new games
 
-After AutoSync or Register only adds new games, TeknoParrot Manager asks once which country they should start in. Type **0** to leave them as they are. Nothing is asked in a preview or an unattended run.
+After AutoSync or Register only adds new games that offer a region choice, TeknoParrot Manager asks once which country they should start in. Type **0** to leave them as they are. Nothing is asked in a preview or an unattended run.
 
 This question only changes new games that are still on automatic. A region you chose before is kept. In Region setup you are asking for the change yourself, so it can replace an earlier choice.
 

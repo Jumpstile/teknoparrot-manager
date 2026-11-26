@@ -2,12 +2,43 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-RC9.3 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
+This guide set is for v1.0 RC9.4. RC9.3 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
 The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2. RC9.1, RC9, RC8.4 and older are earlier published releases. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
 ---
+
+## v1.0 RC9.4 (changes since RC9.3)
+
+- Menu 4 is now named Controls. AutoSync, Register and menu 4 set up controls
+  only with your controller layout; copying from example games is removed.
+- Choose your controller layout now has "My learned arcade controls" for an
+  arcade encoder in keyboard mode. It changes nothing and needs no mode switch.
+- Controls fit your pad (volume on L3/R3, any slot); choice 5 sets any by hand.
+  A clash skips one. TPM also looks for Wii remotes, guitars, drums and dance
+  pads, and you can say what any device is.
+- Learn my arcade buttons now keeps the keys you saved before and asks only
+  for the controls that have none.
+- After the picture download, TeknoParrot Manager names the games still
+  without a picture and lets you pick your own PNG for each one.
+- Screens, lists and reports now show each game's full title (for example
+  "Tekken 2"), not its profile code, in Controls too. The code stays in the log.
+- AutoSync no longer stops when you reach the LaunchBox step, and it no longer
+  skips a game just because another edition of the same title is in the same run.
+- LaunchBox playlists now sit under TeknoParrot; same-name ones stay as is.
+  The LaunchBox folder is remembered.
+- The ReShade result now says the Home key opens the ReShade effects menu.
+- Game Path Repair uses the folder names and file name of a game's old saved
+  path to find it after you move your library, and says "Partly done" instead
+  of FAILED when some games need your help.
+- Game rules (game notes and graphics-card warnings) can be updated without a
+  new TeknoParrot Manager release. It never changes your game or TeknoParrot
+  files, and you can turn it off with the GameRulesUpdate setting.
+- TeknoParrot Manager no longer looks up a game list online. It reads the
+  profiles in your own TeknoParrot GameProfiles folder.
+- The TeknoParrot Manager log no longer grows without limit. At start, a log
+  over 5 MB is kept as one "previous" log and a new log begins.
 
 ## v1.0 RC9.3 (changes since RC9.2)
 
@@ -67,7 +98,7 @@ The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/tekn
 ## v1.0 RC9 (changes since RC8.4)
 
 ### Controls
-- Controller layout (Propagate Controls, menu 3): choose your layout
+- Controller layout (Propagate Controls, menu 3 at that time; now menu 4): choose your layout
   once (Xbox, PlayStation, Nintendo or arcade stick), change any button,
   then set up one game, all your games, or game by game. You see a
   preview and approve once. A saved copy is made first, every changed
@@ -79,7 +110,8 @@ The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/tekn
   give them a button.
 - Controls check (Propagate Controls choice 4, and a Controls line in
   Library health check) sorts every registered game into every control
-  set up, some, none, or "cannot tell", and names the missing controls.
+  set up, some, none, or "cannot tell" (a game with an input type TPM
+  cannot check is counted on its own), and names the missing controls.
   For most games the list comes from TeknoParrot's own game file and
   says that no person has checked it. It changes nothing and never says
   a game is ready.
@@ -152,10 +184,10 @@ The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/tekn
   "not in TeknoParrot", not as a failed profile.
 - A game set is never registered just because its parent ZIP is in the
   folder, except when the Eggman list names the parent ZIP (17 games,
-  such as Dance Dance Revolution 2nd Mix Link). System 11 games need
+  such as Dance Dance Revolution 2nd Mix Link). TeknoS11 arcade games need
   both ZIPs in one folder. The disc image (CHD) is chosen when there is
   only one, never guessed when there are several. If you have your own
-  System 11 saved files set, TPM can copy the files for your
+  TeknoS11 saved files set, TPM can copy the files for your
   games. It never replaces a file that is there and says which games
   the set lacks.
 - Startup files for Chihiro, PlayStation 3 and the other systems that
@@ -255,10 +287,11 @@ The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/tekn
 - New choice B in ReShade setup: use your own bezel folder. A bezel is
   a picture that frames the game, like a cabinet's edge. TPM
   matches your .png pictures to your games and shows how sure each match
-  is. It copies nothing until you say yes, never uses an unsure match or
-  a different sequel number unless you pick it, keeps a bezel you placed
+  is. It copies nothing until you say yes, never uses a weak match or
+  a different sequel number unless you pick it (a medium match is chosen
+  for you in the preview, so look it over first), keeps a bezel you placed
   yourself unless you say to replace it, and saves a copy first. Undo
-  puts everything back. Nothing is downloaded.
+  puts back what it changed and leaves alone a file you changed since. Nothing is downloaded.
 - Progress counts the games being changed ("Applying ReShade: 1 of 34"),
   not your whole library, and checking all your games is its own step.
 
@@ -276,7 +309,7 @@ The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/tekn
   extracted is a short note.
 - The GPU fix at the end of first-time setup shows the same result as
   the menu. A game on a drive that is not connected is "skipped", the
-  drive letter is named, and Library health check (menu 13) repairs the
+  drive letter is named, and Library health check (menu 13 at that time; now menu 14) repairs the
   paths.
 - The README and User Guide say the online list of TeknoParrot game
   profiles is used only when it can be reached (it currently cannot,
@@ -318,7 +351,7 @@ The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/tekn
 - The Action Required list is grouped by feature, with a short heading
   for each group.
 - A step that skipped games on a drive that is not connected now points
-  to Library health check (menu 13) to repair them.
+  to Library health check (menu 13 at that time; now menu 14) to repair them.
 - Library health check lists the games that need BepInEx and do not
   have it set up.
 - A game file that cannot be read is now told apart from a game whose
@@ -394,7 +427,7 @@ The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/tekn
 ## v1.0 RC8.2 (changes since RC8.1)
 
 ### Controls
-- Propagate Controls (menu 3) now shows a preview first. It lists what
+- Propagate Controls (menu 3 at that time; now menu 4) now shows a preview first. It lists what
   would change and saves nothing until you say yes.
 - Your game settings are backed up and the backup is checked before the
   first change. After the copy you can undo it in one step.
@@ -489,7 +522,7 @@ The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/tekn
   copy first and leaves a profile TeknoParrot changed meanwhile alone.
   If saving a profile fails after Windows removed the old file, the new
   file is kept and the message says where it is.
-- Region setup (main menu item 10) sets the region of your games. After
+- Region setup (main menu item 10 at that time; now menu 11) sets the region of your games. After
   new games are registered you are also asked once which region to use.
   Only regions the games really offer are listed. A game never gets a
   region it does not have, and a region you chose before is kept unless
@@ -558,7 +591,9 @@ The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/tekn
   game's own settings: it must connect and hold its tables. Nothing is
   left for TeknoParrot to create when you first start a game. A game
   with no starting database file (pg_backup) cannot be made ready: it
-  is left out and named, and every other game is still set up.
+  is left out and named, and every other game is still set up. (Old
+  behavior: later versions let a game with automatic database creation
+  make its own database on first start.)
 - A game with several identical backup files gets its database from the
   newest one, in setup and in the [I] rebuild. The confirm screen, Details
   and the log say which file was used. If it does not restore, setup stops
@@ -1044,7 +1079,6 @@ For shared-executable games (Raw Thrills' `sdaemon.exe` and similar), a folder w
 ## v0.81 BETA (2026-06-17)
 
 - Fixed recurring version drift: the GitHub API User-Agent header was hardcoded to a stale `TeknoParrot-Manager/0.76` in two places (same class of bug fixed once before at v0.71). All GitHub API calls and the startup banner/log now read from a single version variable.
-- Hardened profile discovery against the upstream `teknogods/TeknoParrotUI` repository ever renaming its default branch: the script now queries the repo's actual default branch via the GitHub API instead of hardcoding "master", falling back to "master" if that lookup fails.
 
 ---
 
@@ -1234,9 +1268,8 @@ For shared-executable games (Raw Thrills' `sdaemon.exe` and similar), a folder w
 
 ## v0.59 BETA (2026-06-14)
 
-**GitHub profile set resolution, supplementary dat as priority overrides**
+**Supplementary dat as priority overrides**
 
-- The script now fetches the full list of GameProfile XML filenames from the teknogods/TeknoParrotUI GitHub repository before every registration run. The fetched set is used to validate and resolve dat profile codes before they are written to UserProfiles.
 - Supplementary dat entries can now act as priority overrides: when the main dat has no match but the supplementary dat does, the supplementary profile code is used.
 
 ---

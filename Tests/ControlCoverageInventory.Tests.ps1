@@ -18,7 +18,7 @@ BeforeAll {
         'Get-TpmControlCoverageContract', 'Get-TpmControlBindingFacts', 'Get-TpmControlCoverageInventory',
         'Get-TpmControlCoverageLines', 'Get-TpmControlCoverage', 'Get-TpmControlCoverageWhyText', 'Read-TpmGameTemplate', 'Get-TpmTemplateIdentity',
         'Get-TpmDerivedControlContract', 'Get-TpmGameControlContract', 'Get-TpmControlCoverageAudit', 'Get-TpmControlCoverageAuditSummary',
-        'Test-TpmMappingInPlayerOneScope', 'Get-TpmProfileFriendlyTitle'
+        'Test-TpmMappingInPlayerOneScope', 'Get-TpmProfileFriendlyTitle', 'Get-TpmGameTitle'
     )
     $functionFile = Join-Path $TestDrive 'coverage-functions.ps1'
     ($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -in $wanted }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n" | Set-Content -LiteralPath $functionFile -Encoding utf8
@@ -360,7 +360,7 @@ Describe 'Controls coverage from the game''s own file' {
         $audit.Unknown | Should -Be 1
         $summary = Get-TpmControlCoverageAuditSummary -Audit $audit
         $summary.Status | Should -Be 'Attention'
-        ($summary.Done -join ' ') | Should -Match 'Games with every control the game lists set up: 1 of 4'
+        ($summary.Done -join ' ') | Should -Match 'Games with every required control the game lists set up: 1 of 4'
         $detail = ($summary.Blocks | ForEach-Object { $_.Lines }) -join ' '
         $detail | Should -Match 'some: still needed|some.*Gun Trigger'
         ($summary.Done + $summary.Needs + $summary.Note) -join ' ' | Should -Not -Match '(?i)\bready\b|\bverified\b'

@@ -1,6 +1,6 @@
 # Quick Start
 
-Get TeknoParrot Manager (TPM) running in a few minutes. This page is for v1.0 RC9.3. See the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases).
+Get TeknoParrot Manager (TPM) running in a few minutes. This page is for v1.0 RC9.4. See the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Test one game after each run.
 
@@ -10,7 +10,7 @@ Test one game after each run.
 
 [TeknoParrot](https://www.teknoparrot.com/) is a free Windows program that runs arcade games on a normal PC. **TPM is not TeknoParrot.** It is a helper that sets up TeknoParrot's saved game settings (called profiles) for many games at once, so you do not have to do each game by hand in `TeknoParrotUi.exe`.
 
-TPM does not provide game files, firmware, or BIOS. You bring your own.
+TPM does not provide game files, firmware, or BIOS (startup files some game systems need). You bring your own.
 
 It plays safe: it makes a backup first, shows a preview first, asks before it changes things, and stops if a check fails.
 
@@ -23,7 +23,7 @@ Registered, launched, and controls-ready are three different things. A game that
 |---|---|
 | **TeknoParrotUi.exe** | TeknoParrot's own window, where you launch games and set them up by hand. TPM edits the same profile files. |
 | **DAT file** | A community list of game names (Eggman/RomVault). TPM uses it to recognize games with odd or renamed files. |
-| **Control propagation** | You set up the controls for one game. TPM copies them to other games of the same type. |
+| **Controller layout** | The controls you pick once (Xbox, PlayStation, Nintendo or arcade stick). TPM sets up your games' buttons from it. |
 | **BepInEx** | A plugin framework some games use. See [[BepInEx]]. |
 | **FFB** | Force feedback for wheels and sticks. See [[FFB Setup]]. |
 
@@ -79,7 +79,7 @@ You can also double-click `TeknoParrot-Manager.bat`.
 | 1 | AutoSync | Your games are ZIP files |
 | 2 | Register only | Your games are already extracted |
 | 3 | LaunchBox integration | You want to add your registered games to LaunchBox. Works any time, without registering first. See [[LaunchBox Integration]] |
-| 4 | Propagate Controls | You want to copy controls again |
+| 4 | Controls | You want to set up your controller layout and controls |
 | 5 | Crosshair setup | You want custom crosshairs on lightgun games |
 | 6 | ReShade setup | You want visual filters |
 | 7 | dgVoodoo2 setup | An old game crashes or shows a black screen |
@@ -111,16 +111,12 @@ Many result screens say `Press D for details`. Press `D` for the full technical 
   1) AutoSync        -- Extract your game ZIPs into your games
                         folder, then register the games.
   2) Register only   -- Register games already in the games folder.
-  3) LaunchBox integration -- Add your registered games to LaunchBox,
-                        fill in details and playlists, link art, keep
-                        LaunchBox in step. Opens the LaunchBox choices
-                        (P, A, G, V, S, L, C, F, B) any time, without
-                        registering or extracting anything first. If you
-                        have no LaunchBox yet, it tells you so and how
-                        to continue.
-  4) Propagate Controls -- Copy controls from a game you set up
-                        to games of the same type, without
-                        going through AutoSync/Register first.
+  3) LaunchBox integration -- Open the LaunchBox choices any time: add games,
+                        fill in details, link art, keep LaunchBox in step.
+                        Nothing is registered or extracted first.
+  4) Controls        -- Set up your games with your controller layout
+                        (Xbox, PlayStation, Nintendo or arcade stick)
+                        and check which games have all their controls.
 
   GAME ENHANCEMENTS (OPTIONAL -- NOT EVERY GAME NEEDS THEM)
   ---------------------------------------------------------
@@ -151,12 +147,15 @@ Many result screens say `Press D for details`. Press `D` for the full technical 
   ---------------------------------------
   12) Postgres setup -- For games set to Existing PostgreSQL.
                         Installs/configures local PostgreSQL 8.3 for
-                        Golden Tee Live (2020 too), Power Putt Live,
-                        Silver Strike Bowling Live, Target Toss Pro.
+                        every Golden Tee Live game (also 2020),
+                        every PGA Tour game, Power Putt Live,
+                        Silver Strike Bowling Live, Target Toss Pro
+                        and Orange County Choppers.
                         Games on Internal storage (the new default)
                         need no database install and are skipped.
                         A missing game database is made from the
-                        game's own backup, then tested before ready.
+                        game's own backup. A game that ships none is
+                        left to TeknoParrot to make on first start.
                         Administrator is required if PostgreSQL isn't
                         installed yet.
   13) Required game patches -- Find required patches for supported exact
@@ -203,23 +202,22 @@ Enter 1-18:
 | D | Done: go on with the games you picked |
 | B | Back: cancel |
 
-After new games are registered, TPM asks once which country they should start in. Type `0` to leave them as they are. See [[Region Setup]].
+If a new game offers a region choice, TPM asks once after registering which country it should start in. Type `0` to leave them as they are. See [[Region Setup]].
+
+Remember: `P` (Preview) registers nothing. If you only previewed, run the same item again and choose `R` before you open TeknoParrotUI.
 
 **6.** Open `TeknoParrotUi.exe`. Your games are there.
 
 ---
 
-## Copy your controls (recommended)
+## Set up your controls (recommended)
 
-Set up the controls once, and TPM copies them to the other games of the same type.
+Pick your controller layout once, and TPM sets up your games from it.
 
-1. In TeknoParrot, fully set up **one game of each type**: buttons, axes, Test, Service, Coin, Start. Good ones to start with:
-   - **Fighting / buttons:** Street Fighter III, BlazBlue, Tekken 7
-   - **Driving:** Daytona Championship USA, Initial D, OutRun 2 SP
-   - **Lightgun:** House of the Dead 4, Aliens Extermination
-   - **Trackball:** Golden Tee Live, Silver Strike Bowling
-2. Run TPM again (item 1 or 2). After registering, it copies the controls on its own. To copy without registering, choose item 4. See [[Propagate Controls]].
-3. Start **one** game and test it before you trust the rest.
+1. Run TPM and choose item 4 (Controls). It sets up your games with the controller layout you pick: Xbox, PlayStation, Nintendo or arcade stick. See [[Controls]].
+2. Run TPM again (item 1 or 2) any time. At the end it also offers the Controller Layout step.
+3. Open TeknoParrot and set up by hand any control TPM could not set, such as steering or aim.
+4. Start **one** game and test it before you trust the rest.
 
 ---
 
@@ -229,7 +227,7 @@ Set up the controls once, and TPM copies them to the other games of the same typ
 - [[Region Setup]] (11)
 - [[Postgres Setup]] (12), [[Required Game Patches]] (13)
 - [[Health Check]] (14)
-- Games that will not start because files are missing (PS3 firmware, Chihiro files): see [[Game Startup Files]], which also covers the optional System 11 saved files. [[CPS3 First-Boot Files]] covers the optional CPS3 step.
+- Games that will not start because files are missing (PS3 firmware, Chihiro files): see [[Game Startup Files]], which also covers the optional saved files for TeknoS11 arcade games. [[CPS3 First-Boot Files]] covers the optional CPS3 step.
 - [[LaunchBox Integration]] (3)
 
 ---

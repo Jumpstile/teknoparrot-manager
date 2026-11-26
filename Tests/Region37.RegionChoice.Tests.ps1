@@ -18,6 +18,7 @@ BeforeAll {
     [System.IO.File]::WriteAllText($functionFile, $functionText, (New-Object System.Text.UTF8Encoding $false))
     . $functionFile
     $script:Rg37RealSaveXml = (Get-Command Save-Xml -CommandType Function).ScriptBlock
+    $script:Rg37RealChoice = (Get-Command Read-TpmChoice -CommandType Function).ScriptBlock
 
     function New-Rg37FieldXml {
         param([string]$Name, [string[]]$Options, [string]$Value, [string]$FieldType = 'Dropdown')
@@ -168,6 +169,41 @@ Describe 'Region choice for new games' {
         Invoke-Rg37 -Dir $script:dir -Codes @('Game') -Answer '0'
         Get-Rg37Value -Dir $script:dir -Code 'Game' | Should -BeExactly 'Auto'
         $script:Rg37Outcome | Should -BeNullOrEmpty
+    }
+
+    It 'shows the key line, lists exactly the games counted under a country for L1, then asks again and 0 leaves as is' {
+        # Mutation: list every game or the wrong country for L1, drop the key line, or write after a list -> a name is wrong or a file changes.
+        New-Rg37Profile -Dir $script:dir -Code 'G1' -Options @('Auto', 'Japan', 'USA') -GameName 'Alpha Racer'
+        New-Rg37Profile -Dir $script:dir -Code 'G2' -Options @('Auto', 'USA', 'Europe') -GameName 'Beta Shooter'
+        New-Rg37Profile -Dir $script:dir -Code 'G3' -Options @('Auto', 'Japan') -GameName 'Gamma Only Japan'
+        $script:Rg37Seq = New-Object System.Collections.Generic.Queue[string]
+        'L1', '0' | ForEach-Object { $script:Rg37Seq.Enqueue($_) }
+        $script:Rg37Seen = New-Object System.Collections.Generic.List[object]
+        Mock Read-TpmChoice { $script:Rg37Seen.Add(@($Choices)); return $script:Rg37Seq.Dequeue() }
+        Invoke-Rg37 -Dir $script:dir -Codes @('G1', 'G2', 'G3') -Answer '0'
+        $script:Rg37Lines | Should -Contain 'Type L and a number to see the games in a country (example: L1).'
+        $script:Rg37Lines | Should -Contain '    1) Japan (2 games)'
+        $script:Rg37Lines | Should -Contain '      - Alpha Racer'
+        $script:Rg37Lines | Should -Contain '      - Gamma Only Japan'
+        $script:Rg37Lines | Should -Not -Contain '      - Beta Shooter'
+        $script:Rg37Seen.Count | Should -Be 2
+        $script:Rg37Seen[0] | Should -Contain 'L1'
+        $script:Rg37Seen[0] | Should -Not -Contain 'L99'
+        Get-Rg37Value -Dir $script:dir -Code 'G1' | Should -BeExactly 'Auto'
+        $script:Rg37Outcome | Should -BeNullOrEmpty
+    }
+
+    It 'asks again after an unknown answer and still lists games for L1 (real prompt helper)' {
+        # Mutation: accept any text or drop L1 from the allowed answers -> no warning line, or L1 is rejected and no list appears.
+        New-Rg37Profile -Dir $script:dir -Code 'G1' -Options @('Auto', 'Japan', 'USA') -GameName 'Alpha Racer'
+        Mock Read-TpmChoice { & $script:Rg37RealChoice -Prompt $Prompt -Choices $Choices -Default $Default }
+        Reset-Rg37 -Answer '0'
+        foreach ($a in 'L9', 'L1', '0') { $script:Rg37Inputs.Enqueue($a) }
+        $result = [pscustomobject]@{ TechnicalDetails = [pscustomobject]@{ SafetyBackupState = @{ Done = $true } } }
+        Invoke-TpmRegionChoice -Codes @('G1') -UserProfilesDir $script:dir -Result $result
+        @($script:Rg37Lines | Where-Object { $_ -like '  Invalid choice.*' }).Count | Should -Be 1
+        $script:Rg37Lines | Should -Contain '      - Alpha Racer'
+        Get-Rg37Value -Dir $script:dir -Code 'G1' | Should -BeExactly 'Auto'
     }
 
     It 'asks nothing and changes nothing in an unattended run or a preview' {

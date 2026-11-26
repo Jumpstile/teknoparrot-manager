@@ -96,6 +96,13 @@
             "ArcadeEncoder",
             "Keyboard",
             "PointerOrTrackball",
+            "PlayStationPad",
+            "NintendoPad",
+            "FlightStick",
+            "WiiRemote",
+            "Guitar",
+            "Drums",
+            "DancePad",
             "Unknown"
           ]
         },

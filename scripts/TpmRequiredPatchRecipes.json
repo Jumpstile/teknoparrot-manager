@@ -2059,6 +2059,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Dead or Alive 6 (1.00.00) - APM3 Component.zip",
       "SourceEntry": "apm.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Dead or Alive 6 (1.00.00)(2019-06-26)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm.dll"
+        }
+      ],
       "SourceSize": 1269760,
       "SourceSha1": "4856952CB074601C114EA44561C539E073177C0F",
       "SourceSha256": "A91CA49BBE728413B87343B3405F9BE93EBC08D10F991B0E7004F89C842021E7",
@@ -2086,6 +2092,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Dead or Alive 6 (1.01.00) - APM3 Component.zip",
       "SourceEntry": "apm.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Dead or Alive 6 (1.01.00)(2019-07-04)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm.dll"
+        }
+      ],
       "SourceSize": 1269760,
       "SourceSha1": "4856952CB074601C114EA44561C539E073177C0F",
       "SourceSha256": "A91CA49BBE728413B87343B3405F9BE93EBC08D10F991B0E7004F89C842021E7",
@@ -2113,6 +2125,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Dead or Alive 6 (1.02.00) - APM3 Component.zip",
       "SourceEntry": "apm.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Dead or Alive 6 (1.02.00)(2019-08-06)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm.dll"
+        }
+      ],
       "SourceSize": 1269760,
       "SourceSha1": "4856952CB074601C114EA44561C539E073177C0F",
       "SourceSha256": "A91CA49BBE728413B87343B3405F9BE93EBC08D10F991B0E7004F89C842021E7",
@@ -2140,6 +2158,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Dead or Alive 6 (1.03.00) - APM3 Component.zip",
       "SourceEntry": "apm.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Dead or Alive 6 (1.03.00)(2019-09-25)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm.dll"
+        }
+      ],
       "SourceSize": 1269760,
       "SourceSha1": "4856952CB074601C114EA44561C539E073177C0F",
       "SourceSha256": "A91CA49BBE728413B87343B3405F9BE93EBC08D10F991B0E7004F89C842021E7",
@@ -2167,6 +2191,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Dead or Alive 6 (1.04.00) - APM3 Component.zip",
       "SourceEntry": "apm.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Dead or Alive 6 (1.04.00)(2020-01-09)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm.dll"
+        }
+      ],
       "SourceSize": 1269760,
       "SourceSha1": "4856952CB074601C114EA44561C539E073177C0F",
       "SourceSha256": "A91CA49BBE728413B87343B3405F9BE93EBC08D10F991B0E7004F89C842021E7",
@@ -2194,6 +2224,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Dead or Alive 6 (1.06.00) - APM3 Component.zip",
       "SourceEntry": "apm.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Dead or Alive 6 (1.06.00)(2020-03-23)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm.dll"
+        }
+      ],
       "SourceSize": 1269760,
       "SourceSha1": "4856952CB074601C114EA44561C539E073177C0F",
       "SourceSha256": "A91CA49BBE728413B87343B3405F9BE93EBC08D10F991B0E7004F89C842021E7",
@@ -2221,6 +2257,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Goonya Fighter APM3 Edition (1.00.00) - APM3 Component.zip",
       "SourceEntry": "apm.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Goonya Fighter APM3 Edition (1.00.00)(2020-08-27)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "game/apm.dll"
+        }
+      ],
       "SourceSize": 1269760,
       "SourceSha1": "4856952CB074601C114EA44561C539E073177C0F",
       "SourceSha256": "A91CA49BBE728413B87343B3405F9BE93EBC08D10F991B0E7004F89C842021E7",
@@ -2248,6 +2290,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Goonya Fighter APM3 Edition (1.01.00) - APM3 Component.zip",
       "SourceEntry": "apm.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Goonya Fighter APM3 Edition (1.01.00)(2020-10-16)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "game/apm.dll"
+        }
+      ],
       "SourceSize": 1269760,
       "SourceSha1": "4856952CB074601C114EA44561C539E073177C0F",
       "SourceSha256": "A91CA49BBE728413B87343B3405F9BE93EBC08D10F991B0E7004F89C842021E7",
@@ -2275,6 +2323,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Goonya Fighter APM3 Edition (1.02.00) - APM3 Component.zip",
       "SourceEntry": "apm.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Goonya Fighter APM3 Edition (1.02.00)(2020-11-13)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "game/apm.dll"
+        }
+      ],
       "SourceSize": 1269760,
       "SourceSha1": "4856952CB074601C114EA44561C539E073177C0F",
       "SourceSha256": "A91CA49BBE728413B87343B3405F9BE93EBC08D10F991B0E7004F89C842021E7",
@@ -2302,6 +2356,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Goonya Fighter APM3 Edition (1.03.00) - APM3 Component.zip",
       "SourceEntry": "apm.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Goonya Fighter APM3 Edition (1.03.00)(2021-04-07)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "game/apm.dll"
+        }
+      ],
       "SourceSize": 1269760,
       "SourceSha1": "4856952CB074601C114EA44561C539E073177C0F",
       "SourceSha256": "A91CA49BBE728413B87343B3405F9BE93EBC08D10F991B0E7004F89C842021E7",
@@ -2329,6 +2389,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Otoshu DX (1.00.00) - APM3 Component.zip",
       "SourceEntry": "apm.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Otoshu DX (1.00.00)(2020-02-15)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm.dll"
+        }
+      ],
       "SourceSize": 1269760,
       "SourceSha1": "4856952CB074601C114EA44561C539E073177C0F",
       "SourceSha256": "A91CA49BBE728413B87343B3405F9BE93EBC08D10F991B0E7004F89C842021E7",
@@ -2356,6 +2422,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Puyo Puyo e-Sports (1.00.01) - APM3 Component.zip",
       "SourceEntry": "apm.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Puyo Puyo e-Sports (1.00.01)(2019-02-26)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm.dll"
+        }
+      ],
       "SourceSize": 1269760,
       "SourceSha1": "4856952CB074601C114EA44561C539E073177C0F",
       "SourceSha256": "A91CA49BBE728413B87343B3405F9BE93EBC08D10F991B0E7004F89C842021E7",
@@ -2383,6 +2455,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Blade Strangers (2.01.00) - APM3 Component.zip",
       "SourceEntry": "apm_x86.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Blade Strangers (APM3)(2.01.00)(2019-12-03)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm_x86.dll"
+        }
+      ],
       "SourceSize": 1060352,
       "SourceSha1": "FA140ECEBE4D4D2F0258AC55E8ACB427F9DFC633",
       "SourceSha256": "41A067788D23DF8EA753ADFA0A9B5B39DAA6C6D7E2745FE3C3FF0CC49478D8C2",
@@ -2410,6 +2488,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Blazblue Cross Tag Battle (1.00.00,1.50.00) - APM3 Component.zip",
       "SourceEntry": "apm_x86.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Blazblue Cross Tag Battle (1.00.00,1.50.00)(2019-02-10)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm_x86.dll"
+        }
+      ],
       "SourceSize": 1060352,
       "SourceSha1": "FA140ECEBE4D4D2F0258AC55E8ACB427F9DFC633",
       "SourceSha256": "41A067788D23DF8EA753ADFA0A9B5B39DAA6C6D7E2745FE3C3FF0CC49478D8C2",
@@ -2437,6 +2521,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Blazblue Cross Tag Battle (1.01.00,1.50.00) - APM3 Component.zip",
       "SourceEntry": "apm_x86.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Blazblue Cross Tag Battle (1.01.00,1.50.00)(2019-04-17)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm_x86.dll"
+        }
+      ],
       "SourceSize": 1060352,
       "SourceSha1": "FA140ECEBE4D4D2F0258AC55E8ACB427F9DFC633",
       "SourceSha256": "41A067788D23DF8EA753ADFA0A9B5B39DAA6C6D7E2745FE3C3FF0CC49478D8C2",
@@ -2464,6 +2554,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Blazblue Cross Tag Battle (1.02.00,1.50.01) - APM3 Component.zip",
       "SourceEntry": "apm_x86.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Blazblue Cross Tag Battle (1.02.00,1.50.01)(2019-05-30)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm_x86.dll"
+        }
+      ],
       "SourceSize": 1060352,
       "SourceSha1": "FA140ECEBE4D4D2F0258AC55E8ACB427F9DFC633",
       "SourceSha256": "41A067788D23DF8EA753ADFA0A9B5B39DAA6C6D7E2745FE3C3FF0CC49478D8C2",
@@ -2491,6 +2587,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Blazblue Cross Tag Battle (1.03.00,2.00.00) - APM3 Component.zip",
       "SourceEntry": "apm_x86.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Blazblue Cross Tag Battle (1.03.00,2.00.00)(2019-11-05)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm_x86.dll"
+        }
+      ],
       "SourceSize": 1060352,
       "SourceSha1": "FA140ECEBE4D4D2F0258AC55E8ACB427F9DFC633",
       "SourceSha256": "41A067788D23DF8EA753ADFA0A9B5B39DAA6C6D7E2745FE3C3FF0CC49478D8C2",
@@ -2518,6 +2620,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Rolling Gunner (2.00.00) - APM3 Component.zip",
       "SourceEntry": "apm_x86.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Rolling Gunner (2.00.00)(2020-07-07)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm_x86.dll"
+        }
+      ],
       "SourceSize": 1060352,
       "SourceSha1": "FA140ECEBE4D4D2F0258AC55E8ACB427F9DFC633",
       "SourceSha256": "41A067788D23DF8EA753ADFA0A9B5B39DAA6C6D7E2745FE3C3FF0CC49478D8C2",
@@ -2545,6 +2653,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Rolling Gunner (2.01.00) - APM3 Component.zip",
       "SourceEntry": "apm_x86.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Rolling Gunner (2.01.00)(2020-08-19)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm_x86.dll"
+        }
+      ],
       "SourceSize": 1060352,
       "SourceSha1": "FA140ECEBE4D4D2F0258AC55E8ACB427F9DFC633",
       "SourceSha256": "41A067788D23DF8EA753ADFA0A9B5B39DAA6C6D7E2745FE3C3FF0CC49478D8C2",
@@ -2572,6 +2686,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Senxin Aleste (1.00.00) - APM3 Component.zip",
       "SourceEntry": "apm_x86.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Senxin Aleste (1.00.00)(2021-05-31)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm_x86.dll"
+        }
+      ],
       "SourceSize": 1060352,
       "SourceSha1": "FA140ECEBE4D4D2F0258AC55E8ACB427F9DFC633",
       "SourceSha256": "41A067788D23DF8EA753ADFA0A9B5B39DAA6C6D7E2745FE3C3FF0CC49478D8C2",
@@ -2599,6 +2719,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Senxin Aleste (1.01.00) - APM3 Component.zip",
       "SourceEntry": "apm_x86.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Senxin Aleste (1.01.00)(2021-07-02)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm_x86.dll"
+        }
+      ],
       "SourceSize": 1060352,
       "SourceSha1": "FA140ECEBE4D4D2F0258AC55E8ACB427F9DFC633",
       "SourceSha256": "41A067788D23DF8EA753ADFA0A9B5B39DAA6C6D7E2745FE3C3FF0CC49478D8C2",
@@ -2626,6 +2752,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Koihime Enbu RyoRaiRai Version 3 (1.00.00,3.00) - APM3 Component.zip",
       "SourceEntry": "apm_x86.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Koihime Enbu RyoRaiRai Version 3 (APM3)(1.00.00,3.00)(2020-09-23)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm_x86.dll"
+        }
+      ],
       "SourceSize": 1059840,
       "SourceSha1": "D24887BAD738FB8160B030EB341F865A94E2CF3B",
       "SourceSha256": "BD1A62C9498AF616739D558BED8D7F6A37321D7EF470D15F76F9E110D52FF050",
@@ -2653,6 +2785,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Koihime Enbu RyoRaiRai Version 3 (1.01.00,3.01) - APM3 Component.zip",
       "SourceEntry": "apm_x86.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Koihime Enbu RyoRaiRai Version 3 (APM3)(1.01.00,3.01)(2020-11-02)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm_x86.dll"
+        }
+      ],
       "SourceSize": 1059840,
       "SourceSha1": "D24887BAD738FB8160B030EB341F865A94E2CF3B",
       "SourceSha256": "BD1A62C9498AF616739D558BED8D7F6A37321D7EF470D15F76F9E110D52FF050",
@@ -2680,6 +2818,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Koihime Enbu RyoRaiRai Version 3 (1.03.00,3.02) - APM3 Component.zip",
       "SourceEntry": "apm_x86.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Koihime Enbu RyoRaiRai Version 3 (APM3)(1.03.00,3.02)(2021-03-30)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm_x86.dll"
+        }
+      ],
       "SourceSize": 1059840,
       "SourceSha1": "D24887BAD738FB8160B030EB341F865A94E2CF3B",
       "SourceSha256": "BD1A62C9498AF616739D558BED8D7F6A37321D7EF470D15F76F9E110D52FF050",
@@ -2707,6 +2851,12 @@
       "SourceRole": "UserSelected",
       "SourceSet": "Koihime Enbu RyoRaiRai Version 3 (1.04.00,3.11) - APM3 Component.zip",
       "SourceEntry": "apm_x86.dll",
+      "AlternateSources": [
+        {
+          "SourceSet": "Koihime Enbu RyoRaiRai Version 3 (APM3)(1.04.00,3.11)(2021-06-14)(JPN)[Sega ALLS][TP].zip",
+          "SourceEntry": "apm_x86.dll"
+        }
+      ],
       "SourceSize": 1059840,
       "SourceSha1": "D24887BAD738FB8160B030EB341F865A94E2CF3B",
       "SourceSha256": "BD1A62C9498AF616739D558BED8D7F6A37321D7EF470D15F76F9E110D52FF050",

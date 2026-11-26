@@ -463,16 +463,22 @@ Describe 'S4: a stale settings save does not revert another window' {
         (@($kept | ForEach-Object { [System.IO.File]::ReadAllText($_.FullName) }) -join '|') | Should -BeLike '*C:\\Zip-Race-3*'
     }
 
-    It 'still saves when the file on disk can no longer be read' {
-        # Mutation: refuse to save when the file cannot be read -> Save-Config returns false and the settings are not written.
+    It 'does not replace a settings file that exists but cannot be read, and tells the player what to do' {
+        # Mutation: publish over an unreadable settings file -> the player's hand-edited paths and saved password are replaced by this window's memory.
         $windows = Start-Fix97TwoWindows
-        [System.IO.File]::WriteAllText($script:configPath, '{ this is not json')
+        $bad = '{ this is not json'
+        [System.IO.File]::WriteAllText($script:configPath, $bad)
         Resume-Fix97Window $windows.A
         Update-Fix97Window -Changes @{ ZipSourceFolder = 'C:\Zip-A' }
+        $script:TpmConfigUnreadableShown = $false
+        $script:Fix97Shown = New-Object System.Collections.Generic.List[string]
+        Mock Write-Host { [void]$script:Fix97Shown.Add([string]$Object) }
 
-        Save-Config | Should -BeTrue
+        Save-Config | Should -BeFalse
 
-        (Read-Fix97Settings).ZipSourceFolder | Should -BeExactly 'C:\Zip-A'
+        [System.IO.File]::ReadAllText($script:configPath) | Should -BeExactly $bad
+        @(Get-ChildItem -LiteralPath $TestDrive -Filter ((Split-Path -Leaf $script:configPath) + '.*') | Where-Object { $_.Name -cne (Split-Path -Leaf $script:configPath) }).Count | Should -Be 0
+        ($script:Fix97Shown -join ' ') | Should -BeLike '*left as it is*Next step*'
     }
 
     It 'does not save stale settings after a config restore' {

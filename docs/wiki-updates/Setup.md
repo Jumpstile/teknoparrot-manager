@@ -55,7 +55,7 @@ Your UserProfiles are backed up inside TeknoParrot, in `UserProfiles\FullBackup\
 
 The AutoSync record `TeknoParrot-Manager.syncstate.json` is in your games (staging) folder. The overrides file `TeknoParrot-Manager.overrides.json` is next to the script.
 
-On start-up TPM can offer `Tidy up now?` to move older files from beside the script into the folders above. Answer `N` and nothing moves and your settings stay as they were.
+On start-up TPM can offer `Tidy up now?` to move older files from beside the script into the folders above. Answer `N` and none of your files move and your settings stay as they were. TPM may still move its own start-up log into its Logs folder without asking.
 
 ### Add-on files in Assets
 
@@ -75,10 +75,7 @@ Crosshairs stay in the script folder.
 {
   "noSync":             ["ZipBaseName1", "ZipBaseName2"],
   "onlySync":           ["ZipBaseName1", "ZipBaseName2"],
-  "noPropagate":        ["ProfileCode1", "ProfileCode2"],
-  "forceArchetype":     { "ProfileCode": "ReferenceProfileCode" },
-  "familyOverride":     { "ProfileCode": "trackball" },
-  "canonicalArchetype": { "button": "ReferenceProfileCode" },
+  "subFolderMap":       { "ProfileCode": "Sub\\Folder" },
   "datFile":            "C:\\full\\path\\to\\collection.dat"
 }
 ```
@@ -87,13 +84,10 @@ Crosshairs stay in the script folder.
 |---|---|
 | `noSync` | ZIP names AutoSync always skips |
 | `onlySync` | AutoSync extracts only these ZIPs |
-| `noPropagate` | Games whose controls are never changed when copying controls |
-| `forceArchetype` | Copy controls to a game from one named reference game |
-| `familyOverride` | Set a game's control type. Values: `button`, `driving`, `lightgun`, `trackball`, `analog`, `spinner` |
-| `canonicalArchetype` | The one reference game per control type whose Input API counts as correct |
+| `subFolderMap` | For a game code, the sub-folder inside the game folder where its game file is, when Register cannot find it |
 | `datFile` | Full path to a DAT file |
 
-All keys are optional.
+All keys are optional. Older versions had other keys (`noPropagate`, `forceArchetype`, `familyOverride`, `canonicalArchetype`). If your file still has them, they are ignored.
 
 ---
 

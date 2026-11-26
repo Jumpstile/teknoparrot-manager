@@ -1,8 +1,8 @@
 # TPM Certification Suite
 
 The TPM Certification Suite is the canonical quality and release-validation framework for TeknoParrot Manager.
-Current release state: v1.0 RC9.2 is the latest published release;
-v1.0 RC9.1 is the previous published release; v1.0 RC9, RC8.4, RC8.3, RC8.2,
+Current release state: v1.0 RC9.3 is the latest published release;
+v1.0 RC9.2 is the previous published release; v1.0 RC9.1, RC9, RC8.4, RC8.3, RC8.2,
 RC8.1, RC7 and RC6 are earlier published releases;
 final Version 1.0 has not been published yet.
 
@@ -39,7 +39,7 @@ reported as its own "Behavioral Certification (Virtual Beta Tester)" gate
 in the certification scorecard, not folded anonymously into the overall
 Pester count. The gate reports a category breakdown (human behaviors,
 idempotency, recovery, environment variations) plus a count of High-TVD
-behaviors covered (see `CONSTITUTION.md`, "Tester Value Density" -- this
+behaviors covered (TVD means Tester Value Density, how much a behavior matters to a real tester -- this
 count is coverage evidence only, never converted to a percentage or used
 in the gate's pass/fail decision).
 
@@ -150,11 +150,11 @@ genuinely makes zero changes.
   to genuinely touch nothing on disk via a full before/after filesystem
   diff, not just console wording.
 
-## Test-PC Packaged Runtime UX Gate (final RC8 pre-release gate; issue #323)
+## Test-PC Packaged Runtime UX Gate (required pre-release gate; issue #323)
 
 Purpose: catch defects that appear only when TeknoParrot Manager runs as the
 real packaged script in the real test-PC environment. This is the final required
-gate before RC8 release authorization, not post-release hardening or optional polish.
+gate before release authorization, not post-release hardening or optional polish.
 
 ### 1. Package identity
 
@@ -258,7 +258,7 @@ phases, not implemented yet): broad fuzzing, long soak testing, mutation
 testing, a full property-based framework, randomized menu walking, large
 synthetic libraries, performance timing, and cross-project portability. GUI
 and browser automation remain out of scope for phase 1.7; the packaged-runtime
-UX gate above is the separate final RC8 pre-release requirement tracked in #323.
+UX gate above is the separate required pre-release gate tracked in #323.
 
 ## Certification Levels
 
@@ -269,7 +269,7 @@ Fast developer validation.
 Adds human-use simulation and real-install validation.
 
 ### Level 3 - Release Candidate Certified
-Adds adversarial, mutation, fuzz, performance, and security validation.
+Adds adversarial and security validation. The mutation, fuzz, and performance lanes are not implemented yet and are not part of this level.
 
 ### Level 4 - Gold Certified
 Full certification including long-duration, scale, and stress testing.
@@ -416,9 +416,8 @@ executable code). The extracted function text is written to a temporary
 `[scriptblock]::Create()` form was confirmed to break
 `Tests/TpmAutoUpdate.DestructivePath.Tests.ps1`'s module-scoped Pester mock
 when both files run together (the normal case for a real certification
-run), letting real GitHub API calls through and failing on rate limits. See
-`LESSONS_LEARNED.md` ("TPM Certification Suite (commit bb2a160)") for the
-full bisection. Do not revert this to `[scriptblock]::Create()` without
+run), letting real GitHub API calls through and failing on rate limits.
+Do not revert this to `[scriptblock]::Create()` without
 re-running the full `Tests/` folder to confirm the destructive-path suite
 still passes -- a single-file test run will not catch the regression.
 

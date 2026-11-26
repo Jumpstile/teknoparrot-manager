@@ -28,6 +28,7 @@ TeknoParrot Manager never downloads these fixes. They come from your own game ZI
 
 - It only patches a game when the version matches exactly. A game that has no patch in the list is left alone.
 - You are asked only for the ZIP folder of the version you have. TeknoParrot Manager reads just the named file inside the ZIP. It does not unpack the whole ZIP.
+- TeknoParrot Manager never downloads a patch file. A few patches also accept the game's own ZIP (for example the APM3 `apm.dll` for Dead or Alive 6, Otoshu DX and Rolling Gunner). The screen names every file that would work. Other separate patch ZIPs, such as the Guilty Gear APM3 files, are a separate download that TeknoParrot Manager does not provide.
 - A copy of the original files is saved first, so Undo can put them back. Undo only works for patches TeknoParrot Manager installed.
 - If your PC has two real graphics cards, you are asked once which one the game uses. Press Enter if you are not sure. Fixes made for one make of card are then skipped.
 

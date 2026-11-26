@@ -24,14 +24,14 @@ The roadmap follows the rule:
 > Build the platform foundations first. Add intelligence second. Add automation last.
 
 No item in this document authorizes product code, UI implementation, tests,
-issue creation or updates, updater work, release-package changes, or an RC8
+issue creation or updates, updater work, release-package changes, or a release-candidate
 or Version 1.0 scope change.
 
 ## TPM 1.0 completion boundary
 
 The current commitment is to complete and support the existing TPM 1.0 release
 path. v1.0 RC9.3 is the latest published release today. v1.0 RC9.2 is the
-previous published release and v1.0 RC9.1 is the one before it (RC8 was a tester build and was never published). Final Version 1.0 comes later.
+previous published release and v1.0 RC9.1 is the one before it (the earlier RC8 was a tester build and was never published). Final Version 1.0 comes later.
 Release safety,
 certification, and any remaining work required for the existing feature set
 take precedence over every phase in this document.
@@ -39,7 +39,7 @@ take precedence over every phase in this document.
 TPM 1.0 is the boundary between the current product and the post-1.0
 evolution roadmap. No post-1.0 capability should enter implementation until:
 
-1. The RC8 stabilization, validation, and release-safety path is complete.
+1. The current release-candidate stabilization, validation, and release-safety path is complete.
 2. The TPM 1.0 release decision is explicitly authorized.
 3. The current baseline is recorded so future work can be compared against a
    known release state.
@@ -47,7 +47,7 @@ evolution roadmap. No post-1.0 capability should enter implementation until:
    acceptance criteria, and review path.
 
 
-This boundary does not redefine the RC8 release criteria and does not authorize
+This boundary does not redefine the release-candidate criteria and does not authorize
 new features during the active freeze.
 
 ## Version 1.0 backlog before final release
@@ -119,7 +119,7 @@ Each boundary must eventually define its owner, inputs, outputs, dependencies,
 failure states, and verification responsibilities. Shared behavior belongs
 behind stable contracts rather than being reimplemented at each call site.
 
-Modularization is not permission to rewrite the product during the RC8-era
+Modularization is not permission to rewrite the product during the release-candidate
 completion path. The work begins only after the TPM 1.0 completion boundary and
 is staged so every intermediate state remains understandable and recoverable.
 
@@ -160,7 +160,7 @@ The plugin must not bypass those gates or silently mutate LaunchBox, Big Box,
 TeknoParrot, or TPM-owned state.
 
 This roadmap entry is planning guidance only. It does not authorize merging
-PR #245, changing RC8 or final Version 1.0 scope, changing a package or tag,
+PR #245, changing release-candidate or final Version 1.0 scope, changing a package or tag,
 publishing a release, or publishing wiki changes.
 
 ### Glanceable first
@@ -419,7 +419,7 @@ The product input recorded in issues #279, #280, and #281 points to a
 post-1.0 gap beyond ordinary single-game setup: users want safe, reproducible
 support for complex workflows, ready-made profile inputs, emulator coverage,
 and clearer evidence of what is actually ready. The following issue-backed
-work is a planning group for that gap. It is not an RC8 scope expansion.
+work is a planning group for that gap. It is not a release-candidate scope expansion.
 
 ### Workflow and environment foundations
 
@@ -468,7 +468,7 @@ work is a planning group for that gap. It is not an RC8 scope expansion.
   boundary.
 
 - All seven issues are assigned to the Post-1.0 / 1.1 milestone. None is part
-  of RC8. Any future implementation still requires an authorized design,
+  of the release candidate. Any future implementation still requires an authorized design,
   ownership contract, explicit approval policy, backup/rollback, redaction,
   effective-result verification, and fail-closed behavior.
 
@@ -549,7 +549,7 @@ This roadmap does not authorize:
 - product-code, UI implementation, schema, menu, configuration, or test changes;
 - issue creation, issue updates, or tracker churn;
 - updater expansion or updater implementation;
-- RC8 scope changes or release-package changes;
+- release-candidate scope changes or release-package changes;
 - silent writes to emulator, runtime, user, hardware, provider, or HIP-owned
   state;
 - firmware, driver, licensing, calibration, third-party device-software, or

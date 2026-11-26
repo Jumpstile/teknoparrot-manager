@@ -146,3 +146,43 @@ Describe 'LaunchBox Games Database links for TeknoParrot games' {
         Format-TpmLaunchBoxIdLinkTitle -Plan $empty | Should -Match 'already has a Games Database ID'
     }
 }
+
+Describe 'LaunchBox link and detail screens tell the truth about what was written and counted (sweep)' {
+    # Mutation: count only the three listed kinds -> "Preview: . Nothing was changed." when every entry is a non-game profile.
+    It 'words and counts profiles that are not games instead of printing an empty preview' {
+        $plan = [pscustomobject]@{ Plans = @(); Items = @([pscustomobject]@{ Status = 'NotGame'; Title = 'Firmware Updater' }, [pscustomobject]@{ Status = 'NotGame'; Title = 'Other Tool' }) }
+        $preview = Format-TpmLaunchBoxIdLinkTitle -Plan $plan -Preview
+        $preview | Should -Not -Match 'Preview: \.'
+        $preview | Should -BeExactly 'Preview: 2 profiles that are not games. Nothing was changed.'
+        $written = Format-TpmLaunchBoxIdLinkTitle -Plan $plan
+        $written | Should -Not -Match 'Linked 0'
+        $written | Should -Match 'No games were linked'
+    }
+
+    # Mutation: use the preview wording for a written result -> the saved record says "will be linked" for a link that was made.
+    It 'uses past tense in the link lines after a write and future tense in a preview' {
+        $plan = [pscustomobject]@{ Plans = @(); Items = @([pscustomobject]@{ Status = 'Certain'; Title = 'Too Spicy'; MatchName = 'Too Spicy'; TitleChanged = $false }) }
+        (@(Format-TpmLaunchBoxIdLinkLine -Plan $plan) -join ' ') | Should -Match 'will be linked to Too Spicy'
+        $written = (@(Format-TpmLaunchBoxIdLinkLine -Plan $plan -Written) -join ' ')
+        $written | Should -Match 'was linked to Too Spicy'
+        $written | Should -Not -Match 'will'
+    }
+
+    It 'passes the written wording to the saved lines of the details and link results, but not for a preview' {
+        $script:IdlSeenLines = $null
+        Mock Write-TpmLaunchBoxResult { $script:IdlSeenLines = @($Result.EnrichLines) -join ' ' }
+        $enrich = [pscustomobject]@{ Changes = @([pscustomobject]@{ Kind = 'Fields'; Title = 'Ghost Squad'; Fields = @([pscustomobject]@{ Field = 'ReleaseDate'; Value = '2004-01-01' }) }, [pscustomobject]@{ Kind = 'PlaylistNew'; Name = 'Light guns'; Count = 2 }, [pscustomobject]@{ Kind = 'SetupFlag'; Title = 'Broken'; Fields = @('Pick the game file.') }); FilledGames = 1; PlaylistsNew = 1; PlaylistsUpdated = 0; SetupFlagged = 1; SetupCleared = 0 }
+        Write-TpmLaunchBoxEnrichResult -Result ([pscustomobject]@{ Outcome = 'SAVED'; EnrichPlan = $enrich })
+        $script:IdlSeenLines | Should -Match 'Ghost Squad: filled in year 2004'
+        $script:IdlSeenLines | Should -Match 'Light guns: was made with 2 games'
+        $script:IdlSeenLines | Should -Match 'Broken: was marked Needs setup'
+        $script:IdlSeenLines | Should -Not -Match '\bwill\b'
+        Write-TpmLaunchBoxEnrichResult -Result ([pscustomobject]@{ Outcome = 'SAVED'; EnrichPlan = $enrich }) -Preview
+        $script:IdlSeenLines | Should -Match 'Ghost Squad: will fill in year 2004'
+        $link = [pscustomobject]@{ Plans = @(); Items = @([pscustomobject]@{ Status = 'Certain'; Title = 'Too Spicy'; MatchName = 'Too Spicy'; TitleChanged = $false }) }
+        Write-TpmLaunchBoxIdLinkResult -Result ([pscustomobject]@{ Outcome = 'SAVED'; LinkPlan = $link })
+        $script:IdlSeenLines | Should -Match 'was linked to Too Spicy'
+        Write-TpmLaunchBoxIdLinkResult -Result ([pscustomobject]@{ Outcome = 'SAVED'; LinkPlan = $link }) -Preview
+        $script:IdlSeenLines | Should -Match 'will be linked to Too Spicy'
+    }
+}

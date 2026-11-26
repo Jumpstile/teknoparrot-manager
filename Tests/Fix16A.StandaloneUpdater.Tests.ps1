@@ -410,6 +410,29 @@ Describe 'Get-TpmResponseContentLength' {
     }
 }
 
+Describe 'Invoke-TpmDownloadHttpClient no-progress guard before the response starts' {
+    It 'gives up on a server that accepts the connection but never answers, so the next tier runs' {
+        # Mutation: remove the bound on GetAsync -> this waits for the 30-minute client timeout instead of failing within seconds.
+        InModuleScope TpmAutoUpdate.Core -Parameters @{ Td = $TestDrive } {
+            param($Td)
+            $savedTimeout = $script:TpmDownloadNoProgressTimeoutSeconds
+            $script:TpmDownloadNoProgressTimeoutSeconds = 2
+            $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 0)
+            $listener.Start()
+            try {
+                Mock Write-TpmDownloadProgress {}
+                $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+                $watch = [System.Diagnostics.Stopwatch]::StartNew()
+                { Invoke-TpmDownloadHttpClient -DownloadUrl ('http://127.0.0.1:{0}/p.zip' -f $port) -TempPath (Join-Path $Td 'stalled.partial') -Label 'test' } |
+                    Should -Throw '*no progress*'
+                $watch.Elapsed.TotalSeconds | Should -BeLessThan 60
+            } finally {
+                $listener.Stop()
+                $script:TpmDownloadNoProgressTimeoutSeconds = $savedTimeout
+            }
+        }
+    }
+}
 Describe 'Invoke-TpmDownloadBitTransfer no-progress guard' {
     It 'uses a 120-second no-progress window by default' {
         InModuleScope TpmAutoUpdate.Core {

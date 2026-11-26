@@ -118,12 +118,12 @@ Describe 'Other flows agree with the game-path check for a path over 259 charact
 }
 
 Describe 'Main menu in a short window' {
-    It 'shows every option with its name and allows the prompt when the packed layout fits (100x9)' {
-        # Mutation: keep the old height-10 gate -> a 9-row window gets only the resize message and no option can be chosen.
-        $screen = Render-MainMenuScreen -Tier (Get-ConsoleLayoutTier -Width 100 -Height 9) -Width 100 -Height 9
+    It 'shows every option with its name and allows the prompt when the packed layout fits (100x10)' {
+        # The 18 options pack into 8 rows plus nothing dropped. A 9-row window cannot hold them, so it gets the resize message instead of a menu with missing options.
+        $screen = Render-MainMenuScreen -Tier (Get-ConsoleLayoutTier -Width 100 -Height 10) -Width 100 -Height 10
         $text = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $screen.PromptAllowed | Should -BeTrue
-        $screen.Rows.Count | Should -BeLessOrEqual 7
+        $screen.Rows.Count | Should -BeLessOrEqual 8
         foreach ($item in (Get-MainMenuItems)) { $text | Should -Match ([regex]::Escape(("{0}) {1}" -f $item.Number, $item.Label))) }
     }
     It 'still blocks the prompt and says to resize when the named options cannot fit (60x8)' {

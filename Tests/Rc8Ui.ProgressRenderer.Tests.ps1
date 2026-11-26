@@ -587,7 +587,7 @@ Describe 'Stateful renderer: redirected output prints plain periodic lines' {
         $global:TpmUiLines[$global:TpmUiLines.Count - 1] | Should -Match 'FAILED'
     }
 
-    It 'closes a canceled operation as cancelled' {
+    It 'closes a canceled operation as canceled' {
         Start-TpmProgressOperation -Title 'Backup' -Stage 'Files' -Total 4 | Out-Null
         Complete-TpmProgressOperation -State Cancelled
         $global:TpmUiLines[$global:TpmUiLines.Count - 1] | Should -Match 'canceled'

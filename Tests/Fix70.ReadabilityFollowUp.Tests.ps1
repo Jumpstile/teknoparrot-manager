@@ -328,21 +328,25 @@ Describe 'FIX70 reason codes for the PostgreSQL screens' {
             'CPS3_FILE_TRANSACTION_FAILED', 'CROSSHAIR_FILE_TRANSACTION_FAILED', 'CROSSHAIR_SOURCE_UNAVAILABLE',
             'CROSSHAIR_TARGET_UNAVAILABLE', 'DGV_FILE_TRANSACTION_FAILED', 'FFB_FILE_TRANSACTION_FAILED',
             'FFB_PROFILE_REVIEW_REQUIRED', 'NO_PLUGIN_CHANGES_NEEDED',
+            # dgVoodoo2 skip row: it carries its own plain sentence about the shared game folder.
+            'PRESET_SHARED_FOLDER',
             # ReShade undo: the engine's failure code for the file batch; the undo screen shows the UNDO_* code it is turned into.
             'RESHADE_UNDO_FAILED',
             # Bezel copy and undo (own screen sentences) and System 11 saved-file copy (own review screen sentences).
             'BEZEL_FILE_TRANSACTION_FAILED', 'BEZEL_UNDO_FAILED', 'S11_FILE_TRANSACTION_FAILED',
-            # Propagate Controls baseline row: its screen words the reason with Get-TpmBaselineReasonText.
+            # Controller layout baseline row: its screen words the reason with Get-TpmBaselineReasonText.
             'UNREADABLE',
             # Controls, profile writes and paths.
-            'CONTROLS_PROCESSED', 'PATHS_PROCESSED', 'NO_USABLE_FAMILY_REFERENCE', 'NO_ELIGIBLE_CHANGES', 'PROFILE_BACKUP_COMPLETED_NO_WRITE',
-            'PROFILE_CHANGED_BEFORE_WRITE', 'PROFILE_PLAN_CHANGED', 'PROFILE_SAVE_FAILED',
+            'PATHS_PROCESSED', 'NO_ELIGIBLE_CHANGES',
+            'PROFILE_CHANGED_BEFORE_WRITE', 'PROFILE_PLAN_CHANGED',
             'PROFILE_SCAN_INCOMPLETE',
             # Library health, registration and repair.
             'DETECTION_FAILED', 'HEALTH_CHECK_COMPLETED', 'HEALTH_COVERAGE_INCOMPLETE', 'INVENTORY_UNVERIFIED', 'NEW_REGISTRATION_TARGETS_UNVERIFIED', 'PREVIEW_NO_REGISTRATION', 'NO_LEGACY_STATE', 'UNATTENDED_SKIPPED', 'NO_MEMBERSHIP',
             'NO_REPAIR_CANDIDATE', 'REGISTRATION_EVIDENCE_UNAVAILABLE', 'REPAIR_PLAN_ONLY', 'SOURCE_INSPECTION_FAILED', 'SOURCE_MANIFEST_FAILED',
             # Generic engine results that are not raised by the PostgreSQL or Reset and Restore flows.
             'PREFLIGHT_INCOMPLETE', 'RESULT_UNAVAILABLE',
+            # PostgreSQL rebuild: the result carries its own plain summary sentence.
+            'SEVERAL_DONE',
             # Game startup files copy (the review screen prints its own plain sentences; the code stays in the log).
             'PREREQUISITE_FILE_TRANSACTION_FAILED'
         )

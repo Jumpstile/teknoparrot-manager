@@ -13,7 +13,7 @@ BeforeAll {
     if ($parseErrors.Count -gt 0) { throw 'FIX41 bootstrap could not parse the production script.' }
 
     # The functions behind the dgVoodoo2 result screen (menu 6) and the helpers they call, dot-sourced from the product's own text.
-    $wanted41 = @('Get-TpmDgVoodoo2ResultView', 'Get-TpmDgVoodoo2DetailBlocks', 'Get-TpmDgVoodoo2GameOutcomes', 'Get-TpmStepCountsLine', 'Get-TpmBackupFolderLine', 'Get-TpmDriveSkipNext', 'Format-TpmNameList', 'Join-TpmPostgresSetupNames', 'Get-TpmTransactionField', 'Format-TpmGameCount', 'Format-TpmCountNoun', 'Add-TpmDetailLine')
+    $wanted41 = @('Get-TpmDgVoodoo2ResultView', 'Get-TpmDgVoodoo2DetailBlocks', 'Get-TpmDgVoodoo2GameOutcomes', 'Get-TpmStepCountsLine', 'Get-TpmBackupFolderLine', 'Get-TpmDriveSkipNext', 'Format-TpmNameList', 'Get-TpmGameTitle', 'Get-TpmGameTitleWithCode', 'Get-TpmGameDisplayLabel', 'Split-TpmRunTogetherGameName', 'Join-TpmPostgresSetupNames', 'Get-TpmTransactionField', 'Format-TpmGameCount', 'Format-TpmCountNoun', 'Add-TpmDetailLine')
     $functions41 = @($script:fix41Ast.FindAll({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted41 -contains $node.Name

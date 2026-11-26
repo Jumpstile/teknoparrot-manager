@@ -286,7 +286,7 @@ Describe 'FIXM2 finding 17: ReShade setup when the chosen profile cannot be prep
 
 Describe 'FIXM2 finding 18: Crosshair setup while PCSX2 is still open' {
     It 'does not say nothing was deployed while the other lightgun games still get their crosshairs' {
-        # Mutation: restore "cancelled without changes ... not deployed" -> the screen contradicts the ElfLdr2 crosshairs that are installed anyway.
+        # Mutation: restore "canceled without changes ... not deployed" -> the screen contradicts the ElfLdr2 crosshairs that are installed anyway.
         $tp = New-M2Root 'cross-tp'
         $profiles = New-M2Root 'cross-profiles'
         $elf = Join-Path $tp 'ElfLdr2'

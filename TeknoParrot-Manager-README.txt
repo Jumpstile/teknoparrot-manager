@@ -1,10 +1,10 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC9.3
+  TeknoParrot Manager  |  v1.0 RC9.4
   Author: Jumpstile
 ===============================================================================
 
   Registers your extracted games with TeknoParrot so they appear and launch
-  automatically, copies your controls between games of the same type, and
+  automatically, sets up your controls from your controller layout, and
   keeps your game library organized. Windows / PowerShell 5.1+.
 
   Made for beginners, and useful if you already know TeknoParrot. It hides
@@ -12,7 +12,7 @@
   up your game settings before it changes them, and Details and the log
   show what was done. See docs\ADVANCED-USERS.md.
 
-  This guide is for v1.0 RC9.3.
+  This guide is for v1.0 RC9.4.
   Release page: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
@@ -76,9 +76,7 @@
     THE STAGING FOLDER
     REGISTRATION
     HOW FUZZY MATCHING WORKS
-    CONTROL PROPAGATION
-    PROPAGATE CONTROLS              -- mode 4
-    DEVICE SURVEY
+    CONTROLS                       -- mode 4
     FRONTEND LAUNCHER INTEGRATION
       LAUNCHBOX
       RETROBAT / BATOCERA
@@ -198,11 +196,12 @@
   Controls
   --------
 
-  - Control propagation. Set up the buttons for ONE game of each type.
-    TeknoParrot Manager copies them to the other games of that type.
+  - Controller layout. You pick your controller layout (Xbox,
+    PlayStation, Nintendo or arcade stick). TeknoParrot Manager sets up
+    your games' buttons from it.
 
-  - Device survey. You say which controls you own. It tells you which
-    game to set up first with which device.
+  - My controls. You say which controls you own. TPM uses your answers in
+    your control guides and your cabinet summary.
 
   - Controls status file. After every real run it writes a list of your
     games and their control state.
@@ -254,7 +253,8 @@
   Safety and keeping things tidy
   ------------------------------
 
-  - Preview / dry-run mode. Shows what would change, and changes nothing.
+  - Preview / dry-run mode. Shows what would change. It does not change your
+    games or profiles. It still reads your files and writes the log.
     Good for your first run.
 
   - Restore from backup (menu option 15). Puts back a saved copy. The
@@ -338,6 +338,8 @@
 
     Existing registrations are not overwritten, except a duplicate you
     choose to switch yourself (you are asked first, and a backup is made).
+    One more exception: if a saved path points into another game's folder,
+    it is fixed to the game's own folder (backup first, written to the log).
 
   - Fuzzy name matching. For platforms that share a single executable file
     (most notably NESiCAxLive, where 80+ games all use game.exe), the script
@@ -370,7 +372,7 @@
           exe name;
 
       (2) games whose exe name does not appear in any GameProfile at all
-          (e.g. pcsx2x6 ELF games, ELF-based Lindbergh titles) -- a second
+          (e.g. pcsx2x6 and Lindbergh games, which use ELF program files) -- a second
           pass looks them up in the dat by normalized folder name;
 
       (3) slightly misnamed folders -- a fuzzy scan of all dat entries finds
@@ -408,10 +410,9 @@
     (datFile key); that path is used instead of the one from setup. If an
     Eggman DAT ZIP is set up, the ZIP is used and datFile is ignored.
 
-    Profile list. The script tries to read TeknoParrot's full game list
-    online when it starts, to match dat codes that do not exactly match a
-    local game setup file. When the online list is not available, it uses
-    the setup files in your own TeknoParrot GameProfiles folder instead.
+    Profile list. The script reads the setup files in your own TeknoParrot
+    GameProfiles folder to match dat codes that do not exactly match a
+    local game setup file. It does not look anything up online.
 
   - Already-registered detection. Before flagging a shared-executable folder
     as needing an explicit registration choice, the script checks whether
@@ -447,23 +448,19 @@
   MORE DETAIL: Controls
   ---------------------
 
-  - Control propagation. Bind ONE game of each control type once. The
-    script can copy those known controls to compatible unbound games in the
-    same detected control family, matched so a wheel value can never land on
-    a gun.
+  - Controller layout. Pick your layout once. TPM sets up your games'
+    buttons from that layout. A preview shows what would change before
+    anything is saved.
 
-    Aim-mode settings (relative input, sensitivity, hide-cursor) are also
-    carried across.
-
-  - Device survey. Asks which controls you have and prints a tailored plan
-    of which game to bind with which device.
+  - My controls. Asks which controls you have and saves your answers. TPM
+    uses them in your control guides and your cabinet summary.
 
   - Controls status file. After every real run, writes a persistent
-    TeknoParrot-Manager-controls.txt listing every registered game, its
-    control family, whether controls were propagated and from which
-    reference game, and how many buttons are still set manually.
+    TeknoParrot-Manager-controls.txt listing every registered game, how
+    many buttons are bound ("N/M bound"), its status (bound, partial, or
+    no controls), and which buttons are still set manually.
 
-    This is a propagation inventory, not proof that controls have been
+    This is an inventory, not proof that controls have been
     verified. The ACTION REQUIRED summary remains authoritative for the
     separate controls-readiness state.
 
@@ -485,15 +482,17 @@
   - What it does. Installs ReShade post-processing into your game folders,
     auto-detecting the correct DLL name from each game's executable.
 
-    ReShade works with 64-bit games. 32-bit games are skipped.
+    ReShade works with both 32-bit and 64-bit games. Games that run through
+    BudgieLoader (a Linux-style game format) are skipped for now, and
+    nothing in their folder changes.
 
     During ReShade setup, TeknoParrot Manager checks for a newer version
     and offers an automatic official download and update.
 
   - The first menu. Choose 6 at the main menu. You see:
     S) Set up ReShade visual enhancements, R) Remove verified TeknoParrot
-    Manager-managed ReShade files, U) Undo ReShade changes.
-    The default is S.
+    Manager-managed ReShade files, U) Undo ReShade changes, B) Use my bezel
+    folder (bezels you already have). The default is S.
 
   - The looks. Beginner profile and restore choices are explicit and
     per-game. TeknoParrot Manager offers 17 profiles chosen for arcade play
@@ -557,8 +556,9 @@
     Browsing the gallery does not change game or profile files.
 
   - License evidence. An effect is offered only while its recorded license
-    evidence is complete and current (pinned files matched upstream, in-file
-    notices or repository license copies checked, includes resolved).
+    evidence is complete and current (the saved files match the original
+    source, license notices or license copies were checked, and any files
+    the effect pulls in were checked too).
 
     All 25 effects are held to the same standard. An effect whose evidence
     is missing, stale or incomplete is withheld, with the specific reason in
@@ -642,8 +642,8 @@
   The choice line under the list reads:
 
     Choose: [1-17] Select profile  [U] Use selected profile
-            [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back
-            [D] Details
+            [S] Custom preset  [N] Skip ReShade -- no changes
+            [R] Reopen preview  [B] Back  [D] Details
 
   - The terminal always works. The terminal remains usable if the gallery
     is behind another window, closed, unavailable, or fails.
@@ -694,7 +694,10 @@
     Select.
 
     Adopted installations are counted separately from ordinary installs.
-    Onboarding pauses for review before dgVoodoo2.
+    Onboarding pauses for review before dgVoodoo2. Its ReShade result is a
+    short summary: games selected, set up, failed and skipped, with the
+    skipped games grouped by one plain reason each. Press D for the full
+    game lists. A failure warning appears only if a game really failed.
 
   - Games that already have ReShade. Protected existing files stay
     unchanged unless you explicitly choose to replace them and confirm.
@@ -747,10 +750,11 @@
     Only verified TeknoParrot Manager-managed files are removed. Protected
     bundled, preinstalled, changed, and ambiguous files are preserved.
 
-  - Display notes. Multi-monitor suitability is read-only and advisory,
-    uses caller-supplied evidence, treats duplicate target IDs as ambiguous,
-    and does not separately label EXTENDED arrangements or acquire Windows
-    display topology itself.
+  - Display notes. Multi-monitor advice is read-only: it never changes
+    anything. It uses the monitor details you give it, treats two monitors
+    with the same ID as unclear, and does not tell an extended desktop
+    (several screens joined into one big screen) from other layouts or look
+    up your Windows screen layout by itself.
 
 
   MORE DETAIL: Older games and game fixes
@@ -943,8 +947,9 @@
     The end-of-run menu is explicit: P previews without changing
     LaunchBox, A adds missing games, G fills in details and playlists, V
     groups regions and versions, S keeps LaunchBox in step with
-    TeknoParrot, L links games for art and details, F creates a manual
-    import/reference file, and B skips the optional LaunchBox step.
+    TeknoParrot, L links games for art and details, C fills in players and
+    controllers for Big Box (backed up), F creates a manual import/reference
+    file, and B skips the optional LaunchBox step.
 
     A manual-import reference file remains available if you prefer not to
     let the script touch LaunchBox's files directly.
@@ -967,7 +972,7 @@
       -- which games would extract,
       -- which would register and to which profile,
       -- which broken paths would be repaired,
-      -- which controls would propagate.
+      -- which controls would be set up.
 
     A preview does not apply game/profile changes. Scans and logging still
     occur.
@@ -1007,7 +1012,7 @@
     saved settings.
 
     In this release it runs only the read-only Library Health Check. It
-    does not extract games, register them, copy controls or download
+    does not extract games, register them, set up controls or download
     thumbnails, so it cannot run AutoSync overnight.
 
     It needs the saved setting "UnattendedMode": "HealthCheck". See the
@@ -1016,17 +1021,15 @@
     At start-up it prints "TeknoParrot Manager found your saved settings."
     and "[Unattended] Using saved settings." It asks no question.
 
-  - Per-game overrides. A JSON file lets you exclude games from sync or
-    propagation, whitelist specific games for extraction, pin a game to a
-    specific reference game for control copying, or override the
-    auto-detected control family for mis-classified titles.
+  - Per-game overrides. A JSON file lets you exclude games from sync, or
+    whitelist specific games for extraction.
 
   - Action summary. At the end of every run the script prints a clear list
     of everything that needs your attention in TeknoParrotUI.
 
     It includes which ambiguous games received an explicit candidate
-    choice, which paths to fix, and which control types still need to be
-    set up.
+    choice, which paths to fix, and which games still need controls set
+    up.
 
   - Check for Updates. Manually checks the latest GitHub release against
     the version you're running. Nothing is downloaded or changed without
@@ -1095,25 +1098,15 @@
 
   Dat file              An optional list kept by the community (from the
                         Eggmansworld TeknoParrot collection). It links
-                        exact ZIP names to the right profile code. It is
-                        used instead of fuzzy matching for confusing
-                        games, because it is exact, not a best guess.
+                        ZIP names to the right profile code. Most matches
+                        are exact, but a slightly misnamed folder can
+                        match by similarity and register by itself. The
+                        log says dat/exact or dat/fuzzy for each match.
 
-  Control propagation   A shortcut so you do not set up every game's
-                        controls by hand. Set up ONE game of each type in
-                        TeknoParrot's own window. The script copies those
-                        controls to every other game of that type that
-                        has none yet. See CONTROL PROPAGATION below.
-
-  Archetype / reference game
-                        A game that already has enough buttons set up (by
-                        you, in TeknoParrot's own window). Its settings
-                        are copied to other games of the same family. Its
-                        button settings are kept.
-
-  Family                Which kind of controls a game uses: button,
-                        driving, lightgun, trackball or analog. It is
-                        found automatically for each game.
+  Controller layout     The kind of controller you use: Xbox, PlayStation,
+                        Nintendo or arcade stick. You pick it in the
+                        Controls menu (mode 4). The script sets up your
+                        games' buttons from it. See CONTROLS below.
 
   ACTION REQUIRED       The summary at the end of a run. It lists what you
                         still need to do in TeknoParrotUI itself. See
@@ -1139,15 +1132,9 @@
   MORE DETAIL: Glossary
   ---------------------
 
-  Archetype / reference game. An explicit canonical reference can correct
-  InputAPI. The button bindings of the archetype are preserved.
-
-  Family. It can be overridden per game in
-  TeknoParrot-Manager.overrides.json if this script guesses wrong.
-
   Overrides (TeknoParrot-Manager.overrides.json). You can skip syncing one
-  game, pin a game to a specific archetype, override its detected family,
-  and make a few other per-game exceptions.
+  game, whitelist games for extraction, and make a few other per-game
+  exceptions.
 
   HasTwoExecutables. It is handled automatically via GamePath2 above, which
   holds the second companion executable.
@@ -1293,7 +1280,7 @@
 
   When recovery metadata is available, the status action line names the
   concrete Retry and Stop choices and their remediation instead of showing
-  acknowledgement alone.
+  acknowledgment alone.
 
 
 -------------------------------------------------------------------------------
@@ -1380,17 +1367,16 @@
 
        See LAUNCHBOX below.
 
-  4) Propagate Controls
-       Copies your current TeknoParrot controls from your reference games
-       to other games of the same type. It also sets up games with your
-       controller layout, checks which games have all their controls, and
-       learns your arcade buttons (choices 1 to 5 on that screen).
+  4) Controls
+       Sets up your games with your controller layout (Xbox, PlayStation,
+       Nintendo or arcade stick), lets you choose or change that layout,
+       checks which games have all their controls, and learns your arcade
+       buttons (choices 1 to 4 on that screen).
 
-       This step never registers or extracts games. It is the same step
-       offered at the end of AutoSync and Register. You can run it any time,
-       without going through extraction or registration first.
+       This step never registers or extracts games. You can run it any
+       time, without going through extraction or registration first.
 
-       See CONTROL PROPAGATION below.
+       See CONTROLS below.
 
   GAME ENHANCEMENTS (optional -- not every game needs them)
   ---------------------------------------------------------
@@ -1410,17 +1396,19 @@
        filters on top of a game, such as a sharper image, CRT-style
        scanlines and screen borders.
 
-       ReShade works with 64-bit games. 32-bit games are skipped. You will
-       see three choices: S) Set up ReShade visual
+       ReShade works with both 32-bit and 64-bit games. Games that run
+       through BudgieLoader are skipped for now. You will
+       see four choices: S) Set up ReShade visual
        enhancements, R) Remove verified TeknoParrot Manager-managed
-       ReShade files, and U) Undo ReShade changes. Plain Enter picks S.
+       ReShade files, U) Undo ReShade changes, and B) Use my bezel folder
+       (bezels you already have). Plain Enter picks S.
 
        See RESHADE VISUAL ENHANCEMENTS below. It returns to the menu
        when done.
 
        What you see when ReShade setup finishes. The result screen says
-       "Done:" with the look and the number of games. It also says "To
-       turn the effect on or off, start a game and press the Home key."
+       "Done:" with the look and the number of games. It also says "To open
+       the ReShade effects menu, start a game and press the Home key."
        If some games were left alone, you may press A, S, B or D:
 
          A   Replace the old ReShade files of those games with
@@ -1452,9 +1440,8 @@
 
          1. At the main menu, type 6.
          2. Type S and choose the new look. Then type U to use it.
-         3. Type Y at "Use the selected ReShade profile?".
-         4. Choose A) All registered games.
-         5. Type Y at the question "Apply ... to ... games?".
+         3. Choose A) All registered games.
+         4. Type Y at the question "Apply ... to ... games?".
 
        Games that TeknoParrot Manager set up earlier with a different look
        are listed. [A] changes them to the new look. [K] keeps their
@@ -1464,9 +1451,8 @@
 
          1. At the main menu, type 6.
          2. Type S and choose a look. Then type U to use it.
-         3. Type Y at "Use the selected ReShade profile?".
-         4. Choose L) Browse and select specific games.
-         5. Type that game's number, then type D (done).
+         3. Choose L) Browse and select specific games.
+         4. Type that game's number, then type D (done).
 
        Undoing your ReShade look:
 
@@ -1520,7 +1506,8 @@
   -------------------------------------------
 
   Mode 6, ReShade. It installs ReShade post-processing. ReShade works with
-  64-bit games. 32-bit games are skipped. Every ReShade.ini it writes turns
+  both 32-bit and 64-bit games. Games that run through BudgieLoader (a
+  Linux-style game format) are skipped for now. Every ReShade.ini it writes turns
   off the welcome window, the counters and the on-screen messages. A short
   ReShade version banner may still show at game start.
 
@@ -1581,7 +1568,10 @@
        changed. If a game's database already exists, setup leaves it as it
        is. Only two choices that you confirm yourself replace database
        content: restoring a saved backup (mode 15) and Reinitialize ([I]
-       on the backup-failure screen).
+       on the backup-failure screen). One more case needs no choice from
+       you: if its own note says an earlier setup stopped while still
+       building a database, setup removes that unfinished copy and builds
+       it again.
 
        When Windows permission is needed, TeknoParrot Manager first waits
        for you to press Enter, so you can read what it will ask for. Then
@@ -1598,6 +1588,10 @@
 
          Next: open TeknoParrot and start any game. Every game database was
          checked and is ready.
+
+       You see that line only when every game is ready. For a "Profile
+       ready" game or a game that could not be made ready, a different
+       "Next:" line tells you what to do instead.
 
        Next: type D and press Enter for details, or just press
        Enter to go back. The prompt reads "Press Enter to return to menu,
@@ -1638,7 +1632,7 @@
 
   [C] returns to AutoSync with only the broken profile codes selected; it
   cannot broaden into an all-games extraction. [M] Let me pick the correct
-  executable or folder manually requires you to select the exact executable
+  executable manually requires you to select the exact executable
   and never guesses. A complete HealthCheck backup is made before confirmed
   saves.
 
@@ -1679,6 +1673,9 @@
        Finds fixes that some game versions need. It only works for exact
        game versions it knows. You supply the patch ZIP files yourself,
        from your own computer.
+       TeknoParrot Manager never downloads a patch file. If one is not
+       found, the screen names the exact file that would work. For the
+       APM3 patches of several ALLS games, the game's own ZIP works too.
 
        TeknoParrot Manager checks the game, saves a backup copy, applies
        the files, and checks them again. A checked patch does not prove
@@ -1694,7 +1691,9 @@
        Both ways need the exact game version, your own local ZIP, a
        closed game, and everything the screen lists as required. The
        backup lets you undo the change. A game that already has the patch
-       is skipped. Other files already there are never overwritten.
+       is skipped. Other files already there are not overwritten, with one
+       exception: a recipe that replaces a file works only when that file
+       matches the exact known original, and the backup lets you undo it.
 
        At the start you choose A (your registered games), M (one game
        you pick), U (undo patches that TeknoParrot Manager installed) or
@@ -1703,7 +1702,7 @@
        result share one line. Press D at the last question for the
        technical details.
 
-  MORE DETAIL: Required game patches (mode 13)
+  MORE DETAIL: REQUIRED GAME PATCHES (mode 13)
   --------------------------------------------
 
   Both modes require an exact executable/build, a user-supplied local ZIP
@@ -1831,7 +1830,7 @@
              paths it proposes. It asks you again before it changes
              anything. The folder with your games is searched first.
 
-         [M] Let me pick the correct executable or folder manually
+         [M] Let me pick the correct executable manually
              You choose the exact game program yourself. Nothing is
              guessed.
 
@@ -1853,7 +1852,9 @@
 
        It also checks every game database. A database that is missing,
        cannot be opened with the game's own settings, or has no tables
-       shows as "Problem - <game>" under D. Next: run Postgres setup
+       shows as "Problem - <game>" under D. A game that has no database yet
+       but makes its own on first start ("Profile ready") is not a problem.
+       Next: run Postgres setup
        (menu 12). Games set to Internal storage are skipped here. They
        show "Game database: OK" with a note to start each game once so it
        makes its own database.
@@ -1865,7 +1866,7 @@
          - emulators missing from your TeknoParrot folder
          - games that need you to pick the game file by hand (the profile
            names no game file and there is no setup file)
-         - System 11 games with no saved files yet
+         - TeknoS11 arcade games with no saved files yet
 
   15) Restore from backup
        Puts back a saved copy. The menu calls this "Restore backup". You
@@ -1928,7 +1929,7 @@
          B) Back
 
        Next (choice 4): for a single game, you confirm with YES. For all
-       games, you type YES and then ALL. Nothing changes before you confirm.
+       games, you type YES. Nothing changes before you confirm.
 
        Choice 5 (Rebuild one game from its ZIP) is for a game that is
        broken for no clear reason. It puts the game folder back to
@@ -1940,6 +1941,7 @@
          1) Rebuild one game from its ZIP
          2) Put an old folder back (undo a rebuild)
          3) Delete an old folder I no longer need
+         4) Rebuild several games from their ZIPs
          B) Back
 
        Choice 1: pick a game, read the preview (files, size, where your
@@ -1955,6 +1957,16 @@
        Choice 2 puts the old folder back. Choice 3 deletes an old folder
        for good, after you type YES. Old folders use disk space until you
        delete them.
+       Choice 4: pick several games at once (type numbers like 1,3,6, a
+       range like 1-8, A for all, or B for none). Each game is checked
+       first. A game that is running, has no ZIP, or has more than one
+       ZIP that fits is skipped, with the reason shown (use choice 1 to
+       pick the ZIP for that one). You see what will be rebuilt and what
+       will be skipped, then type YES and then the word REBUILD. Any
+       other answer cancels and nothing is changed. Each game is rebuilt
+       on its own like choice 1, so one failure does not stop the
+       others. Every old folder is kept, so choice 2 still works. If you
+       press Ctrl+C, it tells you what was done so far.
 
 
   APPLICATION
@@ -2126,6 +2138,11 @@
   AutoSync unpacks your games into a staging folder. Your original ZIP files
   stay where they are, in their source folders.
 
+  TeknoParrot Manager never deletes your ZIP files. Keep them for now:
+  resetting a game folder, or unpacking a game again, needs the original
+  ZIP. Once your games work and you have your own backup, you can archive
+  or delete the ZIP files yourself.
+
   On first setup, TeknoParrot Manager picks a safe default for you. It
   builds it from the TeknoParrot location you set, for example
   <same volume>\TeknoParrot Games.
@@ -2209,7 +2226,8 @@
   screen.
 
   After new games are registered, you are asked once which country they
-  should start in. Type 0 to leave them as they are. See REGION SETUP.
+  should start in. Type 0 to leave them as they are. Type L and a number
+  (example: L1) to see the games in a country first. See REGION SETUP.
 
     Registered          A matching game setup file was found. Your game now
                         appears in TeknoParrot.
@@ -2230,8 +2248,10 @@
                         itself.
 
     Already set         This game already has a setup file. The script
-                        leaves it exactly as it is. It never overwrites
-                        your existing work.
+                        leaves it as it is, and never overwrites your
+                        existing work. The one exception is a saved path
+                        that points into another game's folder: it is
+                        fixed after a backup.
 
     Register manually   The .exe name is shared by many games. The script
                         shows a short list of checked choices and you pick
@@ -2266,7 +2286,8 @@
   EVERY TEKNOPARROT GAME
 
   TPM is checked against every game setup file in TeknoParrot
-  1.0.0.2334 (2,544 of them), and against the Eggman game list and guide. docs\GAME-SUPPORT.md lists every game
+  1.0.0.2334 (2,544 of them), and against the Eggman game list (a community
+  list of game names) and guide. docs\GAME-SUPPORT.md lists every game
   and what TPM does for it. These cases work with no extra steps:
 
     Two versions of a game   Each version is registered. If TeknoParrot has
@@ -2290,14 +2311,16 @@
 
   Games that use more than one ZIP. A game set has a child game that uses
   a parent ZIP. A child game is never registered only because its parent
-  ZIP is present, unless the Eggman list names that parent ZIP. A System 11 game that names two ZIPs (child and parent)
+  ZIP is present, unless the Eggman list names that parent ZIP. A
+  An arcade game that uses the TeknoS11 loader (System 10, System 11, System 12, Sony ZN, Konami 573, Taito G-NET and similar boards) that names two ZIPs (child and parent)
   is registered only when both are in the same folder. If a game needs a
   disc image (*.chd), it is chosen for you when there is exactly one. With
   several, TeknoParrot Manager never guesses.
 
-  System 11 saved files (optional). After registration, if a System 11
-  game has no saved files yet, you see "OPTIONAL: System 11 saved game
-  files". If you have your own saved-files set (a ZIP in your collection
+  Saved game files for TeknoS11 arcade games (optional). After
+  registration, if one of these games has no saved files yet, you see
+  "OPTIONAL: Saved game files for TeknoS11 arcade games". If you
+  have your own saved-files set (a ZIP in your collection
   folders, or a folder or ZIP you pick), TeknoParrot Manager copies the
   files for your games into TeknoParrotUi's TeknoS11\state\<game>\cabinet-1
   folder. It only adds files and never replaces one. It tells you which of
@@ -2308,8 +2331,8 @@
   MORE DETAIL: REGISTRATION
   -------------------------
 
-    Registered (fuzzy): the profile code and the similarity score are shown
-    in Cyan so you can spot-check the match.
+    Registered (fuzzy): the full game title and the similarity score are
+    shown in Cyan so you can spot-check the match.
 
     Registered (dat): the dat's authoritative profile code is used directly.
     If the dat includes an Executable path, that exact binary is used.
@@ -2328,8 +2351,9 @@
     SonicDashExtreme, HydroThunder. The best available executable in the
     folder is selected automatically.
 
-    Already set: a profile for this game already exists and is left exactly
-    as it is.
+    Already set: a profile for this game already exists and is left as it
+    is. If its saved path points into another game's folder, it is fixed
+    to the game's own folder after a backup.
 
     Register manually: the executable is shared. TeknoParrot Manager
     presents validated candidates for an explicit choice. Pressing Enter
@@ -2388,10 +2412,6 @@
 
     3. Do not delete the XML file just to try again.
 
-  If the script gets the control type wrong (for example, a trackball game
-  treated as a lightgun), add a familyOverride entry in
-  TeknoParrot-Manager.overrides.json.
-
   To see how the score is worked out, and what is removed from folder names
   before comparing, see APPENDIX: FUZZY MATCHING DETAILS.
 
@@ -2407,215 +2427,101 @@
     the correct official profile and executable. Use a validated candidate
     when offered. Do not delete XML merely to retry.
 
-    forceArchetype chooses a control reference; it does not change
-    registration matching.
-
 
 -------------------------------------------------------------------------------
-  CONTROL PROPAGATION
+  CONTROLS                          -- mode 4
 -------------------------------------------------------------------------------
 
   Setting up the controls for every game by hand takes a very long time.
-  Control propagation saves you that work.
+  Menu 4 saves you that work. You pick a controller layout (Xbox,
+  PlayStation, Nintendo or arcade stick). TPM sets up each game's buttons
+  from that layout.
 
-  You set up the controls for ONE game of each control type. The script then
-  copies those controls to your other games of the same type.
+  "Binding" means telling TeknoParrot which button or stick does what.
 
-  "Control type" means the kind of game: lightgun, driving, fighting,
-  trackball, and so on. "Binding" means telling TeknoParrot which button or
-  stick does what.
+  This screen is titled "Controls". It says "This sets up your games with
+  your controller layout and checks which games have all their controls."
+  and "This screen never registers or unpacks games." You can run it any
+  time, without going through extraction or registration first.
+
+  The choices (the prompt is "Choose 1, 2, 3, 4 or 5"):
+
+    1  Set up my games with my controller layout (Xbox, PlayStation,
+       Nintendo or arcade stick).
+    2  Choose or change my controller layout. If a pad or arcade stick is
+       connected and none is saved yet, TPM selects that layout for you.
+    3  Check which games have all their controls. This changes nothing.
+    4  My controls: learn my buttons, print a control guide, tell TPM a
+       game worked.
+    5  Change one control by hand (any game, any button).
+
+  Press Enter to take choice 3, the check. It changes nothing.
+
+  CHANGE A CONTROL BY HAND (Controls, choice 5)
+
+    Pick a game, then one control from the list (each line shows what it is
+    set to now), then choose: X = pick a pad button from a list, C = clear
+    the pad button, K = press the key your keyboard or arcade encoder sends,
+    B or Esc = go back and change nothing.
+
+    TPM makes a saved copy of your game settings first, and reads the file
+    back afterwards. TPM keeps what you set: setting up games again and
+    Learn my arcade buttons skip those controls and say "Kept your own
+    setting for N controls." T puts TPM's choice back. The first line of the
+    list, Input type, keeps a game on its own input type. Triggers and
+    sticks are not changed here; use TeknoParrotUI.
 
   How to use it:
 
-    1. Open TeknoParrotUi.exe.
+    1. Choose main menu option 4 (Controls), then choice 2 if you have
+       not picked a controller layout yet.
 
-    2. Pick one game of a control type you use. Bind everything in that
-       game: buttons, axes (steering or aiming), Test, Service, Coin and
-       Start.
-       Next: do the same for one game of each other control type you use.
+    2. Choose choice 1. You will see a preview of what would change.
+       Nothing changes until you approve it.
 
-    3. Run this script again.
-       You will see: after registration, the script copies the controls.
-       If it has not asked before, it first asks about your devices.
+    3. Start ONE updated game and test it before you trust the rest.
+       Next: if anything is wrong, restore from the saved copy of your
+       game settings (main menu option 15, Restore backup).
 
-    4. Read the line about your example games.
-       You will see: "You have N games with their controls set up." Then a
-       preview lists what would change. It ends with "Preview only. Nothing
-       was saved." If a copied setting looks wrong, a yellow "Check first"
-       line also appears.
+  AutoSync and Register only use the same layout. Their last step,
+  Controller Layout, sets up your games with the layout you chose. Preview
+  shows only what would change. An unattended AutoSync run applies your
+  saved layout after a backup, or skips if there is none. The -Unattended
+  switch alone runs only the read-only Library Health Check.
 
-       Next: press D to see each reference game, with the aim settings the
-       script will copy: relative input, sensitivity, hide-cursor and "Use
-       Keyboard/Button For Axis". Check these against your real hardware.
-       They apply to every other game of that type.
-
-    5. Answer the question "Copy controls from N games to your other games
-       of the same type? (Y/N, D = details)".
-       Answer Y if the settings match your hardware.
-       Answer N if they do not. Nothing changes. Then fix the reference
-       game in TeknoParrotUI and run the script again.
-
-       After a copy, the program asks: "Undo these changes and put your
-       game settings back as they were? (Y/N)". Answer Y to put everything
-       back at once. You can also undo later with main menu option 15
-       (Restore backup).
-
-    6. Start ONE updated game and test it before you trust the rest.
-       Next: if anything is wrong, restore from the saved copy made at the
-       start of the run (main menu option 15, Restore backup).
-
-    If a game type has no usable example, its games are skipped.
-    The registration screen ends with "Registration run finished" (not
-    "Done"). That means the run ended, not that every game's controls work.
-    When games are skipped because no game of their type has your controls
-    yet, Details names one game of each type to set up first in
-    TeknoParrotUI, then run Propagate Controls (menu 4). Choosing a device
-    in the binding plan does not set up a game.
-    The summary counts the skips. Details and the log list the games.
-    Add one game of this family with your own controls, then run this again.
-    If all games are skipped, the screen says no game was changed.
-    A failed save still ends as an error.
-
-  Good games to start with:
-
-    Fighting / buttons    Street Fighter III, BlazBlue, Tekken 7,
-                          Dead or Alive 5
-
-    Driving               Daytona Championship USA, Initial D,
-                          OutRun 2 SP, F-Zero AX
-
-    Lightgun              House of the Dead 4, Aliens Extermination,
-                          Point Blank
-
-    Trackball             Golden Tee Live, Silver Strike Bowling,
-                          Target Toss Pro
-
-  Example for step 5: you bound a driving game with a real wheel. Then
-  "Use Keyboard/Button For Axis" should read False. If it reads True,
-  answer N, fix the reference game in TeknoParrotUI, then run the script
-  again.
-
-  Mixed devices in one game are fine. For example, one game can use an
-  Xbox stick to aim and arcade buttons to fire. Mixed setups copy across
-  as you set them up.
-
-  What is safe:
-
-    - Button settings in your reference game are kept.
-    - Buttons that are already set up in other games are kept.
-    - Everything is reported, so you can see exactly what changed.
-
-  Check first lines:
-
-    The script shows a yellow "Check first" line for a few known mistakes.
-    Press D to see a Warning line for each reference game. They usually
-    mean the reference game was set up with a stand-in device instead of
-    its real hardware.
-
-    - Driving: "Use Keyboard/Button For Axis" = True. The wheel and pedals
-      would act like keyboard keys instead of smooth controls.
-
-    - Lightgun: "Use Relative Input" = True. The gun would follow mouse
-      movement instead of pointing at an exact spot on the screen.
-
-    - Any sensitivity set to 0. This switches off aiming or axis response
-      in every game that gets the copy.
-
-    A Check first line does not stop the copy. It is a hint to double-check
-    the reference game in TeknoParrotUI before you answer Y.
+  Everything is reported, so you can see exactly what changed.
 
   What stays manual (and is reported):
 
-    - Game-specific controls that do not exist in the game you bound.
-    - Any game whose control type has no reference game yet. These appear
-      under "CONTROLS SKIPPED BY DESIGN" in the ACTION REQUIRED section at
-      the end of the run. Each one tells you to add one game of that control
-      type with your own controls, then run again.
+    - Game-specific controls that the layout does not cover. Set them up
+      in TeknoParrotUI.
+
+  "Registration run finished" (not "Done") means the run ended, not that
+  every game's controls work.
 
 
-  MORE DETAIL: CONTROL PROPAGATION
-  --------------------------------
+  MY CONTROLS (Controls, choice 4)
 
-    How it matches: each control is matched by function (its input mapping
-    and analog type), so a steering value is never copied onto a gun axis.
+    Nothing here changes a TeknoParrot game file. The sub-menu choices are
+    1 = Tell TPM which controls I have, 2 = Learn my arcade buttons,
+    3 = Show or print the controls of one game, 4 = Tell TPM how a game
+    played, 5 = Show or print my cabinet controls, 6 = Undo my last save
+    (only when a saved copy exists), and B = Back.
 
-    The script copies each control's device exactly as you bound it, and
-    carries aim-mode settings (relative input, sensitivity, hide-cursor)
-    between same-type games so a copied game feels identical to the one
-    you set up.
-
-    Mixed devices: TeknoParrot stores each control's device individually,
-    so a single game can use, for example, an Xbox stick to aim and arcade
-    buttons to fire. Mixed setups copy across intact.
-
-    What is safe, in technical terms:
-
-      - Reference-game button bindings are preserved. An explicit canonical
-        reference can correct the InputAPI setting without rebinding
-        buttons.
-
-      - Already-bound buttons are preserved; InputAPI may still be
-        corrected.
-
-    Warning patterns, in technical terms:
-
-      - Driving: "Use Keyboard/Button For Axis" = True (wheel/pedal axes
-        would be read as digital keyboard input, not analog).
-
-      - Lightgun: "Use Relative Input" = True (gun aim would be read as
-        relative mouse movement, not absolute screen position).
-
-      - Any sensitivity setting carried as 0 (silently disables
-        aiming/axis response on every propagated game).
-
-
--------------------------------------------------------------------------------
-  PROPAGATE CONTROLS                -- mode 4
--------------------------------------------------------------------------------
-
-  Mode 4 does only the copy step from CONTROL PROPAGATION above.
-
-  It uses the same set of games, the same question and hardware-check
-  warnings, the same saved copy before any change, and the same report.
-
-  It skips AutoSync and Register. It does not extract or register any games.
-
-  Unlike the copy step at the end of AutoSync and Register, mode 4 shows a
-  preview first and offers a one-step undo after it saves.
-
-  Use it when your library is already registered and you have just set up a
-  new or updated reference game in TeknoParrotUi.exe. You can copy the
-  controls right away. You do not have to wait for a full AutoSync or
-  Register run.
-
-
--------------------------------------------------------------------------------
-  DEVICE SURVEY
--------------------------------------------------------------------------------
-
-  On a first run (or when you ask), the script asks which controls you
-  have: Xbox pad, arcade stick, trackball, spinner, wheel, lightgun, or
-  keyboard.
-
-  If a controller is connected, it looks for it first. When it finds an
-  Xbox-style controller, it asks one question ("Use the Xbox controller
-  for all games?") instead of seven. A match that is only a guess from a
-  device name is shown as "may be connected" and never answers for you.
-
-  It then prints a plan of which game to bind with which device. It
-  changes no game file.
-
-  Your answers are saved in TPM's own settings folder
-  (State\Controls), so you are not asked the same thing twice. Next time
-  it shows your answers and asks one question ("Keep these answers?"). It
-  asks again if a controller turns up that you said you do not have. A
-  saved file that cannot be read is set aside, never overwritten, and the
-  last good copy is kept next to the new one as a .bak file.
-
-  MY CONTROLS (Propagate Controls, choice 5)
-
-    Nothing here changes a TeknoParrot game file.
-
+    - Tell TPM which controls I have. TPM asks which controls you have:
+      gamepad, arcade stick, trackball, spinner, wheel, lightgun, or
+      keyboard. If a controller is connected, it looks for it first. When
+      it finds a gamepad, it asks one question ("Use this
+      controller for all games?") instead of seven. A match that is
+      only a guess from a device name is shown as "may be connected" and
+      never answers for you. Your answers are saved in TPM's own settings
+      folder (State\Controls), so you are not asked the same thing twice.
+      Next time it shows your answers and asks one question ("Keep these
+      answers?"). It asks again if a controller turns up that you said you
+      do not have. A saved file that cannot be read is set aside, never
+      overwritten, and the last good copy is kept next to the new one as a
+      .bak file. It ends with the line "TPM uses your answers in your
+      control guides and your cabinet summary."
     - Learn my arcade buttons. You say how many players and buttons your
       cabinet has. First TPM waits 2 seconds with your hands off
       the cabinet. If a key shows up on its own, a button may be stuck,
@@ -2633,8 +2539,8 @@
       notes which arcade encoders it can see right now. Other encoder
       brands' own setup files are not read: no maker writes down which
       pin is which button. Pressing the buttons works for any encoder.
-    - Is it the same controller? My controls and the Device Survey say,
-      in one line, whether TPM sees the same arcade encoders as
+    - Is it the same controller? My controls says, in one line,
+      whether TPM sees the same arcade encoders as
       when you taught it your keys, whether one was added or removed, or
       whether it could not check. It is only a hint. It never changes a
       saved key or answer and never marks a game Verified. If you
@@ -2673,8 +2579,8 @@
       ("Your cabinet has no button 3" is shown on that row), and which
       device the game needs (trackball, spinner, wheel and pedals, light
       gun) that you said you do not have. If you have no wheel but have
-      an Xbox controller, or no light gun but have a trackball or an
-      Xbox controller, it says that can stand in. If you never told
+      a gamepad, or no light gun but have a trackball or an
+      gamepad, it says that can stand in. If you never told
       TPM, it says it does not know instead of guessing. This only
       compares: it sets up nothing and changes no game file. The same
       lines go to the log.
@@ -2693,7 +2599,7 @@
   If you have no lightgun, you can aim gun games in two ways:
 
     - With the Windows mouse cursor (a mouse or trackball, absolute aim).
-    - With the Xbox right stick.
+    - With the right stick of a gamepad.
 
 
 -------------------------------------------------------------------------------
@@ -2745,14 +2651,17 @@
         example "Too Spicy", not "2Spicy"), plus release year and
         developer. Firmware updaters, drive checkers and test boards are
         never added. A game is linked by itself only when TeknoParrot
-        Manager is sure; if not, you choose from the possible games. The
-        platform it makes is called TeknoParrot and is looked up as
-        Arcade.
+        Manager is sure; if not, you choose from the possible games. You
+        choose the platform: Arcade, TeknoParrot, both, or a custom name.
+        Games are looked up as Arcade.
 
     G   Fills in game details and makes playlists, after a backup. It
         fills in the release year and developer where LaunchBox has
         nothing yet. It makes playlists for each arcade hardware family,
-        plus "Light gun games" and "Driving games". A game that cannot
+        plus "Light gun games" and "Driving games". LaunchBox shows them
+        under TeknoParrot. A playlist you already have with the same
+        name, even one an older version made, is left as it is and no
+        second one is made. A game that cannot
         start yet (game file, firmware or BepInEx missing) gets a plain
         "Needs setup" note and goes into a "Needs setup" playlist. Both
         go away by themselves when the problem is fixed. Your own
@@ -2853,9 +2762,9 @@
   replace them. Nothing is downloaded. U removes the pictures that the
   last import added.
 
-  Lighting for your arcade buttons (LEDBlinky, optional). If you use
+  Lighting for your cabinet (LEDBlinky, optional). If you use
   LEDBlinky, a full run (not "New game only") ends with "Optional:
-  lighting for your arcade buttons." TPM looks for LEDBlinky on
+  lighting for your cabinet." TPM looks for LEDBlinky on
   your drives and in Program Files, or asks where it is and remembers
   the folder. You see:
 
@@ -2870,6 +2779,14 @@
   A game gets only the controls it uses that your cabinet has. You see a
   preview first, a saved copy is made, and you can undo it. Only entries
   TPM added are ever removed.
+
+  Every cabinet is different, so TPM never guesses which controls have
+  a light. It uses the lights it finds in your own LEDBlinky setup, for
+  buttons, joysticks, trackballs and anything else alike. A control with
+  no light found is left out and listed as "No light found". If your
+  LEDBlinky map is missing and a game has a control that is not a plain
+  button, TPM asks once, for example "Does your joystick light up?", and
+  remembers your answer. Press M, then K, to change an answer later.
 
   If anything looks wrong afterward:
 
@@ -2888,7 +2805,7 @@
        You will see: "Exported : N game(s)", then "File :" with a path.
        Then you will see "HOW TO IMPORT INTO LAUNCHBOX" with the wizard
        steps.
-       Next: close LaunchBox, then follow those steps.
+       Next: close LaunchBox, follow those steps, then open LaunchBox again.
 
   The file is called TeknoParrot-LaunchBox-Import.xml. It is saved in the
   TeknoParrotManager\Reports folder inside your TeknoParrot folder.
@@ -3097,7 +3014,7 @@
     The list has two groups: CRT Choices and Main Catalog. Each row looks
     like this:
 
-      [2] * Fast CRT [CRT-ZFast]
+      [9] * Fast CRT [CRT-ZFast]
 
     The star (*) marks the look that is selected now. Under each row is a
     short description. It ends with the rough cost of the look: light,
@@ -3120,18 +3037,25 @@
     Next: choose a look from the list. You will see this line under it:
 
       Choose: [1-N] Select profile  [U] Use selected profile
-      [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back
-      [D] Details
+      [S] Custom preset  [N] Skip ReShade -- no changes
+      [R] Reopen preview  [B] Back  [D] Details
 
     (TeknoParrot Manager prints this on one line, or wraps it on a narrow
     window. N is the number of the last look in the list.) The prompt is
     Choice.
 
       A number   Picks that look. The preview window moves to it too.
-                 You will see: Preview selection changed to: and the name.
+                 You will see: Selected: and the name, then a short
+                 Choose line. The long list is not printed again.
 
-      U          Uses the look you picked. If you have not picked one, you
-                 will see: Choose a numbered profile before using it.
+      U          Uses the look you picked and goes straight on to choosing
+                 games. If you have not picked one, you will see: Choose a
+                 numbered profile before using it.
+
+      S          Uses the look you picked and asks for the path to your own
+                 ReShade .ini preset file.
+
+      L          Shows the full list again.
 
       N          Skips ReShade. You will see: ReShade setup skipped. No
                  ReShade files were installed or changed.
@@ -3399,10 +3323,11 @@
     TeknoParrot Manager looks for the ReShade helper files (DLLs) in
     <TeknoParrotRoot>\TeknoParrotManager\Assets\ReShade\ . A  ReShade\
     folder next to TeknoParrot-Manager.ps1 is also found, and the startup
-    tidy-up moves it into the managed folder. ReShade works with 64-bit
-    games. 32-bit games are skipped. The one file it needs is:
+    tidy-up moves it into the managed folder. ReShade works with both
+    32-bit and 64-bit games. The files it needs are:
 
-      ReShade64.dll (needed for ReShade setup, which is Mode 6)
+      ReShade64.dll (needed for 64-bit games and for ReShade setup, Mode 6)
+      and ReShade32.dll (optional; only 32-bit games need it)
 
     WHERE TO GET THE DLLS
 
@@ -3483,29 +3408,17 @@
              Next: nothing to do. Go on to step 2.
 
     Step 2.  Pick a look from the list (see BEGINNER VISUAL PROFILES).
-             Next: type the look's number, then type U to use it.
+             Next: type the look's number, then type U to use it. There is
+             no second question: U goes straight on to choosing games.
 
-    Step 3.  Confirm the look. You will see:
-
-               Use the selected ReShade profile?
-
-             with these choices:
-
-               [Y] Yes, use (your look)
-               [S] Custom preset
-               [B] Back
-
-             The prompt is Choice (default Y).
-             Next: press Enter for Y.
-
-             Use S only if you already have your own ReShade preset file (a
-             ready-made set of effects, .ini). S asks: Path to your
-             ReShade preset (.ini) file (or type B to browse). Then it says
-             Custom preset selected.
+             Type S instead of U only if you already have your own ReShade
+             preset file (a ready-made set of effects, .ini). S asks: Path
+             to your ReShade preset (.ini) file (or type B to browse). Then
+             it says Custom preset selected.
 
              B says: ReShade setup canceled. No files were changed.
 
-    Step 4.  Choose which games get ReShade. You will see:
+    Step 3.  Choose which games get ReShade. You will see:
 
                Which games should get ReShade?
                You can run setup again later to add or change individual
@@ -3519,13 +3432,13 @@
              The prompt is Enter A or L.
              Next: type A for all games, or L to pick games.
 
-    Step 5.  If you typed L, you will see a paged list with * marking the
+    Step 4.  If you typed L, you will see a paged list with * marking the
              games you picked. Its help line says: Enter number(s) to
              toggle (e.g. 1,3,5-7) | N=next | P=prev | A=all | D=done.
              Next: type the game numbers, then type D when done. Here D
              means done.
 
-    Step 6.  If you picked more than one game, you will see how many can be
+    Step 5.  If you picked more than one game, you will see how many can be
              changed. Some may be left alone to protect your own files. The
              line says: Press D to see why. You will then see
              Apply (look) to (number) games? with these choices:
@@ -3539,7 +3452,7 @@
              Next: press Enter to apply the look to every game that can be
              changed. Choose S to go game by game, or B to cancel.
 
-    Step 7.  If some games already use a different TeknoParrot Manager look,
+    Step 6.  If some games already use a different TeknoParrot Manager look,
              you will see Previously TeknoParrot Manager-managed: and the
              old and new look for each game.
 
@@ -3555,7 +3468,7 @@
              The prompt is Choice, default A.
              Next: press Enter to change them, or type K to keep their look.
 
-    Step 8.  You will see: Installing ReShade into (number) games...
+    Step 7.  You will see: Installing ReShade into (number) games...
              Next: wait. Then read the result screen below.
              While it works, the progress line counts only the games
              being changed (for example "Applying ReShade: 1 of 34"), not
@@ -3571,7 +3484,9 @@
     If your look is a CRT look and a game can be turned off, you will see:
 
       This game already uses TeknoParrot's own CRT look.
-      Together with this ReShade look, it can look doubled.
+      That look stays on. This ReShade look adds another effect on top,
+      so the picture can look doubled.
+      Game: (the game name)
 
     (For several games it says: (number) of these games already use
     TeknoParrot's own CRT look.) Then the choices appear:
@@ -3615,7 +3530,7 @@
     If it worked, you will see:
 
       Done: (look) applied to (number) games.
-      To turn the effect on or off, start a game and press the Home key.
+      To open the ReShade effects menu, start a game and press the Home key.
 
     If nothing was changed, you will see: Nothing was changed. After that
     comes a line starting Not changed: that says why. It may also say:
@@ -3666,11 +3581,12 @@
   -----------------------------
 
     The download audit records the authoritative reshade.me source URL,
-    installer filename and version, computed SHA-256, transfer method/size/
-    elapsed time/average speed, and Authenticode signer/subject, status,
-    thumbprint, and final trust result.
+    installer filename and version, computed SHA-256 (a file fingerprint),
+    transfer method/size/elapsed time/average speed, and the Windows digital
+    signature (Authenticode) signer/subject, status, thumbprint (the
+    signer's ID), and final trust result.
 
-    The SHA-256 is an audit hash;
+    The SHA-256 is only a record for later checking;
     TeknoParrot Manager does not claim it matches a separately published
     ReShade digest.
 
@@ -3693,8 +3609,8 @@
 
     In plain words, ReShade setup lets you use a preset file (a ready-made
     set of effects) or just the look you picked, and then install ReShade
-    on all games or on a selection from a list. These are the confirm
-    screen (S = Custom preset) and the game chooser (A or L) described
+    on all games or on a selection from a list. These are the profile
+    list (S = Custom preset) and the game chooser (A or L) described
     above.
 
     The DLL with the correct name is copied into each selected game folder.
@@ -3702,7 +3618,7 @@
   PER-GAME PRESETS
 
     This is about preset files (.ini), not about the look you pick. A custom
-    preset you choose with S at the confirm screen applies to every game you
+    preset you choose with S in the profile list applies to every game you
     selected.
 
     To give one specific game a different preset, follow these steps. A
@@ -3719,8 +3635,8 @@
     TeknoParrot-Manager-controls.txt. It is written after every real run.
 
     A per-game file always overrides the global choice for that one game
-    only. Every other selected game still gets whatever you chose with S at
-    the confirm screen.
+    only. Every other selected game still gets whatever you chose with S in
+    the profile list.
 
     A file whose name does not match any registered profile code is reported
     as WRONG NAME and ignored, the same way CustomThumbnails handles a
@@ -3734,7 +3650,7 @@
              Next: press the  Home  key.
 
     Step 2.  You will see: the ReShade overlay with a list of effects.
-             Next: turn an effect on or off with its tick-box. Change its
+             Next: turn an effect on or off with its check box. Change its
              settings with the sliders.
 
     Your settings are saved automatically to a ReShade.ini file in the game
@@ -3758,7 +3674,7 @@
              Next: type S (or press Enter) at Action (S/R/U/B, default S).
 
     Step 2.  Pick the new look in the list, then type U.
-             Next: press Enter at Choice (default Y) to confirm it.
+             Next: you go straight on to choosing games.
 
     Step 3.  At Enter A or L, type A for all games.
              Next: at the Apply question, press Enter for [Y] Yes.
@@ -3773,7 +3689,7 @@
     Step 1.  At the main menu, type 6.
              Next: type S (or press Enter) at the Action prompt.
 
-    Step 2.  Pick the look you want, then type U and confirm it.
+    Step 2.  Pick the look you want, then type U.
              Next: at Enter A or L, type L.
 
     Step 3.  Type the number of that game.
@@ -3983,8 +3899,8 @@
   ATTRIBUTION
 
     ReShade is developed by crosire and is distributed under the BSD
-    3-Clause license. The included DLLs are unmodified binaries of the
-    official ReShade release.
+    3-Clause license. TeknoParrot Manager does not include the DLLs. The
+    DLLs you use are unmodified binaries of the official ReShade release.
 
     For source code, full license text, and the latest version see:
 
@@ -4107,13 +4023,17 @@
     It shows [H] Open 14) Library Health Check for missing paths and
     [B] Back to main menu, and asks Choose H or B. The default is B.
 
-    Next: press Enter to go back, or D to see each game's details.
+    Next: press Enter to go back. On the Choose D, O, B screen you can also
+    type D to see each game's details.
 
-    The result also says how many games you selected, for example "You
-    selected 5 games: 3 changed, 1 already set up, 1 skipped." It says
-    where the backup is. Press D to see "Every game you selected": every
-    game with its result, and the reason for each game that was skipped
-    or failed.
+    The result, also when nothing needed changing, says how many games were
+    checked and how many need dgVoodoo2, then how many games you selected,
+    for example "You selected 5 games: 3 set up now, 1 already set up
+    (nothing to change), 1 skipped." It says where the backup is. Press D
+    to see "Every game you selected": every game with its old graphics
+    system, its result and the reason. The same list is in the log. When
+    dgVoodoo2 runs as the optional step after a normal run, the same
+    summary and D Details come before the next optional step.
 
   MORE DETAIL: DGVOODOO2 SETUP
   ----------------------------
@@ -4145,11 +4065,13 @@
     that is already there is never replaced. The one exception is a
     per-game config file (see "Per-game config overrides" below).
 
-    To undo the added dgVoodoo.conf for a game, delete the dgVoodoo.conf in
-    that game's folder (the folder with the game's exe). That folder had
-    none before, so nothing of yours is lost. If you do not want it added to
-    more games, take dgVoodoo.conf out of your dgVoodoo2 folder before you
-    run setup.
+    To undo the added dgVoodoo.conf for a game, first copy the
+    dgVoodoo.conf in that game's folder (the folder with the game's exe) to
+    a safe place, because it may now hold edits you made after setup. Then
+    delete it only if you no longer want it. The folder had no dgVoodoo.conf
+    before setup, but setup cannot tell whether you changed the copy since.
+    If you do not want it added to more games, take dgVoodoo.conf out of
+    your dgVoodoo2 folder before you run setup.
 
   Per-game config overrides
 
@@ -4614,8 +4536,9 @@
       touch it.
 
   If a game could not be changed, the result says "Could not be changed". Your
-  other games are still changed. To undo a change, use 15) Restore backup and
-  pick the restore point saved just before it.
+  other games are still changed. To undo a change, use 15) Restore backup,
+  choose 1) TeknoParrot UserProfiles backup, and pick the newest saved copy,
+  the one made just before the change.
 
 
   POSTGRES SETUP
@@ -4698,6 +4621,9 @@
     password choices (F, P and X) never delete, recreate or restore over a
     database. Restoring a saved backup (mode 15) and Reinitialize ([I])
     do replace database content, but only after you confirm by typing YES.
+    One more case needs no choice: if its own note says an earlier setup
+    stopped while still building a database, setup removes that unfinished
+    copy and builds it again.
 
   What you see when it finishes
 
@@ -4713,7 +4639,8 @@
 
     4. The screen ends with this line:
        "Next: open TeknoParrot and start any game. Every game database
-       was checked and is ready."
+       was checked and is ready." You see this line only when every game
+       is ready. Otherwise a different "Next:" line tells you what to do.
 
     5. Last, you will see "[D] Show details" and this question:
        "Press Enter to return to menu, or D for details"
@@ -4879,7 +4806,9 @@
   Two choices that you confirm yourself do replace database content:
   restoring a saved backup (mode 15) drops and recreates the selected
   databases from that backup, and Reinitialize ([I]) replaces the data
-  with the game's own starting database.
+  with the game's own starting database. One more case needs no choice:
+  if its own note says an earlier setup stopped while still building a
+  database, setup removes that unfinished copy and builds it again.
 
   Profile updates: TeknoParrot Manager updates only affected profiles whose
   values are not already correct, in a deterministic order, and fails closed
@@ -5026,8 +4955,8 @@
     changes. If the drive is too full, you see "There is not enough free
     space for the update" and nothing is installed.
 
-    tools\Invoke-TpmAutoUpdate.ps1 -Apply still refuses a release with
-    many files and changes nothing.
+    tools\Invoke-TpmAutoUpdate.ps1 -Apply refuses any release package that
+    has files besides TeknoParrot-Manager.ps1 and changes nothing.
 
     To update by hand (needed once if you run a build before RC8.1):
 
@@ -5149,11 +5078,12 @@
   ends with a certain suffix (a short ending on the name). The script
   supports all three:
 
-    .teknoparrot   (most common -- used for new extractions)
+    .teknoparrot   (used for new extractions when RetroBat mode is on)
     .parrot
     .game
 
-  New games are always extracted into .teknoparrot folders.
+  With RetroBat mode off (the default), new games are extracted into plain
+  GameName folders. With it on, they go into .teknoparrot folders.
 
   The other two endings are also recognized on folders you already have. So
   a library that another tool extracted earlier works without extracting
@@ -5256,11 +5186,18 @@
   TeknoParrot Manager unpacks: GameName.teknoparrot instead of GameName.
   It does not change RetroBat, its settings or its game list.
 
+  Where should the games folder be? TeknoParrot Manager puts games in the
+  games folder you chose and does not move them again. It does not move
+  games into RetroBat's folders. If RetroBat does not show your games, use
+  the games folder where RetroBat looks for TeknoParrot games (RetroBat's
+  own guide says where). To change it, answer N at "Use these settings?
+  (Y/N, D = show them)" and choose the new games folder.
+
   Who does what:
-    TeknoParrot Manager  Adds your games to TeknoParrot, copies controls
-                         from a game you set up to games of the same type
-                         (after you say yes, with a backup first), applies
-                         the optional fixes you choose, names the folders.
+    TeknoParrot Manager  Adds your games to TeknoParrot, sets up controls
+                         from your controller layout (after you say yes,
+                         with a backup first), applies the optional fixes
+                         you choose, names the folders.
     TeknoParrot          Runs the games. Keeps each game's controls and
                          input type (for example mouse and keyboard, a
                          controller or a lightgun). Has its own first-time
@@ -5268,26 +5205,25 @@
     RetroBat             Keeps its own game list and starts games its own
                          way.
 
-  Before you change any controls, check three things: the game shows up
-  in TeknoParrotUI, it starts from TeknoParrotUI, and you set up one
-  example game of that type yourself.
+  Before you change any controls, check two things: the game shows up in
+  TeknoParrotUI and it starts from TeknoParrotUI.
 
   Only a mouse and keyboard for now? TeknoParrot Manager does not set up
   mouse or keyboard input and does not test your devices. Set the controls
   for one game in TeknoParrotUI and choose its input type there (RawInput
-  is the mouse and keyboard type). Start that game from TeknoParrot first.
-  Then use Propagate Controls (4) to copy the setup to other games of the
-  same type, and test one game before you trust the rest. Starting a game
+  is the mouse and keyboard type). Start that game from TeknoParrot first,
+  and test one game before you trust the rest. Starting a game
   from TeknoParrot and starting it from RetroBat are two different ways to
   start it. TeknoParrot Manager does not change how RetroBat starts a game
   and cannot tell you why one way works and the other does not. If a game
   works in TeknoParrot but not from RetroBat, look at RetroBat's
   TeknoParrot settings or ask the RetroBat community.
 
-  Later, with Sinden lightguns: TeknoParrot Manager does not detect or set
-  up lightguns. That setup happens in TeknoParrot and in the gun's own
-  software. The crosshair option (5) only copies crosshair pictures to
-  lightgun games.
+  Later, with Sinden lightguns: TeknoParrot Manager can notice that
+  something that looks like a lightgun is plugged in, but it does not set
+  one up. That setup happens in TeknoParrot and in the gun's own software.
+  The crosshair option (5) only copies crosshair pictures to lightgun
+  games.
 
   THE FIRST-TIME QUESTIONS IN PLAIN WORDS
   ---------------------------------------
@@ -5372,7 +5308,7 @@
 
     2. Drop your PNG files in there.
        Name each one <ProfileCode>.png (for example, Daytona3.png or
-       HouseOfDead4.png).
+       HOTD4.png).
 
     Next: every time you run the thumbnail download step, the script copies
     any PNG files from that folder into TeknoParrot's Icons folder. You never
@@ -5430,7 +5366,7 @@
       Display name                  Profile code      Thumbnail filename
       ----------------------------  ----------------  --------------------
       Daytona Championship USA      Daytona3          Daytona3.png
-      House of the Dead 4           HouseOfTheDead4   HouseOfTheDead4.png
+      House of the Dead 4           HOTD4             HOTD4.png
       Aliens Extermination          AliensExtermination  AliensExtermination.png
       Tekken 7                      Tekken7           Tekken7.png
 
@@ -5521,44 +5457,25 @@
   The report shows the controls of every registered game, as they are right
   now. Here is an example:
 
-    [button]
-      BlazBlueContinuumShift     52/52 bound   REFERENCE
-      AkaiKatanaShinNesica       47/52 bound   propagated  <- BlazBlueContinuumShift
-      StreetFighter6             47/52 bound   propagated  <- BlazBlueContinuumShift
-        manual: SpeedChange1, SpeedChange2, SpeedChange3
-
-    [driving]
-      Daytona3                   31/31 bound   REFERENCE
-      InitialD8                  29/31 bound   propagated  <- Daytona3
-        manual: GearUp, GearDown
-
-    [lightgun]
-      SomeNewGame                 0/52 bound   no controls
+    AkaiKatanaShinNesica       47/52 bound   partial
+      manual: SpeedChange1, SpeedChange2, SpeedChange3
+    Daytona3                   31/31 bound   bound
+    SomeNewGame                 0/52 bound   no controls
 
   Each game line shows:
-
-    - The control family: the kind of controls the game uses
-      (button, driving, lightgun, trackball, analog, spinner).
 
     - How many buttons are set up, out of the total for that game.
       "52/52 bound" means all 52 buttons are set up.
 
     - The status (see the list below).
 
-    - For "propagated" games, which reference game the controls were copied
-      from.
-
     - Any buttons that are still left for you to set up by hand ("manual").
 
   The status can be one of these:
 
-    REFERENCE           Your set-up example game.
-    propagated          Controls were copied from a reference game.
-    already bound       The game had controls before this run.
-    bound               Set up, but not by copying.
+    bound               All buttons are set up.
     partial             Some buttons are set up, but too few.
     no controls         Nothing is set up yet.
-    no reference game   Waiting for you to set up one example game.
 
   Good to know:
 
@@ -5566,8 +5483,8 @@
       it, so you still see the file from the run before.
 
     - It is useful when a game aims wrong days or weeks later. Open the file
-      and you can see at once whether controls were copied, and from which
-      reference game. You do not need to run the script again.
+      and you can see at once which buttons are bound and which are still
+      manual. You do not need to run the script again.
 
   MORE DETAIL: CONTROLS STATUS FILE
   ---------------------------------
@@ -5579,8 +5496,7 @@
   threshold.
 
   The file reflects the state of your UserProfiles (TeknoParrot's saved game
-  settings folder) at the moment the script completed. It does this whether
-  propagation (copying controls) was run or skipped this time.
+  settings folder) at the moment the script completed.
 
 
 -------------------------------------------------------------------------------
@@ -5616,20 +5532,9 @@
                     is not empty, ONLY these ZIPs are extracted.
                     For normal use, the picker menu is easier.
 
-    noPropagate     Games that must be left alone when controls are copied.
-
-    forceArchetype  Copy a game's controls from one specific reference game.
-                    Use it when the script picks the wrong example game.
-
-    familyOverride  Tell the script which kind of controls a game uses.
-                    Use it when the script gets the kind wrong.
-                    Example: FamilyGuyBowling looks like a lightgun game,
-                    but it should use trackball controls.
-
-    canonicalArchetype
-                    Say which reference game is the correct one for a kind
-                    of controls. Only needed in a rare case (see More detail
-                    below).
+    subFolderMap    For a game whose program file sits in a subfolder of
+                    your TeknoParrot folder: the game's profile code and
+                    that subfolder.
 
     datFile         The full path to a dat file (a list of known game names).
                     Use it if the path you gave at first setup is wrong.
@@ -5646,10 +5551,7 @@
     {
       "noSync":             ["ZipBaseName1", "ZipBaseName2"],
       "onlySync":           ["ZipBaseName1", "ZipBaseName2"],
-      "noPropagate":        ["ProfileCode1", "ProfileCode2"],
-      "forceArchetype":     { "ProfileCode": "ReferenceProfileCode" },
-      "familyOverride":     { "ProfileCode": "trackball" },
-      "canonicalArchetype": { "button": "ReferenceProfileCode" },
+      "subFolderMap":       { "ProfileCode": "Folder\\Sub" },
       "datFile":            "C:\\full\\path\\to\\collection.dat"
     }
 
@@ -5663,48 +5565,13 @@
                   and is useful for scripted or repeatable runs. For casual
                   use, the interactive picker is easier.
 
-  noPropagate     Profile codes (UserProfile file name without .xml) to
-                  leave untouched during control propagation.
+  subFolderMap    For a game whose program file sits in a subfolder of your
+                  TeknoParrot folder rather than in your games folder: the
+                  profile code and that subfolder.
+                  Format: { "GameProfileCode": "Folder\\Sub" }
 
-  forceArchetype  Pin a game to copy its controls from a specific reference
-                  game instead of the automatic best match. Useful when the
-                  script picks the wrong game type for an unusual title.
-                  Format: { "GameProfileCode": "ReferenceProfileCode" }
-
-  familyOverride  Override the auto-detected control family for a game.
-                  Use this when the script mis-classifies a title (for
-                  example, FamilyGuyBowling is detected as a lightgun game
-                  because of its input mappings, but it should draw
-                  controls from the trackball pool).
-                  Valid values: "button", "driving", "lightgun",
-                                "trackball", "analog", "spinner"
-                  NOTE: "spinner" is never auto-detected. Spinner games
-                  must always be assigned explicitly via familyOverride.
-                  The override also counts for the games controls are
-                  copied from. So a game set to "spinner" finds a
-                  reference game instead of "no usable reference game".
-                  Format: { "GameProfileCode": "trackball" }
-
-  canonicalArchetype
-                  A reference game (one with enough controls already bound
-                  to copy from) is normally never modified -- not its
-                  bindings, and not its Input API. If two reference games
-                  in the same control family end up on different Input APIs
-                  (for example one set up with an XInput pad, another with
-                  an arcade encoder), the script has no reliable signal for
-                  which one is actually correct, so by default both are
-                  left alone.
-
-                  If you know which one is right, name it here as the
-                  canonical archetype for that family. On the next control
-                  propagation run, every OTHER reference game in that
-                  family gets its Input API corrected to match -- bindings
-                  are still never touched, only the Input API field.
-
-                  Leave a family unset to keep the old behavior (no
-                  reference game in that family is ever modified).
-                  Format: { "button": "ReferenceProfileCode" }
-                  Valid family names: same six as familyOverride above.
+  Keys from older versions (noPropagate, forceArchetype, familyOverride,
+  canonicalArchetype) are ignored if they are still in the file.
 
   datFile         Full path to a No-Intro TeknoParrot dat file (for example
                   the Eggman/RomVault collection dat). Used instead of the
@@ -5776,14 +5643,6 @@
                               Nothing to do right now.
                               Next: extract the game, then run again and answer Y to repair.
 
-    CONTROLS SKIPPED BY DESIGN (informational; not a failed save)
-                              Games whose kind of controls has no usable
-                              example game. The screen says: "Skipped by
-                              design: no usable reference game for the
-                              '<family>' family. Add one game of this
-                              family with your own controls, then run
-                              this again."
-
     CONTROLS NOT READY : <game code>
                               Registered games whose controls are Missing,
                               Not verified, Unsupported, or Unknown.
@@ -5804,7 +5663,8 @@
                               BlazBlue-series games (iDmacDrv32.dll) and
                               Tekken Tag Tournament 2 (EBOOT.BIN).
                               It shows the file name, the current and
-                              needed CRC32, and where to get it.
+                              needed CRC32 (a check number for the file),
+                              and where to get it.
 
     KNOWN <AMD or INTEL> GPU INCOMPATIBILITY -- NO FIX AVAILABLE
                               (information only)
@@ -5816,7 +5676,8 @@
 
     <EMULATOR NAME> FIRMWARE NOT INSTALLED
                               Games whose emulator (PCSX2x6, Chihiro/
-                              CxbxR, PlayStation 3/RPCS3, Play!) needs
+                              CxbxR, RPCS3 for arcade games on PlayStation 3
+                              style hardware, Play!) needs
                               startup files that TeknoParrot does not
                               provide. It says which games will not start
                               and gives one next step. If the files are in
@@ -5859,12 +5720,12 @@
     text file. It is named TeknoParrot-Manager-ActionItems.txt. By default
     it goes in <TeknoParrotRoot>\TeknoParrotManager\Reports\ .
 
-  - A Save dialog lets you pick a different place or file name.
+  - The list is always saved to that default path. There is no Save dialog.
 
   - The script tells you the path when it writes the file.
 
-  - In unattended runs and in preview/dry-run mode, there is no dialog. The
-    file goes to the default path.
+  - There is no dialog in any mode. A preview run saves nothing; a real run
+    puts the file in the default path.
 
   MORE DETAIL: ACTION REQUIRED SUMMARY
   ------------------------------------
@@ -5881,7 +5742,7 @@
 
   File version mismatch: the file names are iDmacDrv32.dll for the
   BlazBlue-series games and EBOOT.BIN for Tekken Tag Tournament 2. The
-  report shows the current and required CRC32 values.
+  report shows the current and required CRC32 (file check number) values.
 
   Firmware not installed: the screen says in plain words which games will
   not start and gives one next step; the exact files and folders are under
@@ -5892,9 +5753,10 @@
   It saves a backup copy first and never replaces a different file without
   asking. It never downloads, links, or redistributes these files.
 
-  For RPCS3 games, the files come from the PlayStation 3 firmware file in
-  your own collection (the "[EMU] Sony PlayStation 3 Firmware" ZIP). RPCS3
-  itself unpacks it, with no window. For Play! games, TeknoParrot Manager
+  For RPCS3 arcade games (they run on PlayStation 3 style hardware, for
+  example the Tekken 6 arcade games), the files come from the firmware file
+  in your own collection (the "[EMU] Sony PlayStation 3 Firmware" ZIP).
+  RPCS3 itself unpacks it, with no window. For Play! games, TeknoParrot Manager
   checks that each game has its own small settings file (.arcadedef) and
   copies it from the "[EMU] Play! working arcadedefs" ZIP.
 
@@ -5923,9 +5785,8 @@
   skipped (with nothing shown) if the fetch fails. It never blocks the rest
   of the run.
 
-  ActionItems file: unattended runs skip the Save dialog and save to the
-  default path. A preview run saves nothing, so it never replaces the list
-  from your last real run.
+  A preview run saves nothing, so it never replaces the list from your last
+  real run.
 
 
 -------------------------------------------------------------------------------
@@ -5934,7 +5795,7 @@
 
   Unattended mode runs the script without asking you any questions. In this
   release it does one job only: the read-only Library Health Check. It
-  does not extract games, register them, copy controls or download
+  does not extract games, register them, set up controls or download
   thumbnails, so it cannot run AutoSync or Register only on a schedule.
   Most people can skip this section.
 
@@ -5986,14 +5847,18 @@
 
   It prints the version and script checksum, the PowerShell and Windows
   versions, your TeknoParrot folder and saved settings (the saved
-  PostgreSQL password is only shown as yes or no), how many games are
-  registered, which games still need PostgreSQL settings, how many profiles
-  support, do not support or do not say whether they support RawInput and
-  RawInputTrackball, the files that ship with TeknoParrot Manager and the
-  compatibility warnings. -ValidationRoot is optional when your settings
-  are saved. -ValidationJsonPath is optional and is the only file it
-  writes. It never changes TeknoParrot, your game profiles, your saved
-  settings or the log.
+  PostgreSQL password is only shown as yes or no), TeknoParrot's own
+  first-time setup state, how many games are registered, which games still
+  need PostgreSQL settings, how many profiles support, do not support or
+  do not say whether they support RawInput and RawInputTrackball, how many
+  games with a reviewed controls list have verified, not verified,
+  missing, unsupported or unknown controls (a game counts as verified only
+  after you told TeknoParrot Manager you played it and its controls
+  worked; the report starts no game, so it never tests a launch), the
+  files that ship with TeknoParrot Manager and the compatibility
+  warnings. -ValidationRoot is optional when your settings are saved.
+  -ValidationJsonPath is optional and is the only file it writes. It never
+  changes TeknoParrot, your game profiles, your saved settings or the log.
 
   Exit codes: 0 pass, 3 action required, 4 failed (for example no
   TeknoParrot folder), 1 the report could not be made.
@@ -6077,7 +5942,10 @@
   This can happen after you move or re-extract a game.
 
   Repair looks for the game by its executable name in your staging folder.
-  Then it updates the path.
+  If the profile has no executable name, it uses the file name in the old
+  saved path. When several games share a name, it compares the folder names
+  of the old path with the new folders. It saves a game only when one file
+  clearly fits. Then it updates the path.
 
   Repair shows one of these results for each game:
 
@@ -6087,11 +5955,15 @@
                          yet.
                          Next: extract it first, then run again and answer Y to repair.
 
-    Register manually    The executable is shared by several games.
-                         TeknoParrot Manager shows you choices it has
-                         checked. Pick one yourself. If you press Enter,
+    Register manually    Several files fit, or the old folder names do not
+                         point to one file. TeknoParrot Manager offers to
+                         let you pick the file yourself. If you decline,
                          the game stays in ACTION REQUIRED, so you can use
                          TeknoParrotUI. It never guesses.
+
+  If some games are repaired and others still need you, the result reads
+  "Partly done: N repaired, N still need your help". Press D at the
+  question to see each game and why.
 
   Games whose path already works are left untouched.
 
@@ -6102,24 +5974,21 @@
 
   - Input method. Most games can be bound using XInput, RawInput or
     DirectInput. These are the different ways a game can talk to your
-    controller. You choose one per game in the TeknoParrot UI when you set
-    up your reference game. The script copies whatever you chose.
+    controller. You choose one per game in the TeknoParrot UI when you
+    set up a game's controls.
 
   - Keyboard. With no controller, set up the keyboard in TeknoParrot's
-    controller setup. Then use a keyboard game as the reference for similar
-    games.
+    controller setup.
 
   - Negative pedals. Some racing games expect a pedal on a negative axis
-    (for example Y- or Z-). Set it up that way in your reference game. The
-    script carries the setting across.
+    (for example Y- or Z-). Set it up that way in TeknoParrotUI.
 
   - Unsupported controllers. If a pad is not recognized, wrappers such as
     DS4Windows or XInputPlus can make it appear as an XInput device. These
     run outside this script.
 
   - Light guns. A gun such as the Sinden shows up in Windows as a pointer.
-    It is bound in RawInput mode. Set it up on your lightgun reference game
-    and the controls are copied. Gun calibration lives in the gun's own
+    It is bound in RawInput mode. Gun calibration lives in the gun's own
     software.
 
 
@@ -6144,7 +6013,8 @@
     - The normal backup covers UserProfiles only. That is TeknoParrot's
       saved game settings folder.
 
-    - Game-side NVRAM, test-menu state, and calibration files outside
+    - Game-side NVRAM (the game's own saved memory), test-menu state, and
+      calibration files outside
       UserProfiles need separate backups (issue 378).
 
     - This is not a full game backup.
@@ -6187,6 +6057,8 @@
     - 2 is the Postgres database backups.
     - 3 is the LaunchBox library backups.
     - 4 is "Reset and Restore". It lists "Restore points, newest first".
+    - 5 is "Rebuild one game from its ZIP". It puts one game folder back
+      from its ZIP file (see mode 15 above).
 
   The confirmation checks still apply before files or databases are
   changed.
@@ -6197,8 +6069,8 @@
 
     <TeknoParrotRoot>\TeknoParrotManager\Logs\TeknoParrot-Manager.log
 
-  It records what was extracted, registered, repaired and propagated
-  (copied controls). It also records any errors.
+  It records what was extracted, registered, repaired and set up with
+  your controller layout. It also records any errors.
 
   If the log file cannot be written (permissions, a full disk, or a path
   problem), the script does not fail silently:
@@ -6339,8 +6211,8 @@
     The game may need your choice in "REGISTER THESE GAMES IN
     TEKNOPARROTUI", or the TeknoParrotUI fallback. Or it may not be
     extracted yet ("EXTRACT THESE GAMES FIRST, THEN RE-RUN REPAIR").
-    If neither applies, look in TeknoParrot-Manager.log for a registration
-    error for that game.
+    If neither applies, look in TeknoParrot-Manager.log (in the Logs folder
+    under TeknoParrotManager) for a registration error for that game.
 
   A game does not extract.
     TeknoParrot Manager keeps what it found about the unfinished job and
@@ -6358,14 +6230,12 @@
     Do not delete an .extracting marker just to clear the warning. Deleting
     it does not check the game files. Ask for help if needed.
 
-  Controls are not being copied to a game.
-    Check these three causes:
-      - No reference game for that control type is set up yet (see
-        "CONTROLS SKIPPED BY DESIGN" in ACTION REQUIRED).
-      - The game is in the noPropagate list in
-        TeknoParrot-Manager.overrides.json.
-      - The game already has five or more bound controls. It is then
-        treated as a reference game itself.
+  Controls are not being set up for a game.
+    Check these causes:
+      - You have not chosen a controller layout yet (main menu 4,
+        choice 2).
+      - The layout does not cover that game's controls. See CONTROLS NOT
+        READY in ACTION REQUIRED.
 
   ReShade text or a window shows when the game starts.
     TeknoParrot Manager turns the welcome window, the counters and the
@@ -6395,17 +6265,16 @@
       3. Use TeknoParrot Manager's checked choice list when it is offered.
          Or set the correct profile and GamePath in TeknoParrotUI.
     Do not delete a profile just to try matching again.
-    forceArchetype picks a control reference. It does not pick a
-    registration match.
 
-  A game's controls are wrong after propagation.
+  A game's controls are wrong after setup.
     Next, in this order:
       1. Look at the Restore backup choices (main menu 15) before you
          restore. Check which later settings would be replaced.
       2. Keep a copy of the current bindings/settings you need, outside
          the affected paths.
-      3. Fix the reference settings in TeknoParrotUI before you try again.
-    Do not remove the XML just to try propagation again.
+      3. Check your controller layout (main menu 4, choice 2) and fix the
+         buttons in TeknoParrotUI before you try again.
+    Do not remove the XML just to try again.
 
   A game appears twice in TeknoParrotUI.
     Next, in this order:
@@ -6482,9 +6351,9 @@
   WHAT IT DOES NOT DO
 -------------------------------------------------------------------------------
 
-  - It does not invent control bindings. A control is set only when a
-    reference game you have set up already has it. Everything else is left
-    for you and shown in the ACTION REQUIRED summary.
+  - It does not invent control bindings. A control is set only from the
+    controller layout you chose. Everything else is left for you and
+    shown in the ACTION REQUIRED summary.
 
   - It does not provide game files. You must own, or otherwise have lawful
     rights to, the original arcade PCB and any ROM/game data you use.
@@ -6599,7 +6468,7 @@
 
 
 ===============================================================================
-  This guide is for v1.0 RC9.3.
+  This guide is for v1.0 RC9.4.
   Test one game after every run. AutoSync backs up UserProfiles before
   extraction; preview mode skips the backup.
 ===============================================================================

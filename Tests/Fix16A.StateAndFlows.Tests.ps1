@@ -59,7 +59,6 @@ BeforeAll {
     # Exact initial script-scope values production assigns before use.
     $script:TpmRegistrationLedger = $null
     $script:TpmRegistrationLedgerStopLatch = $null
-    $script:TpmProfileSetSource = $null
     $script:ScriptVersion = 'fix16a-test'
 
     $script:fix16Progress = New-Object System.Collections.Generic.List[object]
@@ -683,65 +682,34 @@ Describe 'Backfill-SecondaryExecutablePath lazy safety backup (Finding A)' {
     }
 }
 
-Describe 'Get-TeknoParrotProfileSet live/local fallback (Finding B)' {
+Describe 'Get-TeknoParrotProfileSet reads only the local GameProfiles folder' {
     BeforeEach {
         $script:f16Gp = New-Fix16Dir -Prefix 'gp'
         [System.IO.File]::WriteAllText((Join-Path $script:f16Gp 'LocalOne.xml'), '<GameProfile />')
         [System.IO.File]::WriteAllText((Join-Path $script:f16Gp 'LocalTwo.xml'), '<GameProfile />')
         $script:fix16Progress.Clear()
-        $script:TpmProfileSetSource = $null
-        $script:f16RepoUri = 'https://api.github.com/repos/teknogods/TeknoParrotUI'
-        $script:f16Tree = @{
-            truncated = $false
-            tree = @(
-                @{ type = 'blob'; path = 'TeknoParrotUi.Common/GameProfiles/LiveOne.xml' }
-                @{ type = 'blob'; path = 'TeknoParrotUi.Common/GameProfiles/LiveTwo.xml' }
-                @{ type = 'tree'; path = 'TeknoParrotUi.Common/GameProfiles' }
-            )
-        }
-        Mock Start-Sleep {}
     }
 
-    It 'skips the tree request after a repository 404 and reports local templates as the source' {
-        Mock Invoke-TpmWebRequestSilently { throw 'The remote server returned an error: (404) Not Found.' }
-        Mock Get-TpmHttpStatusCodeFromError { 404 }
+    It 'builds the set from the local profile files and makes no web request' {
+        Mock Invoke-TpmWebRequestSilently { throw 'must not be called' }
 
         $set = @(Get-TeknoParrotProfileSet -localGameProfilesDir $script:f16Gp)
 
         (@($set | Sort-Object) -join '|') | Should -Be 'LocalOne|LocalTwo'
-        Should -Invoke Invoke-TpmWebRequestSilently -Times 0 -Exactly -ParameterFilter { $Uri -like '*/git/trees/*' }
-        Should -Invoke Invoke-TpmWebRequestSilently -Times 1 -Exactly -ParameterFilter { $Uri -eq $script:f16RepoUri }
-        $script:TpmProfileSetSource.Source | Should -Be 'LocalTemplates'
-        $script:TpmProfileSetSource.LiveCount | Should -Be 0
-        $script:TpmProfileSetSource.Count | Should -Be 2
-        @($script:fix16Progress | Where-Object { $_.Complete -and $_.Outcome -ne 'Final' }).Count | Should -Be 0
-        @($script:fix16Progress | Where-Object { $_.Label -eq 'GitHub profile query' }).Count | Should -Be 0
+        Should -Invoke Invoke-TpmWebRequestSilently -Times 0 -Exactly
         @($script:fix16Progress | Where-Object { $_.Complete -and $_.Label -eq 'TeknoParrot profile list' }).Count | Should -Be 1
     }
 
-    It 'reports Live when the live tree is complete and does not merge local templates' {
-        Mock Invoke-TpmWebRequestSilently { [pscustomobject]@{ Content = '{"default_branch":"main"}' } } -ParameterFilter { $Uri -eq $script:f16RepoUri }
-        Mock Invoke-TpmWebRequestSilently { [pscustomobject]@{ Content = ($script:f16Tree | ConvertTo-Json -Depth 5) } } -ParameterFilter { $Uri -like '*/git/trees/*' }
-
-        $set = @(Get-TeknoParrotProfileSet -localGameProfilesDir $script:f16Gp)
-
-        (@($set | Sort-Object) -join '|') | Should -Be 'LiveOne|LiveTwo'
-        Should -Invoke Invoke-TpmWebRequestSilently -Times 1 -Exactly -ParameterFilter { $Uri -like '*/git/trees/main?recursive=1' }
-        $script:TpmProfileSetSource.Source | Should -Be 'Live'
-        $script:TpmProfileSetSource.LiveCount | Should -Be 2
+    It 'returns an empty set when there is no GameProfiles folder' {
+        @(Get-TeknoParrotProfileSet -localGameProfilesDir (Join-Path $script:f16Gp 'missing')).Count | Should -Be 0
     }
 
-    It 'merges local template stems into a truncated live tree' {
-        $script:f16Tree.truncated = $true
-        Mock Invoke-TpmWebRequestSilently { [pscustomobject]@{ Content = '{"default_branch":"master"}' } } -ParameterFilter { $Uri -eq $script:f16RepoUri }
-        Mock Invoke-TpmWebRequestSilently { [pscustomobject]@{ Content = ($script:f16Tree | ConvertTo-Json -Depth 5) } } -ParameterFilter { $Uri -like '*/git/trees/*' }
-
-        $set = @(Get-TeknoParrotProfileSet -localGameProfilesDir $script:f16Gp)
-
-        (@($set | Sort-Object) -join '|') | Should -Be 'LiveOne|LiveTwo|LocalOne|LocalTwo'
-        $script:TpmProfileSetSource.Source | Should -Be 'Live'
-        $script:TpmProfileSetSource.LiveCount | Should -Be 2
-        $script:TpmProfileSetSource.Count | Should -Be 4
+    It 'the script never names the removed GitHub profile repository' {
+        $text = [System.IO.File]::ReadAllText($script:fix16SourcePath)
+        # The separate icon-thumbnail repository keeps its own name.
+        $text = $text -replace 'teknogods/TeknoParrotUIThumbnails', ''
+        $text | Should -Not -Match 'teknogods'
+        $text | Should -Not -Match 'api\.github\.com/repos/teknogods'
     }
 }
 

@@ -26,7 +26,7 @@ Every run starts with this choice:
   [B] Back
 ```
 
-A preview shows which games would be unzipped and why (new, changed ZIP, and so on). It writes nothing: no backup, no folders, no profiles.
+A preview shows which games would be unzipped and why (new, changed ZIP, and so on). It makes no backup and changes no folders or profiles. It still reads your files and writes the log.
 
 When the preview ends, you are asked if you want to make the changes for real. Answer `Y` and TeknoParrot Manager scans again first, so nothing is out of date. Answer `N` and nothing changes.
 
@@ -35,7 +35,7 @@ When the preview ends, you are asked if you want to make the changes for real. A
 ## What AutoSync does to games you already unzipped
 
 - **ZIP did not change:** the game folder is left alone. Your saves and settings stay as they are. You see `Already extracted (ZIP unchanged)`.
-- **ZIP changed:** the game folder is replaced with the new one. Before that, every file in the old folder that is extra or different from the ZIP (saves, settings, ReShade files) is copied to `<your TeknoParrot folder>\TeknoParrotManager\Backups\AutoSyncReplaced\<game>_<date and time>\`.
+- **ZIP changed:** the game folder is replaced with the new one. Before that, every file in the old folder that is extra or different from the ZIP (saves, settings, ReShade files) is copied to a backup folder. You find it here: `<your TeknoParrot folder>\TeknoParrotManager\Backups\AutoSyncReplaced\<game>_<date and time>\`.
 - **Those files cannot be saved, or no Backups folder is set up:** that game is not updated, and nothing is changed for it. You see `This game was not updated`. Other games continue. Fix the Backups folder or free some space, then run AutoSync again.
 
 If AutoSync extracts nothing new, registration is skipped and you see one short note: `Nothing new was extracted, so registration was skipped. To register games already extracted, choose Register only.` It is only a note. It is not under ACTION REQUIRED and does not send you to a saved list.
@@ -116,7 +116,7 @@ You do not have to delete, move or reset anything first. Pick your TeknoParrot f
 
 RetroBat mode only changes the folder names TeknoParrot Manager makes. It does not change RetroBat. TeknoParrot runs the games and keeps each game's controls and input type; RetroBat keeps its own list and starts games its own way.
 
-TeknoParrot Manager does not set up mouse or keyboard input. Set one game's controls in TeknoParrotUI (RawInput is the mouse and keyboard type), start it from TeknoParrot first, then use [[Propagate Controls]] for the others and test one game. Starting from TeknoParrot and from RetroBat are two different ways to start a game, and TeknoParrot Manager cannot tell you why one works and the other does not. It does not detect or set up Sinden lightguns.
+TeknoParrot Manager does not set up mouse or keyboard input. Set one game's controls in TeknoParrotUI (RawInput is the Windows way of reading mouse and keyboard input), start it from TeknoParrot first, and test it. Starting from TeknoParrot and from RetroBat are two different ways to start a game, and TeknoParrot Manager cannot tell you why one works and the other does not. It can notice something that looks like a Sinden lightgun (a light gun that acts like a mouse), but it does not set one up.
 
 ---
 
@@ -126,4 +126,6 @@ AutoSync goes straight on to registration. See [[Register]].
 
 When new games were unzipped, you are asked `Choice (N/A/B)`. `N` (the default) checks only the new games and skips the whole-library steps. `A` goes on to the repair, pictures and controls steps for all your games. `B` goes back to the menu.
 
-At the end, the ACTION REQUIRED list tells you if a game's controls are missing, not verified, unsupported or unknown. A game can be registered and still need its controls set up. Open TeknoParrot's controls screen, map the controls and test them before you call the game ready. TeknoParrot Manager does not write any control mappings in this step. See [[Propagate Controls]] to copy controls from a game you already set up.
+The controls step is Controller Layout, the same screen as [[Controls]], choice 1. It sets up your games with the layout you chose, and you approve it first. In a Preview run it only shows what would change. If AutoSync is run without questions, it applies your saved layout after it makes a backup, or skips if you have not chosen one. (The `-Unattended` flag on its own runs only the Health Check.)
+
+At the end, the ACTION REQUIRED list tells you if a game's controls are missing, not verified, unsupported or unknown. A game can be registered and still need its controls set up. Open TeknoParrot's controls screen, map the controls and test them before you call the game ready. See [[Controls]] to set up more games with your controller layout.

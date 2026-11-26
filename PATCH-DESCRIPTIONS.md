@@ -9,6 +9,8 @@ Two kinds of recipe:
 
 Nothing here is downloaded and nothing is installed without asking. The patch ZIPs are yours and stay yours.
 
+Where the patch file comes from: TeknoParrot Manager never downloads one. For the "APM3 Component" rows below (Dead or Alive 6, Goonya Fighter APM3 Edition, Otoshu DX, Puyo Puyo e-Sports, Blade Strangers, Blazblue Cross Tag Battle, Rolling Gunner, Senxin Aleste, Koihime Enbu RyoRaiRai Version 3), the same `apm.dll` or `apm_x86.dll` is also inside the game's own ZIP (named like the game build, for example `Otoshu DX (1.00.00)(2020-02-15)(JPN)[Sega ALLS][TP].zip`; Goonya Fighter keeps it in the `game` folder). TeknoParrot Manager accepts either that ZIP or a separate `... - APM3 Component.zip`, and checks the file inside it exactly the same way. The two "APM3 File" rows (Guilty Gear Strive, Guilty Gear Xrd Rev2) and the other separate patch ZIPs are separate downloads that TeknoParrot Manager does not provide.
+
 Words used below: a "shader" is a small file that tells your graphics card how to draw the picture, "BepInEx" is a free add-on loader some Unity games need, and "APM3" is the helper file that lets a game talk to the ALLS arcade board.
 
 | Game (versions) | Patch name in the patch folder | What it does, and what you must know |
@@ -30,8 +32,8 @@ Words used below: a "shader" is a small file that tells your graphics card how t
 | Sonic Dash Extreme (2015) | 60fps 60Hz Original and Patched Executables | Swaps the game executable for the version that runs at 60 frames per second and 60 Hz instead of the default. Only acts on the exact original executable. |
 | Hummer (1.0), Hummer Extreme Edition (1.0) | game ZIP only (no separate patch) | Restores the 14 shader files that stop the picture flickering on modern graphics cards. Use it if a "shader fix" was partly applied or deleted. |
 | Primeval Hunt (1.0) | NVIDIA and Intel Shader Fix | Restores the two shader files that make the game render on NVIDIA and Intel cards. |
-| Infinity Blade FX (1.02) | TP Infinity Blade FIX v2 / infinityblade.FIX.v1 | Restores the matrix and input wrapper DLLs the fix needs. It assumes the preserved original DLL and `TPFIX.ini` are already in place. |
-| maimai GreeN (2013) | game ZIP only (no separate patch) | Restores `freeglut.dll` and `libcurl.dll` from the game folder. The game needs both to start. |
+| Infinity Blade FX (1.02) | TP Infinity Blade FIX v2 / infinityblade.FIX.v1 | Puts back the DLL files (small program parts) the fix needs. It assumes the game's original DLL backup and `TPFIX.ini` (the fix's settings file) are already in place. |
+| maimai GreeN (2013) | game ZIP only (no separate patch) | Restores `freeglut.dll` and `libcurl.dll` into the installed game folder, using the copies inside the game's own ZIP. The game needs both to start. |
 | King of Fighters Maximum Impact Regulation A (2007) | game ZIP only (no separate patch) | Restores the four old graphics wrapper DLLs (`d3d8`, `d3d9`, `ddraw`, `wined3d`) that the game needs to draw anything. |
 | Mario Kart Arcade GP DX (1.06.35-OF USA) | D3D11Ref x64 | Restores the shipped graphics helper DLL. Without it this build shows a black screen. |
 | Gashaaaan Refill! (2009-02-24) | Jurassic Park ZIP as the source | Restores the three OGG/Vorbis sound DLLs. They are byte-identical to the ones in the Jurassic Park package, so that ZIP is used as the donor when the game folder lost them. |
@@ -70,5 +72,5 @@ Words used below: a "shader" is a small file that tells your graphics card how t
 | X-Games Snowboarder "D3D8 Wrapper" and "Missing DLL Restoration" | The game ships both `sdaemon_x64.exe` and `sdaemon_x86.exe`, the profile names neither, and the two are different builds. A recipe would refuse to run for one of the two users. Needs a decision on which exe TPM uses. |
 | Virtua Fighter eSports (2021) "APM3 Files" | The patch uses a `runtime/media/...` layout that does not exist in the game ZIP here, and all three payloads are byte-identical to files the game already has. |
 | Walking Dead "105_ELFfix" (`gamed`) | The payload is byte-identical to the game's own `pm/game`; nobody can show which path the loader wants. Writing a duplicate file would not fix anything. |
-| Super Bikes 2 "Fix exe" (142 MB), Spider-Man "Spiderman Fix" (175 MB) | TPM can handle files this big (the per-file limit is 512 MiB), but no recipe has been written for them yet. |
+| Super Bikes 2 "Fix exe" (142 MB), Spider-Man "Spiderman Fix" (175 MB) | No recipe has been written for them yet. |
 | Resolution-variant packs, bezels, configs, installers, translation installers, `.reg` files | Not game-file repairs or swaps; they are choices or tools, so they are not "required" recipes. |

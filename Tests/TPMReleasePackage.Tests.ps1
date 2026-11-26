@@ -214,7 +214,7 @@ function Corrupt-PackageArchiveCompressedMember {
         $commentLength = [BitConverter]::ToUInt16($bytes, $cursor + 32)
         $entryName = [Text.Encoding]::UTF8.GetString($bytes, $cursor + 46, $nameLength)
         if ($entryName -ceq $Name) {
-            if ($method -ne 8 -or $compressedLength -lt 4) { throw \"Member $Name was not Deflate-compressed for this test\" }
+            if ($method -ne 8 -or $compressedLength -lt 4) { throw "Member $Name was not Deflate-compressed for this test" }
             $localOffset = [BitConverter]::ToUInt32($bytes, $cursor + 42)
             $localNameLength = [BitConverter]::ToUInt16($bytes, $localOffset + 26)
             $localExtraLength = [BitConverter]::ToUInt16($bytes, $localOffset + 28)
@@ -226,7 +226,7 @@ function Corrupt-PackageArchiveCompressedMember {
         }
         $cursor += 46 + $nameLength + $extraLength + $commentLength
     }
-    throw \"Synthetic ZIP member missing: $Name\"
+    throw "Synthetic ZIP member missing: $Name"
 }
 
 function Expand-PackageArchiveFixture {

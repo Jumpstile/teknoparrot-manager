@@ -229,6 +229,17 @@ Describe 'FIX82 BepInEx result: one line per kind of problem, no counters, no co
         (Get-TpmBepInExFailureView -Result (New-Fix82BepResult -Counts @{} -Updated 4 -Skipped 0 -Failed 1 -Records @())).Title | Should -BeExactly 'BepInEx could not finish for every game.'
     }
 
+    It 'keeps "could not finish" when a game the person picked was skipped, even if nothing else failed' {
+        # Mutation: ignore the skipped picked games -> a partial run is titled as set up with the other games left alone.
+        $result = New-Fix82BepResult -Counts @{ 'SOURCE_COLLECTION' = 1 } -Updated 2 -Skipped 1 -UnknownArchitecture 0 -Failed 0 -Errors 0 -Records @() -Selected @('A', 'B', 'C')
+        $result.Mutation | Add-Member -NotePropertyName SkippedItems -NotePropertyValue @('C') -Force
+        $view = Get-TpmBepInExFailureView -Result $result
+        $view.Title | Should -BeExactly 'BepInEx could not finish for every game.'
+        $view.Title | Should -Not -Match 'left alone'
+        $view.Done[0] | Should -BeExactly 'BepInEx was set up for 2 games.'
+        $view.Needs.Count | Should -BeGreaterThan 0
+    }
+
     It 'never claims success when there is no result at all' {
         # Mutation: treat a missing result as done (no Problem status), or print nothing.
         $view = Get-TpmBepInExFailureView -Result $null
@@ -322,7 +333,8 @@ Describe 'FIX82 BepInEx update check: the path check line goes to the log, and t
         $approved = Join-Path $TestDrive 'Fix82ApprovedGames'
         $outside = Join-Path $TestDrive 'Fix82OutsideGame'
         $profiles = Join-Path $TestDrive 'Fix82BepProfiles'
-        New-Item -ItemType Directory -Path $approved, $outside, $profiles -Force | Out-Null
+        # A game outside the Games folder is only counted when it has BepInEx files; without them it is not part of the setup.
+        New-Item -ItemType Directory -Path $approved, $outside, $profiles, (Join-Path $outside 'BepInEx') -Force | Out-Null
         $exe = Join-Path $outside 'game.exe'
         New-Item -ItemType File -Path $exe -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $profiles 'Outside.xml') -Value ("<GameProfile><GamePath>$exe</GamePath></GameProfile>")
@@ -436,7 +448,7 @@ Describe 'FIX82 GPU fix result: one plain sentence, the names and paths under De
 
     It 'words each other outcome in plain language: <Case>' -ForEach @(
         @{ Case = 'nothing needed'; Params = @{ Outcome = 'NO_OP'; Updated = 0; Unchanged = 4; Changed = @() }; Title = '  No game needed a GPU fix. Nothing was changed.'; Extra = ''; Next = 'Next: Press B to go back.' }
-        @{ Case = 'cancelled'; Params = @{ Outcome = 'FAILED_BEFORE_MUTATION'; Cancelled = $true; Updated = 0; Changed = @() }; Title = '  GPU fix canceled. No game was changed.'; Extra = ''; Next = 'Next: Press B to go back.' }
+        @{ Case = 'canceled'; Params = @{ Outcome = 'FAILED_BEFORE_MUTATION'; Cancelled = $true; Updated = 0; Changed = @() }; Title = '  GPU fix canceled. No game was changed.'; Extra = ''; Next = 'Next: Press B to go back.' }
         @{ Case = 'partly done'; Params = @{ Outcome = 'PARTIAL_APPLIED'; Updated = 2; Failed = 1; Errors = 1; Changed = @('A', 'B') }; Title = '  Applied the Intel fix to 2 games, but some games need attention.'; Extra = '    - 1 game could not be updated.'; Next = 'Next: Press D to see why, or R to run it again.' }
         @{ Case = 'safety copy failed'; Params = @{ Outcome = 'FAILED_BEFORE_MUTATION'; Updated = 0; Errors = 1; Failed = 1; Reason = 'PROFILE_BACKUP_FAILED'; Changed = @() }; Title = '  The GPU fix could not finish.'; Extra = '    - A safety copy of your game settings could not be made, so nothing was changed.'; Next = 'Next: Press D to see why, or R to run it again.' }
     ) {
@@ -565,7 +577,7 @@ Describe 'FIX82 Force feedback: a four-line intro, the subscription page named o
         Show-TpmFfbNativeResult -Result $tx
         $plain = Get-Fix82Text -Rows $script:fix82Rows
         $plain | Should -Match ([regex]::Escape('Games where FFB Blaster was turned on (2)'))
-        $plain | Should -Match ([regex]::Escape('N09FfbCat, N09FfbField'))
+        $plain | Should -Match ([regex]::Escape('N09FfbCat and N09FfbField'))
         $plain | Should -Match ([regex]::Escape('Folder: D:\bk\FFBBlaster_1'))
     }
 }
@@ -736,7 +748,19 @@ Describe 'FIX82 Crosshair result: games by name, folders under Details' {
         (Get-Fix82RowTexts) | Should -Contain '    - Games: Game01, Game02, Game03, Game04, Game05, Game06 and 3 more'
         $view = Get-TpmCrosshairResultView -Result $result
         $all = @($view.DetailBlocks | Where-Object { $_.Heading -eq 'All games (9)' })[0]
-        $all.Lines | Should -Be @(($games -join ', '))
+        $all.Lines | Should -Be @('Game01, Game02, Game03, Game04, Game05, Game06, Game07, Game08 and Game09')
+    }
+
+    It 'does not say crosshairs are set up when the setup did not succeed' {
+        # Mutation: ignore Succeeded in the result view -> a failed transaction shows a green "Crosshairs are set up for N games."
+        $result = New-Fix82CrosshairResult
+        $result.Succeeded = $false
+        $result.Outcome = 'ACTION_REQUIRED'
+        $view = Get-TpmCrosshairResultView -Result $result
+        $view.Title | Should -Not -Match 'are set up'
+        $view.Title | Should -Match 'did not finish'
+        $view.Status | Should -BeExactly 'Problem'
+        @($view.Done).Count | Should -Be 0
     }
 
     It 'names each skipped game and why under Details' {
@@ -846,6 +870,33 @@ Describe 'FIX82 Crosshair setup run: no folder rows while the files are copied, 
         $result.Skipped | Should -Be 1
         $result.DeployedGames | Should -Be @('Fixture Game')
         $result.Succeeded | Should -BeTrue
+    }
+
+    It 'shows the full game name, not the file name, for a profile with no GameName element' {
+        # Mutation: fall back to the profile file name (TC5) instead of the full game name.
+        $root = Join-Path $TestDrive 'Fix82CrosshairShortName'
+        $crosshairs = Join-Path $TestDrive 'Crosshairs'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        $tpRoot = Join-Path $root 'TeknoParrot'
+        foreach ($directory in @($crosshairs, $profiles, $games, (Join-Path $tpRoot 'Metadata'))) { [void][System.IO.Directory]::CreateDirectory($directory) }
+        [System.IO.File]::WriteAllBytes((Join-Path $crosshairs '001.png'), [byte[]](1, 2, 3))
+        $gamePath = Join-Path $games 'TC5.exe'
+        $enc = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($gamePath, '', $enc)
+        [System.IO.File]::WriteAllText((Join-Path $tpRoot 'Metadata\TC5.json'), '{ "game_name": "Time Crisis 5" }', $enc)
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'TC5.xml'), ('<GameProfile><GamePath>{0}</GamePath><EmulationProfile>TimeCrisis5</EmulationProfile><GunGame>true</GunGame><EmulatorType>Other</EmulatorType></GameProfile>' -f $gamePath), $enc)
+        Mock Test-PngFile { $true }
+        Mock Show-TpmCrosshairPreviewWindow { [pscustomobject]@{ Available = $false; Cancelled = $false; P1Index = $null; P2Index = $null; TimedOut = $false; Reason = 'FIXTURE' } }
+        Mock Resolve-Pcsx2Directory { $null }
+        Mock Test-TpmGameMutationPath { [pscustomobject]@{ Valid = $true; GameDirectory = $games } }
+        Mock Read-HostSafe { if ($Prompt -match '(?i)Y/N') { if ($Prompt -match '(?i)hide the Windows cursor') { 'N' } else { 'Y' } } else { '0' } }
+
+        $result = Invoke-CrosshairSetup -UserProfilesDir $profiles -TpRoot $tpRoot
+
+        $result.DeployedGames | Should -Be @('Time Crisis 5')
+        $view = Get-TpmCrosshairResultView -Result $result
+        @($view.Done) | Should -Contain 'Games: Time Crisis 5'
     }
 
     It 'logs each hidden-cursor game instead of printing its name, and prints no "Updated" row' {

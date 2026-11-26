@@ -21,8 +21,8 @@ BeforeAll {
     [System.IO.File]::WriteAllText($functionFile, (@($definitions | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n"), (New-Object System.Text.UTF8Encoding $false))
     . $functionFile
 
-    $script:F90SomeCounts = [ordered]@{ noSync = 2; onlySync = 0; noPropagate = 1; forceArchetype = 0; familyOverride = 0; canonicalArchetype = 0; subFolderMap = 3 }
-    $script:F90NoCounts = [ordered]@{ noSync = 0; onlySync = 0; noPropagate = 0; forceArchetype = 0; familyOverride = 0; canonicalArchetype = 0; subFolderMap = 0 }
+    $script:F90SomeCounts = [ordered]@{ noSync = 2; onlySync = 0; subFolderMap = 3 }
+    $script:F90NoCounts = [ordered]@{ noSync = 0; onlySync = 0; subFolderMap = 0 }
 
     # A console that would answer any question: every way of asking one throws, so a question can never hang a test.
     function Install-F90NoQuestionMocks {
@@ -73,7 +73,7 @@ Describe 'FIX90 custom rules notice asks nothing' {
         $log | Should -Match 'Custom rules \[The file\]: Name: TeknoParrot-Manager\.overrides\.json'
         $log | Should -Match 'Custom rules \[The file\]: Path: C:\\TPM\\TeknoParrot-Manager\.overrides\.json'
         $log | Should -Match 'Custom rules \[Games with their own folder\]: How many: 3'
-        $log | Should -Match 'Custom rules \[Games that never get copied controls\]: Setting: noPropagate'
+        $log | Should -Match 'Custom rules \[ZIP files that are never extracted\]: Setting: noSync'
         $log | Should -Match 'Custom rules note: If you did not make this file yourself, there is nothing to do\.'
     }
 }
@@ -152,33 +152,6 @@ Describe 'FIX90 the end of a registration run adds no question of its own' {
             $defer.Count | Should -Be 1
             $real = @($call.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.CommandParameterAst] -and $_.ParameterName -ceq 'Unattended' -and $null -ne $_.Argument -and $_.Argument.Extent.Text -ceq '$Unattended' })
             $real.Count | Should -Be 1
-        }
-    }
-
-    It 'passes -DeferDetails and the real unattended state to both control propagation results of the registration run (the calls that have -DryRun)' {
-        # The registration run has exactly two such calls, in mutually exclusive branches: "no reference profiles, nothing to copy" and
-        # "controls were copied". Every other Write-ControlPropagationResults call belongs to the menu and has no -DryRun.
-        # Mutation: drop -DeferDetails from either call -> an extra Enter in the middle of every interactive registration run.
-        # Mutation: pass a bare -Unattended again -> the control details can never be shown in an interactive run.
-        # Mutation: add a third registration call that forgets either parameter -> the count fails.
-        $calls = @($script:F90Ast.FindAll({
-            param($node)
-            if ($node -isnot [System.Management.Automation.Language.CommandAst] -or $node.GetCommandName() -cne 'Write-ControlPropagationResults') { return $false }
-            # The menu preview of Propagate Controls (#411) passes a fixed "-DryRun $true" and is a menu screen, not part of the registration run.
-            $dry = @($node.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.CommandParameterAst] -and $_.ParameterName -ceq 'DryRun' })
-            if ($dry.Count -ne 1) { return $false }
-            # A value written with a space ("-DryRun $x") is the next word; a value written with a colon ("-DryRun:$x") is the parameter's own argument.
-            $dryValue = $dry[0].Argument
-            if ($null -eq $dryValue) {
-                $at = [array]::IndexOf(@($node.CommandElements), $dry[0])
-                if ($at -ge 0 -and ($at + 1) -lt @($node.CommandElements).Count -and $node.CommandElements[$at + 1] -isnot [System.Management.Automation.Language.CommandParameterAst]) { $dryValue = $node.CommandElements[$at + 1] }
-            }
-            return ($null -ne $dryValue -and $dryValue.Extent.Text -cne '$true')
-        }, $true))
-        $calls.Count | Should -Be 2
-        foreach ($call in $calls) {
-            @($call.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.CommandParameterAst] -and $_.ParameterName -ceq 'DeferDetails' -and $null -eq $_.Argument }).Count | Should -Be 1
-            @($call.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.CommandParameterAst] -and $_.ParameterName -ceq 'Unattended' -and $null -ne $_.Argument -and $_.Argument.Extent.Text -ceq '$Unattended' }).Count | Should -Be 1
         }
     }
 }

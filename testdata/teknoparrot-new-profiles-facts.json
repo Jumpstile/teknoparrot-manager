@@ -1,0 +1,425 @@
+{
+  "Source": "Facts only (profile code, emulator type, executable name, profile revision) for the profiles TeknoParrot added in build 1.0.0.2337, read from a real TeknoParrot 1.0.0.2337 install. No profile settings, no game files. Refresh with scripts\\Test-TpmCatalogDrift.ps1 -WriteFactsPath against a TeknoParrot folder.",
+  "Profiles": [
+    {
+      "Code": "GoldenTeeLive2021",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "game|game.bin",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "GoldenTeeLive2022",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "game|game.bin",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "GoldenTeeLive2023",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "game|game.bin",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "GoldenTeeLive2025",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "game|game.bin",
+      "GameProfileRevision": 5
+    },
+    {
+      "Code": "GoldenTeeLive2026",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "game|game.bin",
+      "GameProfileRevision": 5
+    },
+    {
+      "Code": "GoldenTeePGATour2021",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "game|game.bin",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "GoldenTeePGATour2022",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "game|game.bin",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "GoldenTeePGATour2023",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "game|game.bin",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "GoldenTeePGATour2025",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "game|game.bin",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "GoldenTeePGATour2026",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "game|game.bin",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "IgsSpeedDriver2",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "sd2",
+      "GameProfileRevision": 4
+    },
+    {
+      "Code": "IgsSpeedDriver3",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "sd3",
+      "GameProfileRevision": 5
+    },
+    {
+      "Code": "IgsSpeedRider",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "SR",
+      "GameProfileRevision": 2
+    },
+    {
+      "Code": "IgsSpeedRider2",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "speedrider2",
+      "GameProfileRevision": 2
+    },
+    {
+      "Code": "ITArcadeCollection",
+      "EmulatorType": "ElfLdr2",
+      "ExecutableName": "game|game.bin",
+      "GameProfileRevision": 2
+    },
+    {
+      "Code": "teknodos_agro",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "agro.chd",
+      "GameProfileRevision": 2
+    },
+    {
+      "Code": "teknodos_arctthnd",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "arctthnd.chd",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknodos_calchase",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "calchase.chd",
+      "GameProfileRevision": 2
+    },
+    {
+      "Code": "teknodos_dactyl",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "DAC.EXE",
+      "GameProfileRevision": 4
+    },
+    {
+      "Code": "teknodos_dactyl2",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "DN2.EXE",
+      "GameProfileRevision": 4
+    },
+    {
+      "Code": "teknodos_eggsplc",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "eggsplc.chd",
+      "GameProfileRevision": 2
+    },
+    {
+      "Code": "teknodos_funkball",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "funkball.zip",
+      "GameProfileRevision": 2
+    },
+    {
+      "Code": "teknodos_ghosttrn",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "GHOST.EXE",
+      "GameProfileRevision": 4
+    },
+    {
+      "Code": "teknodos_hostinv",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "hostinv.chd",
+      "GameProfileRevision": 2
+    },
+    {
+      "Code": "teknodos_hydro",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "hydro.chd;hydro_101b.chd",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknodos_hydro100d",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "hydro_100d.chd",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknodos_missilevr",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "MISS.EXE",
+      "GameProfileRevision": 4
+    },
+    {
+      "Code": "teknodos_offrthnd",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "offrthnd.chd",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknodos_olinshot",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "GUN.EXE",
+      "GameProfileRevision": 4
+    },
+    {
+      "Code": "teknodos_pacmanvr",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "PAC.EXE",
+      "GameProfileRevision": 4
+    },
+    {
+      "Code": "teknodos_pearl",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "PEARL.EXE",
+      "GameProfileRevision": 4
+    },
+    {
+      "Code": "teknodos_pf2012",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "pf2012.zip",
+      "GameProfileRevision": 2
+    },
+    {
+      "Code": "teknodos_savquest",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "savquest.chd",
+      "GameProfileRevision": 2
+    },
+    {
+      "Code": "teknodos_shootloot",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "SFL.EXE",
+      "GameProfileRevision": 4
+    },
+    {
+      "Code": "teknodos_totalrecoil",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "GUN.EXE",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknodos_uarctict",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "uarctict.chd",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknodos_vrboxing",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "BOX.EXE",
+      "GameProfileRevision": 4
+    },
+    {
+      "Code": "teknodos_xtom3d",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "xtom3d.zip",
+      "GameProfileRevision": 2
+    },
+    {
+      "Code": "teknodos_zeneca",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "Z.EXE",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknodos_zerohour",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "ZERO.EXE",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknodos_zomig",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "Z.EXE",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknodos_zonehunt",
+      "EmulatorType": "TeknoDOS",
+      "ExecutableName": "ZONE.EXE",
+      "GameProfileRevision": 4
+    },
+    {
+      "Code": "teknorender0_crysking",
+      "EmulatorType": "TeknoRender0",
+      "ExecutableName": "crysking.zip",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknorender0_donghaer",
+      "EmulatorType": "TeknoRender0",
+      "ExecutableName": "donghaer.zip",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknorender0_evosocc",
+      "EmulatorType": "TeknoRender0",
+      "ExecutableName": "evosocc.zip",
+      "GameProfileRevision": 5
+    },
+    {
+      "Code": "teknorender0_maldaiza",
+      "EmulatorType": "TeknoRender0",
+      "ExecutableName": "maldaiza.zip",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknorender0_officeye",
+      "EmulatorType": "TeknoRender0",
+      "ExecutableName": "officeye.zip",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknorender0_psattack",
+      "EmulatorType": "TeknoRender0",
+      "ExecutableName": "psattack.zip",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknorender0_topbladv",
+      "EmulatorType": "TeknoRender0",
+      "ExecutableName": "topbladv.zip",
+      "GameProfileRevision": 5
+    },
+    {
+      "Code": "teknorender0_urachamu",
+      "EmulatorType": "TeknoRender0",
+      "ExecutableName": "urachamu.zip",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "teknorender0_wulybuly",
+      "EmulatorType": "TeknoRender0",
+      "ExecutableName": "wulybuly.zip",
+      "GameProfileRevision": 3
+    },
+    {
+      "Code": "tjc_dangcurv",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "dangcurv.zip",
+      "GameProfileRevision": 8
+    },
+    {
+      "Code": "tjc_dangcurvj",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "dangcurv.zip",
+      "GameProfileRevision": 8
+    },
+    {
+      "Code": "tjc_dendego",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "dendego.zip",
+      "GameProfileRevision": 6
+    },
+    {
+      "Code": "tjc_dendego2",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "dendego2.zip",
+      "GameProfileRevision": 6
+    },
+    {
+      "Code": "tjc_dendego23k",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "dendego2.zip",
+      "GameProfileRevision": 6
+    },
+    {
+      "Code": "tjc_dendegoa",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "dendego.zip",
+      "GameProfileRevision": 6
+    },
+    {
+      "Code": "tjc_dendegox",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "dendego.zip",
+      "GameProfileRevision": 6
+    },
+    {
+      "Code": "tjc_landgear",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "landgear.zip",
+      "GameProfileRevision": 5
+    },
+    {
+      "Code": "tjc_landgeara",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "landgear.zip",
+      "GameProfileRevision": 5
+    },
+    {
+      "Code": "tjc_landgearj",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "landgear.zip",
+      "GameProfileRevision": 5
+    },
+    {
+      "Code": "tjc_landgearja",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "landgear.zip",
+      "GameProfileRevision": 5
+    },
+    {
+      "Code": "tjc_sidebs",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "sidebs.zip",
+      "GameProfileRevision": 7
+    },
+    {
+      "Code": "tjc_sidebs2",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "sidebs2.zip",
+      "GameProfileRevision": 7
+    },
+    {
+      "Code": "tjc_sidebs2j",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "sidebs2.zip",
+      "GameProfileRevision": 7
+    },
+    {
+      "Code": "tjc_sidebs2ja",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "sidebs2.zip",
+      "GameProfileRevision": 7
+    },
+    {
+      "Code": "tjc_sidebs2u",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "sidebs2.zip",
+      "GameProfileRevision": 7
+    },
+    {
+      "Code": "tjc_sidebsj",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "sidebs.zip",
+      "GameProfileRevision": 7
+    },
+    {
+      "Code": "tjc_sidebsja",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "sidebs.zip",
+      "GameProfileRevision": 7
+    },
+    {
+      "Code": "tjc_sidebsjb",
+      "EmulatorType": "TeknoTJC",
+      "ExecutableName": "sidebs.zip",
+      "GameProfileRevision": 7
+    }
+  ]
+}

@@ -296,6 +296,45 @@ Describe 'LB424: copy and undo' {
         [System.IO.File]::ReadAllBytes($old) | Should -Be ([byte[]](0, 0, 0))
     }
 
+    It 'a second undo finishes after the first one restored only some replaced pictures' {
+        # Mutation: an original that is already back (and whose saved copy was moved out) counts as kept -> the record never clears.
+        $fx = New-Lb424Fixture
+        $dir = Join-Path $fx.Lb 'Images\TeknoParrot\Clear Logo'
+        [void][System.IO.Directory]::CreateDirectory($dir)
+        $oldA = Join-Path $dir 'Time Crisis 4-01.png'
+        $oldB = Join-Path $dir 'Ghost Squad Evolution-01.png'
+        [System.IO.File]::WriteAllBytes($oldA, [byte[]](0, 0, 0))
+        [System.IO.File]::WriteAllBytes($oldB, [byte[]](7, 7, 7))
+        $plan = Get-Lb424Plan $fx -Replace
+        $cand = $plan.Near[0].Candidates[0]
+        $selected = @($plan.Exact) + @([pscustomobject]@{ Game = $plan.Near[0].Game; Image = $cand.Image; Dest = $cand.Dest })
+        $selected.Count | Should -Be 2
+        (Invoke-TpmLaunchBoxMediaImport -lbRoot $fx.Lb -Selected $selected -BackupRoot $fx.Backups -ReplaceExisting).ReplacedCount | Should -Be 2
+        [System.IO.File]::WriteAllBytes($oldA, [byte[]](42, 42))
+        (Invoke-TpmLaunchBoxMediaUndo -lbRoot $fx.Lb -BackupRoot $fx.Backups).Outcome | Should -BeExactly 'PARTIAL'
+        [System.IO.File]::ReadAllBytes($oldB) | Should -Be ([byte[]](7, 7, 7))
+        [System.IO.File]::Delete($oldA)
+        $second = Invoke-TpmLaunchBoxMediaUndo -lbRoot $fx.Lb -BackupRoot $fx.Backups
+        $second.Outcome | Should -BeExactly 'SAVED'
+        [System.IO.File]::ReadAllBytes($oldA) | Should -Be ([byte[]](0, 0, 0))
+        [System.IO.File]::ReadAllBytes($oldB) | Should -Be ([byte[]](7, 7, 7))
+        @(Get-ChildItem -LiteralPath (Get-TpmLbMediaImportsRoot -lbRoot $fx.Lb -BackupRoot $fx.Backups) -Recurse -Filter manifest.json -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
+
+    It 'replacing pictures never deletes a picture that is itself the one chosen as the source' {
+        # Mutation: no source/destination check -> the file is backed up, deleted, then cannot be copied from its old path.
+        $fx = New-Lb424Fixture
+        $dir = Join-Path $fx.Lb 'Images\TeknoParrot\Clear Logo'
+        [void][System.IO.Directory]::CreateDirectory($dir)
+        $same = Join-Path $dir 'Time Crisis 4-01.png'
+        [System.IO.File]::WriteAllBytes($same, [byte[]](5, 5, 5))
+        $plan = Get-TpmLaunchBoxMediaPlan -lbRoot $fx.Lb -userProfilesDir $fx.Profiles -imageFolder $dir -platformNames @('TeknoParrot') -Kind ClearLogo -ReplaceExisting
+        @($plan.Exact).Count | Should -Be 1
+        $r = Invoke-TpmLaunchBoxMediaImport -lbRoot $fx.Lb -Selected @($plan.Exact) -BackupRoot $fx.Backups -ReplaceExisting
+        $r.Outcome | Should -Not -BeExactly 'FAILED'
+        [System.IO.File]::ReadAllBytes($same) | Should -Be ([byte[]](5, 5, 5))
+    }
+
     It 'a failure part-way removes everything that was already copied' {
         # Mutation: no rollback on failure -> the first picture stays in LaunchBox.
         $fx = New-Lb424Fixture

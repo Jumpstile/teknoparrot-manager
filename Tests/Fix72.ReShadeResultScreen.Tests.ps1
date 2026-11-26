@@ -308,12 +308,10 @@ Describe 'FIX72 result screen: a short plain summary, a plain choice, every fact
         $detailsFrom | Should -BeGreaterThan 0 -Because 'the Details start with the common note'
         $details = Get-Fix72Text -Rows @($script:fix72Rows | Select-Object -Skip $detailsFrom)
         foreach ($fact in @(
-            'Summary: ReShade applied partially: 1 game changed, 0 errors, 0 unavailable-device skips.',
-            'Changed: 1 game', 'Protected existing: 3 games', 'Missing paths: 0 games', 'Failed: 0 games', 'Unsafe/malformed: 1 game',
+            'Summary: ReShade was applied to 1 game. The other selected games were left unchanged.',
+            'Changed: 1 game', 'Protected existing: 3 games', 'Missing paths: 0 games', 'Failed: 0 games', 'Could not be checked safely: 1 game',
             'Changed: verified ReShade deployments only.',
-            'Not changed: protected, unsafe/malformed, unknown, or unavailable game folders.',
-            'Data safety: TeknoParrot Manager did not claim success for every selected game; skipped and failed games were left unchanged.',
-            'What to do next: review the games listed here, repair the listed issue, then run ReShade setup again.',
+            'Not changed: protected games, games that could not be checked safely, games whose 32-bit or 64-bit type could not be read, and games that are not available.',
             'Game 01', 'Game 02', 'Game 03',
             'What happened: This game already has a ReShade that TeknoParrot Manager did not install.',
             'Reason code: RESHADE_NOT_OWNED',
@@ -333,7 +331,9 @@ Describe 'FIX72 result screen: a short plain summary, a plain choice, every fact
         # the same facts are in the log, shown or not
         $log = $script:fix72Log -join "`n"
         $log | Should -Match ([regex]::Escape('ReShade result detail [Game 02]: Reason code: RESHADE_NOT_OWNED'))
-        $log | Should -Match ([regex]::Escape('ReShade result detail [What TeknoParrot Manager did]: Not changed: protected, unsafe/malformed, unknown, or unavailable game folders.'))
+        $log | Should -Match ([regex]::Escape('ReShade result detail [What TeknoParrot Manager did]: Not changed: protected games, games that could not be checked safely, games whose 32-bit or 64-bit type could not be read, and games that are not available.'))
+        # Nothing failed here, so Details must not claim a data-safety problem or tell the player to try again.
+        $details | Should -Not -Match 'Data safety:|What to do next:'
     }
 
     It 'keeps the Details rows inside the console at <Width> columns' -ForEach @(
@@ -384,7 +384,7 @@ Describe 'FIX72 result screen: a short plain summary, a plain choice, every fact
         $screen = Show-TpmReShadeSetupResult -Result (New-Fix72Result -Deployed 3 -Protected 0)
         $plain = Get-Fix72Text -Rows $script:fix72Rows
         $plain | Should -Match ([regex]::Escape('Done: Fast CRT applied to 3 games.'))
-        $plain | Should -Match ([regex]::Escape('To turn the effect on or off, start a game and press the Home key.'))
+        $plain | Should -Match ([regex]::Escape('To open the ReShade effects menu, start a game and press the Home key.'))
         $plain | Should -Not -Match ([regex]::Escape('[A]'))
         $plain | Should -Not -Match 'Not changed'
         $script:fix72Prompts.Count | Should -Be 1

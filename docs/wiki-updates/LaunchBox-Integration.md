@@ -17,7 +17,7 @@ You can also open it any time from main menu item **3** (LaunchBox integration).
 | S | Keep LaunchBox in step with TeknoParrot (backed up). |
 | L | Link games for art and details (backed up). |
 | C | Fill in players and controllers for Big Box (backed up). |
-| F | Make an import file only. LaunchBox is not touched. |
+| F | Make an import file only. LaunchBox is not changed. The optional pictures step still follows: pick `S` (Skip) there. |
 | B | Skip this step. |
 
 You can press **P** as many times as you like. What you answered there becomes the default for **A**.
@@ -82,9 +82,9 @@ After I, pick the folder, then the picture type (`1 Clear logos, 2 Box front`) a
 
 ---
 
-## Lighting for arcade buttons (LEDBlinky)
+## Lighting for your cabinet (LEDBlinky)
 
-If you use LEDBlinky, a full run (not "New game only") ends with `Optional: lighting for your arcade buttons.` TPM looks for LEDBlinky on your drives and in Program Files, or asks where it is and remembers the folder.
+If you use LEDBlinky, a full run (not "New game only") ends with `Optional: lighting for your cabinet.` TPM looks for LEDBlinky on your drives and in Program Files, or asks where it is and remembers the folder.
 
 | Key | What it does |
 |---|---|
@@ -101,7 +101,7 @@ A game gets only the controls it uses that your cabinet has. Only entries TPM ad
 
 ## Import file (F)
 
-TeknoParrot Manager saves `TeknoParrot-LaunchBox-Import.xml` in the `Reports` folder and prints the steps to import it. It never overwrites an older copy of that file. Games whose game file is missing are left out.
+TeknoParrot Manager saves `TeknoParrot-LaunchBox-Import.xml` in the `Reports` folder and prints the steps to import your games. Follow those steps: they point LaunchBox at your TeknoParrot profile XML files. The saved file is a reference copy. It never overwrites an older copy of that file. Games whose game file is missing are left out.
 
 ---
 
@@ -114,7 +114,7 @@ Choose **15** (Restore backup) in the main menu, then option **3**, the LaunchBo
 
 - Nothing is asked in a preview run or an unattended run.
 - Before any write, a checked copy of each LaunchBox file it will change is saved. The copies go to `TeknoParrotManager\Backups\LaunchBoxBackups`. If TeknoParrot is inside the LaunchBox folder, they go to a folder under your Windows user's local app data instead, so they are never kept inside the library.
-- The platform TeknoParrot Manager makes is called TeknoParrot and is set to be scraped as Arcade. This is checked, and nothing is renamed.
+- The platform TeknoParrot Manager makes is called TeknoParrot and is set to be scraped as Arcade (LaunchBox then looks up game details and art as for arcade games). This is checked, and nothing is renamed.
 - Games with an unreadable profile or an invalid saved path are left out and named in Details (press **D**).
 - Saves to several files are not one single step, so keep LaunchBox and BigBox closed until the result appears.
 

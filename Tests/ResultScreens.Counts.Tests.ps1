@@ -60,7 +60,7 @@ Describe 'dgVoodoo2 names every selected game' {
             FailedDetails = @()
         }
         $view = Get-TpmDgVoodoo2ResultView -Result $result
-        $view.Done[0] | Should -BeExactly 'You selected 4 games: 3 changed, 1 skipped.'
+        $view.Done[0] | Should -BeExactly 'You selected 4 games: 3 set up now, 1 skipped.'
         ($view.Needs -join ' ') | Should -Match 'g4'
         $view.Next | Should -Match '14 \(Library health check\)'
     }

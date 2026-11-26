@@ -87,7 +87,13 @@ The intended model has three layers:
 If you already have a controller list from somewhere else (for example RetroBat's `teknoparrot.yml`), TeknoParrot Manager can compare it with your installed game profiles. This is read-only.
 
 ```powershell
-.\TeknoParrot-Manager.ps1 -MappingEvidenceFile "<list>" -ValidationRoot "<TeknoParrot folder>" [-ValidationJsonPath "<details file>"]
+.\TeknoParrot-Manager.ps1 -MappingEvidenceFile "<list>" -ValidationRoot "<TeknoParrot folder>"
+```
+
+To also save the details file, add `-ValidationJsonPath`:
+
+```powershell
+.\TeknoParrot-Manager.ps1 -MappingEvidenceFile "<list>" -ValidationRoot "<TeknoParrot folder>" -ValidationJsonPath "<details file>"
 ```
 
 - It prints plain counts: games in the list, games found in your TeknoParrot, games ready for a person to review, games with some controls missing, and games held back.

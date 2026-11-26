@@ -1078,7 +1078,7 @@ function Format-TpmProgressSegments {
 
     $label = Get-TpmProgressLabelText -Title $Title -Stage $Stage
 
-    $percent = if ($State -in @('Pending', 'Skipped')) { -1 } elseif ($overshoot) { [Math]::Floor(([double]$Current * 100) / $Total) } else { Get-TpmProgressPercent -Current $Current -Total $Total -State $State }
+    $percent = if ($State -in @('Pending', 'Skipped') -or $overshoot) { -1 } else { Get-TpmProgressPercent -Current $Current -Total $Total -State $State }
     $percentText = if ($percent -ge 0) { ('[{0}%]' -f $percent).PadLeft([Math]::Max(6, $PercentWidth)) } else { ' ' * [Math]::Max(6, $PercentWidth) }
     $countText = if ($NoCount -or $State -eq 'Skipped') { '' } else { Format-TpmProgressCount -Current $Current -Total $Total -Unit $Unit }
     if ($countText -and $State -in @('Error', 'Incomplete', 'Cancelled', 'Stalled')) { $countText = '(!) ' + $countText }

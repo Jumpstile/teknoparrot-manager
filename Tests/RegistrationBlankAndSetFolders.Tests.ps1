@@ -100,4 +100,34 @@ Describe 'AutoSync registration of profiles with no game file and of incomplete 
         @($r.Registered | ForEach-Object { $_.Code }) | Should -Not -Contain 'CHILDSET'
         @($r.Unmatched) | Should -Contain 'Child Game'
     }
+
+    It 'does not report a second folder as a duplicate of a game that had no profile to register' {
+        # Mutation: keep the claim after the missing-template skip -> the second folder is reported as a duplicate "claimed by" a folder that was never registered.
+        $root = New-BlankRoot
+        New-BlankFile -Path (Join-Path $root 'Games\Rev Game A\game.exe')
+        New-BlankFile -Path (Join-Path $root 'Games\Rev Game B\game.exe')
+        $profileSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $dat = @{
+            (Get-NormalizedGameKey 'Rev Game A') = [pscustomobject]@{ ProfileCode = 'NOPROFILE'; OriginalName = 'Rev Game A'; Executable = '' }
+            (Get-NormalizedGameKey 'Rev Game B') = [pscustomobject]@{ ProfileCode = 'NOPROFILE'; OriginalName = 'Rev Game B'; Executable = '' }
+        }
+        $r = @(Register-GamesLegacy -userProfilesDir (Join-Path $root 'UserProfiles') -installFolder (Join-Path $root 'Games') -profileIndex @{} `
+            -gameProfilesDir (Join-Path $root 'GameProfiles') -datIndex $dat -profileSet $profileSet -tpRootDir (Join-Path $root 'TeknoParrot') -subFolderMap @{} -DryRun $true)[0]
+        @($r.Ambiguous | Where-Object { $_.Reason -eq 'duplicate' }).Count | Should -Be 0
+    }
+
+    It 'does not register a subFolderMap entry that points outside the TeknoParrot folder' {
+        # Mutation: skip the containment check -> a typo such as ..\Elsewhere in overrides.json writes a profile for a game outside the TeknoParrot folder.
+        $root = New-BlankRoot
+        New-BlankFile -Path (Join-Path $root 'Outside\game.exe')
+        New-BlankFile -Path (Join-Path $root 'TeknoParrot\Inside\game.exe')
+        New-BlankFile -Path (Join-Path $root 'GameProfiles\OUTGAME.xml') -Text '<GameProfile><GamePath></GamePath><ExecutableName>game.exe</ExecutableName></GameProfile>'
+        New-BlankFile -Path (Join-Path $root 'GameProfiles\INGAME.xml') -Text '<GameProfile><GamePath></GamePath><ExecutableName>game.exe</ExecutableName></GameProfile>'
+        $profileSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $r = @(Register-GamesLegacy -userProfilesDir (Join-Path $root 'UserProfiles') -installFolder (Join-Path $root 'Games') -profileIndex @{} `
+            -gameProfilesDir (Join-Path $root 'GameProfiles') -datIndex @{} -profileSet $profileSet -tpRootDir (Join-Path $root 'TeknoParrot') -subFolderMap @{ OUTGAME = '..\Outside'; INGAME = 'Inside' } -DryRun $true)[0]
+        $codes = @($r.Registered | ForEach-Object { $_.Code })
+        $codes | Should -Not -Contain 'OUTGAME'
+        $codes | Should -Contain 'INGAME'
+    }
 }

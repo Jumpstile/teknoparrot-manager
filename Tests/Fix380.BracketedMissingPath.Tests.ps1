@@ -3,7 +3,7 @@ Describe 'A missing file inside a bracketed game folder ([TP]) is reported as mi
         $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'TeknoParrot-Manager.ps1'
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($src, [ref]$null, [ref]$null)
         $want = @('Get-TpmSupportNativeType', 'Get-TpmSupportFinalPathFromHandle', 'Resolve-TpmSupportExpectedFinalPath', 'Remove-TpmSupportHandle',
-            'Get-TpmTreeFileState', 'Remove-TpmTreeOwnedFile')
+            'Get-TpmTreeFileState', 'Remove-TpmTreeOwnedFile', 'Test-TpmGameMutationPath', 'Remove-PostgresTrustRuleMarker')
         $funcs = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $want -contains $n.Name }, $true)
         foreach ($f in $funcs) { . ([scriptblock]::Create($f.Extent.Text)) }
         $script:Base = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-380-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -35,5 +35,19 @@ Describe 'A missing file inside a bracketed game folder ([TP]) is reported as mi
     It 'undoing a file that is already gone from a [TP] folder says Absent instead of failing' {
         $r = Remove-TpmTreeOwnedFile -Path (Join-Path $script:Game 'gone.dll') -ExpectedIdentity 'any'
         $r | Should -Be 'Absent'
+    }
+    It 'a registered game path that is gone from a [TP] folder is reported as missing, with or without the leaf requirement' {
+        $gone = Join-Path $script:Game 'gone.exe'
+        (Test-TpmGameMutationPath -GamePath $gone -RequireLeaf).ReasonCode | Should -Be 'GAME_PATH_MISSING'
+        (Test-TpmGameMutationPath -GamePath $gone).ReasonCode | Should -Be 'GAME_PATH_MISSING'
+        (Test-TpmGameMutationPath -GamePath (Join-Path $script:Base 'Missing (1.00)[TP]\game.exe')).Valid | Should -BeFalse
+    }
+    It 'removing a PostgreSQL recovery marker that is already gone from a [TP] folder finishes quietly' {
+        $script:MarkerForTest = Join-Path $script:Game 'marker.json'
+        function Get-PostgresTrustRuleMarkerPath { return $script:MarkerForTest }
+        { Remove-PostgresTrustRuleMarker } | Should -Not -Throw
+        Set-Content -LiteralPath $script:MarkerForTest -Value '{}'
+        { Remove-PostgresTrustRuleMarker } | Should -Not -Throw
+        [System.IO.File]::Exists($script:MarkerForTest) | Should -BeFalse
     }
 }

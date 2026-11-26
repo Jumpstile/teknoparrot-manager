@@ -15,8 +15,8 @@ Setup finds the games that need it by itself. If none of your registered games n
 1. Start TeknoParrot Manager. At `Enter 1-18:` type `12` and press Enter.
 2. If PostgreSQL is not installed yet, setup first tells you what it will ask Windows for. Read it, then press Enter at `Press Enter to open the Windows permission window`. Windows then asks for permission. Click **Yes**. Use an administrator account of this PC. If your account is not an administrator, close TeknoParrot Manager and start it again with "Run as administrator". (Setup does not wait for Enter when no keyboard is there.)
 3. You are asked for two passwords (see below). Type each one twice.
-4. Wait. Setup installs PostgreSQL, makes each game's database from the game's own backup file, and tests it with the game's own settings.
-5. When you see `PostgreSQL setup finished.`, open TeknoParrot and start a game. For games set to Existing PostgreSQL, nothing else is needed on first start. A game set to Internal makes its own database the first time you start it.
+4. Wait. Setup installs PostgreSQL, makes each game's database from the game's own backup file, and tests it with the game's own settings. A game with no backup file is not set up this way: a few Golden Tee games make their own database when you first start them, and any other game with no backup file is left out and named (every other game is still set up). See "What setup does to each game" below.
+5. When you see `PostgreSQL setup finished.`, open TeknoParrot and start a game. For games set up here, nothing else is needed on first start. A game that makes its own database (the Golden Tee games above) creates it the first time you start it.
 
 At the end, press Enter to go back to the menu, or `D` for details. Everything on the screen is also in the log.
 
@@ -61,6 +61,26 @@ Before it changes anything, setup backs up your existing PostgreSQL databases. T
 - If the install itself fails, open View Log, then choose Postgres setup again. If it then lists PostgreSQL items it found, read the warning on that screen before you delete anything. A PostgreSQL folder can hold game databases and saved scores.
 - Two TeknoParrot Manager windows cannot change PostgreSQL at once.
 
+## If you forgot the PostgreSQL password
+
+TeknoParrot Manager cannot reset it for you.
+To reset a forgotten PostgreSQL password, the database safety check has to be turned off for a short time.
+While it is off, any program on this PC can open the database without a password.
+If a crash or a power cut happens in the middle, the safety check could be left off.
+TeknoParrot Manager will not take that risk for you.
+You do it yourself, on purpose, with the steps below, and you turn the safety check back on at the end.
+
+1. Stop the Windows service `pgsql-8.3`.
+2. Copy `C:\Program Files (x86)\PostgreSQL\8.3\data\pg_hba.conf` to a safe place.
+3. Open `pg_hba.conf` in Notepad. Add this line above all other lines, then save the file: `host all postgres 127.0.0.1/32 trust`. The safety check is now off.
+4. Start the service. In a Command Prompt, run `"C:\Program Files (x86)\PostgreSQL\8.3\bin\psql.exe" -h 127.0.0.1 -p 5432 -U postgres -d postgres`.
+5. Type `\password postgres` and enter the new password twice. Then type `\q`.
+6. Turn the safety check back on. Stop the service. Put your copy of `pg_hba.conf` back. Start the service.
+7. Open Postgres setup again, choose **F** and type the new password.
+8. Check the safety check is back on. The `trust` line must be gone from `pg_hba.conf`. If it is still there, repeat step 6.
+
+Do step 6 straight away. While the `trust` line is there, any program on this PC can log in as `postgres`. If a step fails, still do step 6 first.
+
 ---
 
 <details>
@@ -70,7 +90,7 @@ Before it changes anything, setup backs up your existing PostgreSQL databases. T
 
 **Passwords.** The database password is encrypted with Windows DPAPI (tied to your Windows account and this PC) and saved in `<your TeknoParrot folder>\TeknoParrotManager\State\TeknoParrot-Manager.config.json`.
 
-**Backup files.** The game's database is built from the game's own backup in its `pg_backup` folder. When there are several, the newest one is used. The confirm screen, Details and the log say which file was used.
+**Backup files.** The game's database is built from the game's own backup in its `pg_backup` folder. When there are several, the newest one is used, judged by the date and time in the file names. If the names have no date and time, one is picked by name, so it may not be the one you copied last. The confirm screen, Details and the log say which file was used.
 
 **Checked means connected.** A database counts as ready only when setup could connect with the settings saved in the game's profile and find its tables.
 

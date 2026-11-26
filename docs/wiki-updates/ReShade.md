@@ -2,7 +2,7 @@
 
 ReShade adds visual filters on top of a game: CRT-style scanlines, a soft glow, deeper blacks and brighter whites. It is optional. Your games run fine without it. It is main menu item 6, **ReShade setup**.
 
-ReShade works with **both 32-bit and 64-bit games**. Games that run through BudgieLoader (a Linux-style game format) are skipped for now, and nothing in their folder changes.
+ReShade works with **both 32-bit and 64-bit games**. Games that run through BudgieLoader (a Linux-style game format) are skipped for now, and nothing in their folder changes. A 32-bit game also needs `ReShade32.dll` next to `ReShade64.dll`, or it is skipped.
 
 ---
 
@@ -11,12 +11,12 @@ ReShade works with **both 32-bit and 64-bit games**. Games that run through Budg
 1. Start TeknoParrot Manager. At `Enter 1-18:` type `6` and press Enter.
 2. Press `S` (or just Enter) to set up ReShade.
 3. Pick a look by typing its number at `Choice`. A preview window may open. It only shows an approximation of the look, not the real filter.
-4. Type `U` to use the look you picked. Then press `Y` at `Use the selected ReShade profile?` Nothing changes until you confirm.
+4. Type `U` to use the look you picked. You go straight on to choosing games. Nothing changes until you confirm the games.
 5. Choose your games: `A` for all registered games, or `L` to pick from a list (type numbers, then `D` when you are done).
 6. If you picked more than one game, press `Y` (or Enter) at `Apply ... ?`
-7. Start a game. Press the **Home** key to turn the effect on or off.
+7. Start a game. Press the **Home** key to open the ReShade overlay, then tick or untick the effects you want. Home is ReShade's own key; if a game uses Home for something else, change `KeyOverlay=` in the game's `ReShade.ini`.
 
-Other keys at the `Choice` prompt: `N` skips ReShade, `B` cancels, `R` reopens the preview window, `D` shows details about each look.
+After you pick a number, you see a short `Selected:` line, not the whole list. Other keys at the `Choice` prompt: `L` shows the full list again, `S` uses your own preset file, `N` skips ReShade, `B` cancels, `R` reopens the preview window, `D` shows details about each look.
 
 The first screen at menu 6 has four choices: `S` set up ReShade, `R` remove the files TeknoParrot Manager made, `U` undo ReShade changes, and `B` use my bezel folder (see "Use my bezel folder" below).
 
@@ -63,7 +63,7 @@ A look you saved earlier that is no longer in the list is reported as retired. T
 
 ## Where the files come from
 
-TeknoParrot Manager does not ship ReShade in its ZIP. It needs one file, `ReShade64.dll`. The file is looked for in:
+TeknoParrot Manager does not ship ReShade in its ZIP. It needs `ReShade64.dll`, and `ReShade32.dll` next to it for 32-bit games. The file is looked for in:
 
 - `<your TeknoParrot folder>\TeknoParrotManager\Assets\ReShade\`
 - the `ReShade\` folder next to the script (used if you declined the tidy-up)
@@ -79,7 +79,7 @@ The automatic download is checked before use: the installer must carry the trust
 <details>
 <summary>Details: what goes into a game folder</summary>
 
-- One DLL, named for the graphics system the game uses: `d3d9.dll` (DirectX 9), `dxgi.dll` (DirectX 10 and 11, also used when it cannot tell), `d3d12.dll` (DirectX 12) or `opengl32.dll` (OpenGL and BudgieLoader games).
+- One DLL, named for the graphics system the game uses: `d3d9.dll` (DirectX 9), `dxgi.dll` (DirectX 10 and 11, also used when it cannot tell), `d3d12.dll` (DirectX 12) or `opengl32.dll` (OpenGL games; BudgieLoader games are skipped).
 - OpenParrot games get the DLL in their `openparrot\` subfolder.
 - A `ReShade.ini` with your look, plus the shader files it needs.
 - That `ReShade.ini` marks ReShade's first-run tutorial as done and turns the clock, FPS, frame time and message overlays off. So no welcome window or counters appear when a game starts. The key that opens ReShade is not changed.
@@ -113,11 +113,11 @@ Removing ReShade later does not turn TeknoParrot's CRT look back on. To put it b
 
 After setup, the result screen says what changed and what was left alone. A game is left alone, for example, when:
 
-- it is a 32-bit game, or its type cannot be read
+- it is a 32-bit game and `ReShade32.dll` is not next to `ReShade64.dll`, or its type cannot be read
 - it already has a ReShade that TeknoParrot Manager did not install
 - its game file cannot be found (check its drive is connected, then run [[Health Check]])
 
-Before it installs anything, ReShade tells you how many of the games you picked it can change now (for example `You selected 4 games. 3 can be changed now.`) and that it leaves the others alone. Press `D` on the result screen to see why for each game. If a game only has a leftover ReShade.ini or older ReShade files, press `A` to replace them. You are asked to confirm, and a copy of the old files is saved first so you can undo it.
+Before it installs anything, ReShade tells you how many of the games you picked it can change now (for example `You selected 4 games. 3 can be changed now.`) and that it leaves the others alone. After a setup for many games, the result is a short summary (selected, set up, failed, skipped) with the skipped games grouped by reason, and no failure warning when every game that could be set up was set up. Press `D` on the result screen to see the game lists and why for each game. If a game only has a leftover ReShade.ini or older ReShade files, press `A` to replace them. You are asked to confirm, and a copy of the old files is saved first so you can undo it.
 
 ---
 

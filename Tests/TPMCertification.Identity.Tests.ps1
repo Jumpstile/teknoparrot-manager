@@ -108,7 +108,8 @@ Describe 'Certification checkout identity and serialization guard' {
             $module=$script:executionModulePath.Replace("'","''")
             $path=$repo.Replace("'","''")
             $code="Import-Module '$module' -Force; try { Enter-TPMCertificationRepositoryLockV1 -RepositoryPath '$path' | Out-Null; exit 0 } catch { if (`$_.Exception.Message -like 'CERTIFICATION_ALREADY_RUNNING:*') { exit 17 }; exit 18 }"
-            $process=Start-Process (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-NonInteractive','-Command',$code) -Wait -PassThru
+            $engine=if(Get-Command pwsh -ErrorAction SilentlyContinue){(Get-Command pwsh).Source}else{"$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"}
+            $process=Start-Process $engine -ArgumentList @('-NoProfile','-NonInteractive','-Command',$code) -Wait -PassThru
             $process.ExitCode|Should -Be 17
         }finally{Exit-TPMCertificationRepositoryLockV1 -Lock $lock}
     }

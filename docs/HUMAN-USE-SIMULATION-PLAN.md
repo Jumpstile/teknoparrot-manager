@@ -120,7 +120,7 @@ Human-use simulation should catch issues like:
 
 ## Certification gate
 
-Add a future certification gate named `Human-Use Simulation`.
+The certification gate named `Human-Use Simulation` exists (see `docs\TPM-CERTIFICATION-SUITE.md`).
 
 This gate should pass only when:
 
@@ -134,17 +134,11 @@ This gate should pass only when:
 
 Human-use cases should be stored in machine-readable datasets where possible.
 
-Suggested future files:
+The shipped dataset is the single file `testdata/human-use-scenarios.json`. Its tests are in `Tests/HumanUseSimulation.Tests.ps1`.
 
-- `testdata/human-use-main-menu.json`
-- `testdata/human-use-first-run.json`
-- `testdata/human-use-update-check.json`
-- `testdata/human-use-autosync.json`
-- `testdata/human-use-restore.json`
+## Implementation targets
 
-## First implementation targets
-
-1. Add metadata tests proving human-use datasets exist and are parseable.
+1. Metadata tests proving the human-use dataset exists and is parseable (done, in `Tests/HumanUseSimulation.Tests.ps1`).
 2. Add transcript-based tests for main menu wording.
 3. Add transcript-based tests for update check wording.
 4. Add cancel-path no-change checks.

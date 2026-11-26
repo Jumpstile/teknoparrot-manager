@@ -290,6 +290,8 @@ Describe 'FIX83 item 11: Library health check default view' {
         @{ Case = 'the field definitions could not be read'; Override = @{ OptionalCoverageUnavailable = $true; OptionalCoverageError = 'no GameProfiles folder' }; Fine = $false }
         @{ Case = 'the PostgreSQL check is incomplete'; Override = @{ PostgresInventoryStatus = 'Unknown' }; Fine = $false }
         @{ Case = 'the game startup files check failed'; Override = @{ PrerequisiteChecked = $true; PrerequisiteCheckFailed = $true }; Fine = $false }
+        @{ Case = 'the game types check could not run'; Override = @{ GameTypeCheckFailed = $true }; Fine = $false }
+        @{ Case = 'the controls check could not run'; Override = @{ ControlsCheckFailed = $true }; Fine = $false }
         @{ Case = 'the graphics card was not detected'; Override = @{ DetectedGpuVendor = $null }; Fine = $false }
         @{ Case = 'the PostgreSQL service could not be read'; Override = @{ PostgresConfigured = 1; PostgresServiceExists = $null; PostgresServiceUnverified = $true }; Fine = $false }
     ) {

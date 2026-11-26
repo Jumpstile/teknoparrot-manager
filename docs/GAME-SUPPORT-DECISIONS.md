@@ -2,7 +2,7 @@
 
 `scripts\TpmGameSupportDecisions.json` records one decision for each game in the community guide (eggmansworld.github.io/TeknoParrot) whose loader runs a program: TeknoParrot, ElfLdr2, Lindbergh, cxbxr, pcsx2x6, RPCS3, Dolphin, Model 1/2/3, Play!, and the few single-game loaders. ROM-set loaders (Naomi, S11, MVS, CPS, STV and similar) are listed under `Scope.ExcludedLoaders` and have their own decisions.
 
-The coverage tool reads this file. TeknoParrot Manager does not read it while it runs, and it is not in the release ZIP.
+Neither TeknoParrot Manager nor the coverage tool (`scripts\New-TpmGameCoverage.ps1`) reads this file. Only the test `Tests\Fix412.GameSupportDecisions.Tests.ps1` checks it, and it is not in the release ZIP.
 
 ## What a decision means
 

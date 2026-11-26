@@ -1,6 +1,6 @@
 # Game support
 
-This page says, game by game, what TeknoParrot Manager does for the games in the Eggman guide and in the TeknoParrot catalog it was checked against. The numbers are made by a tool (`scripts\New-TpmGameCoverage.ps1`), not typed by hand.
+This page counts the games in the Eggman guide and in the TeknoParrot catalog it was checked against, grouped by emulator, and says what TeknoParrot Manager does for each group. It does not list every game by name. The one-row-per-game list is a file (`game-coverage.csv`) that the tool makes in the folder you name (see Details at the bottom). The numbers on this page came from TeknoParrot catalog 1.0.0.2334. They were made by a tool (`scripts\New-TpmGameCoverage.ps1`), not typed by hand, and they are not regenerated when TeknoParrot Manager is built or released. A newer TeknoParrot catalog can differ until someone runs the tool again.
 
 ## What the words mean
 
@@ -8,7 +8,7 @@ This page says, game by game, what TeknoParrot Manager does for the games in the
 - **Checked**: TeknoParrot Manager checks something and warns you (path too long, a pinned file, a graphics card that does not work, emulator startup files).
 - **Guided**: the guide has steps for the game. TeknoParrot Manager puts them in your Game Notes file. You do the steps.
 - **Handled**: the guide has nothing for the game that TeknoParrot Manager must do. TeknoParrot does the work.
-- **Gap**: TeknoParrot has no game profile for this guide entry, so there is nothing to register. The row says exactly what is missing.
+- **Gap**: TeknoParrot has no game profile for this guide entry, so there is nothing to register. The per-game row in `game-coverage.csv` says exactly what is missing.
 
 ## Totals
 
@@ -83,8 +83,8 @@ The catalog used is TeknoParrot 1.0.0.2334 with 2544 game profiles. 9 guide IDs 
 - **ROM games (marked ROM)**: the guide asks you to pick the exact ZIP it names, keep the BIOS ZIP in the same folder, pick the matching game revision, and for some games pick a CHD file as a second game file. TeknoParrot Manager sets the game file when a catalog profile exists, shows these steps in the Game Notes file, and reports in Library Health (Game support) when a second game file is missing.
 - **Gap rows**: guide entries that have no TeknoParrot profile of their own. Seven are extra archives that TeknoParrot has no profile for at all (the Sega Rally 3 track mods and Escape from Monster Manor); TeknoParrot Manager lists their folders as "not in TeknoParrot" and does not call that a failure. Two (Battle Gear 3 and Wayne Gretzky's 3D Hockey Fatality Edition) run through a linked profile.
 - **Second profile not written**: four games (House of the Dead 4, Raiden III, Raiden IV and Densha de GO) have a first profile that TeknoParrot Manager registers, and the guide also names a second profile for them. The guide does not say what that second profile is for, so TeknoParrot Manager does not write it. These four are not Gap rows. They stay on this page so they are not forgotten. (The one exception is a game whose first profile TeknoParrot has retired: its second profile is written when the game folder has the file that profile starts.)
-- **Profiles the guide does not list**: 88 TeknoParrot profiles have no guide entry. TeknoParrot Manager registers them like any other game. There are no guide steps to show for them.
+- **Profiles the guide does not list**: 88 TeknoParrot profiles have no guide entry. TeknoParrot Manager registers them like any other game, so a game TeknoParrot adds later needs no TeknoParrot Manager update. The Game Notes file gives each one a plain entry, with the platform, release year and known issues from TeknoParrot's own game information when it has them.
 
 ## Details (for testers)
 
-Run `scripts\New-TpmGameCoverage.ps1 -GuidePath <guide page or game-data JSON> -SnapshotManifestPath <snapshot-manifest.json> -ProfilesDir <saved profile XML folder> -OutputDir <folder> -MarkdownPath docs\GAME-SUPPORT.md`. The tool writes one row per game ID with its loader, what the guide says, and the exact missing data for each gap. Guide text is only read, never run. A refresh is needed whenever the guide, the catalog snapshot or the reviewed recipe list changes.
+Run `scripts\New-TpmGameCoverage.ps1 -GuidePath <guide page or game-data JSON> -SnapshotManifestPath <snapshot-manifest.json> -ProfilesDir <saved profile XML folder> -OutputDir <folder> -MarkdownPath docs\GAME-SUPPORT.md`. The tool writes one row per game ID with its loader, what the guide says, and the exact missing data for each gap. Guide text is only read, never run. A refresh is needed whenever the guide, the catalog snapshot or the reviewed recipe list changes. `scripts\Test-TpmCatalogDrift.ps1 -ProfilesPath <TeknoParrot folder> -GuidePath <guide> -MarkdownPath docs\GAME-SUPPORT.md` makes the same page from a current TeknoParrot folder, and lists new, removed and changed profiles. It is run by hand.

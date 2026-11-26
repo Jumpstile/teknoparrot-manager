@@ -1384,7 +1384,7 @@ Describe 'FIX17B progress glyphs and palette' {
                 $early | Should -Match 'in 6\.4s \(781\.23/s\)'
                 $over = Format-TpmProgressLine -Title 'Overshoot' -Current 5000 -Total 4000 -State Running -ElapsedSeconds 6.4 -Width 160 -Style $style
                 $over | Should -Match '\(!\)\s*5000/4000'
-                $over | Should -Match '\[125%\]'
+                $over | Should -Not -Match '%'
                 $unknown = Format-TpmProgressLine -Title 'Unknown' -Current 4291 -Total 0 -State Running -EtaSeconds 5 -Width 160 -Style $style
                 $unknown | Should -Match '4291'
                 $unknown | Should -Not -Match '%|ETA|/0'

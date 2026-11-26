@@ -1,6 +1,6 @@
 # Support Package (menu 17)
 
-When something goes wrong and you ask for help, send a support package. It is one ZIP file with your logs and reports. It never has game files or passwords.
+When something goes wrong and you ask for help, send a support package. It is one ZIP file with your logs and reports. It leaves out game files. TPM hides passwords and your Windows user name in it, but hiding is not a guarantee, so look it over before you send it.
 
 ---
 
@@ -37,7 +37,7 @@ You can add its info file first. At the menu, press **D** to see the steps:
 <summary>Details</summary>
 
 - Included: logs and reports from the current run, plus clearly labeled background information about TeknoParrot Manager, TeknoParrot, and your games.
-- Never included: game files, passwords and other credentials, or folders picked at random.
+- Hidden: game files are not included, and TPM hides passwords and other credentials, but hiding is not a guarantee. Folders are never picked at random.
 - The registration record is included in a cleaned form. See [[Registration Ledger]].
 - It also says how the last finished job ended (for example a setup that stopped), even if you restarted TeknoParrot Manager since then. Personal folder names are removed.
 - If the ZIP is ready but a temporary folder could not be removed, the result says so. You can delete that folder yourself. Its path is under Details.

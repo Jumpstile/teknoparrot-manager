@@ -406,6 +406,26 @@ Describe 'TPM catalog-wide game support contracts' {
         (Test-TPMGameSupportContractRegistryV1 -Registry $registry).Valid | Should -BeFalse
     }
 
+    It 'is not release-closure eligible while a profile has no evidence hash' {
+        $profileRecord = New-TestGameSupportProfile -ProfileCode 'Unhashed2'
+        $profileRecord | Add-Member -NotePropertyName ProfileXmlSha256 -NotePropertyValue ''
+        $registry = New-TPMGameSupportContractRegistryV13 -Profiles @($profileRecord) -SnapshotId 'TPM-UNHASHED2-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z' -Source ([ordered]@{ Repository = 'fixture/repo'; Commit = 'fixture-commit'; ProfileRoot = 'GameProfiles' })
+        (Test-TPMGameSupportContractRegistryV1 -Registry $registry).ReleaseGate.ClosureEligible | Should -BeFalse
+    }
+
+    It 'the loader refuses a registry whose saved release gate no longer matches its contents, and rewriting a file leaves no temp file' {
+        $profileRecord = New-TestGameSupportProfile -ProfileCode 'Hashed'
+        $registry = New-TPMGameSupportContractRegistryV13 -Profiles @($profileRecord) -SnapshotId 'TPM-GATE-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z' -Source ([ordered]@{ Repository = 'fixture/repo'; Commit = 'fixture-commit'; ProfileRoot = 'GameProfiles' })
+        $path = Join-Path $TestDrive 'gate-registry.json'
+        Write-TPMGameSupportContractRegistryV1 -Registry $registry -Path $path
+        Write-TPMGameSupportContractRegistryV1 -Registry $registry -Path $path
+        @(Get-ChildItem -LiteralPath $TestDrive -Filter 'gate-registry.json*').Count | Should -Be 1
+        (Get-TPMGameSupportContractRegistryV1 -Path $path).ReleaseGate.ClosureEligible | Should -BeTrue
+        $registry.Source.Commit = ''
+        Write-TPMGameSupportContractRegistryV1 -Registry $registry -Path $path
+        { Get-TPMGameSupportContractRegistryV1 -Path $path } | Should -Throw '*ClosureEligible*'
+    }
+
     It 'does not wire the registry into the product menu script' {
         $main = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'))
         $main | Should -Not -Match 'TPMGameSupport\.Contracts'

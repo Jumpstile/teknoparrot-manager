@@ -10,7 +10,7 @@ BeforeAll {
     $parseErrors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { throw 'Controller evidence bootstrap could not parse the production script.' }
-    $wanted = @('Get-TpmControllerEvidence', 'Invoke-DeviceSurvey', 'Get-TpmControlStatePath', 'Read-TpmControlStateFile', 'Save-TpmControlStateFile', 'Get-TpmDeviceQuestions', 'Read-TpmCabinetState', 'Save-TpmCabinetState', 'Get-TpmCabinetDeviceAnswer', 'Set-TpmCabinetDevice', 'Get-TpmLedBlinkyKeyMap', 'Get-TpmControllerSalt', 'Get-TpmControllerSetNotice', 'Get-TpmEncoderFingerprints', 'Get-TpmEncoderCount', 'Get-TpmEncoderChangeNotice')
+    $wanted = @('Get-TpmControllerEvidence', 'Invoke-DeviceSurvey', 'Get-TpmControlStatePath', 'Read-TpmControlStateFile', 'Save-TpmControlStateFile', 'Get-TpmDeviceKinds', 'Get-TpmDeviceQuestions', 'Read-TpmCabinetState', 'Save-TpmCabinetState', 'Get-TpmCabinetDeviceAnswer', 'Set-TpmCabinetDevice', 'Get-TpmLedBlinkyKeyMap', 'Get-TpmControllerSalt', 'Get-TpmControllerSetNotice', 'Get-TpmEncoderFingerprints', 'Get-TpmEncoderCount', 'Get-TpmEncoderChangeNotice')
     $functionFile = Join-Path $TestDrive 'controller-functions.ps1'
     ($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -in $wanted }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n" | Set-Content -LiteralPath $functionFile -Encoding utf8
     . $functionFile
@@ -166,9 +166,9 @@ Describe 'Invoke-DeviceSurvey with detection' {
     It 'uses a connected Xbox pad as the default answer and leaves every other question unanswered' {
         Mock Get-TpmControllerEvidence { New-FakeEvidence -Observations @([pscustomobject]@{ DeviceClass = 'XboxStylePad'; Confidence = 'High'; Basis = 'XInputSlotActive'; Count = 1 }) }
         Invoke-DeviceSurvey -StateRoot $script:state
-        $xbox = @($script:asked | Where-Object Prompt -match 'Xbox')[0]
+        $xbox = @($script:asked | Where-Object Prompt -match 'Gamepad')[0]
         $xbox.Default | Should -Be 'Y'
-        @($script:asked | Where-Object { $_.Prompt -notmatch 'Xbox' -and $_.Default -ne '' }).Count | Should -Be 0
+        @($script:asked | Where-Object { $_.Prompt -notmatch 'Gamepad|Use this controller' -and $_.Default -ne '' }).Count | Should -Be 0
     }
 
     It 'only says "may be connected" for a Low or Medium match and never pre-answers it' {
@@ -197,6 +197,19 @@ Describe 'Invoke-DeviceSurvey with detection' {
         Mock Read-TpmYesNo { [void]$script:asked.Add([pscustomobject]@{ Prompt = $Prompt; Default = $Default }); 'Y' }
         Invoke-DeviceSurvey -StateRoot $script:state
         $script:asked.Count | Should -Be 1
+    }
+
+    It 'does not offer the one-question Xbox shortcut when another device is already saved as owned, so that answer is not thrown away' {
+        # Mutation: offer the shortcut whatever is saved -> the plan treats the saved lightgun as not owned and the question list is skipped.
+        $cabinet = Read-TpmCabinetState -StateRoot $script:state
+        Set-TpmCabinetDevice -State $cabinet -Class 'LightGun' -Has $true -Source 'Asked'
+        Save-TpmCabinetState -State $cabinet -StateRoot $script:state
+        Mock Get-TpmControllerEvidence { New-FakeEvidence -Observations @([pscustomobject]@{ DeviceClass = 'XboxStylePad'; Confidence = 'High'; Basis = 'XInputSlotActive'; Count = 1 }) }
+        Mock Read-TpmYesNo { [void]$script:asked.Add([pscustomobject]@{ Prompt = $Prompt; Default = $Default }); 'Y' }
+        Invoke-DeviceSurvey -StateRoot $script:state
+        @($script:asked | Where-Object Prompt -match 'for all games').Count | Should -Be 0
+        $script:asked.Count | Should -Be 7
+        (@($script:asked | Where-Object Prompt -match 'Lightgun')[0]).Default | Should -Be 'Y'
     }
 
     It 'never offers the shortcut for Low-confidence name hints' {

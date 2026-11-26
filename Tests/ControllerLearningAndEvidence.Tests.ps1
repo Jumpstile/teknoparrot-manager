@@ -90,14 +90,14 @@ Describe 'Saved device answers in the Device Survey' {
         Mock Read-TpmYesNo { [void]$script:asked.Add($Prompt); 'N' }
         Invoke-DeviceSurvey -StateRoot $script:State
         @($script:asked | Where-Object { $_ -match 'Keep these answers' }).Count | Should -Be 0
-        @($script:asked | Where-Object { $_ -match 'Use the Xbox controller' }).Count | Should -Be 1
+        @($script:asked | Where-Object { $_ -match 'Use this controller' }).Count | Should -Be 1
     }
 
-    It 'still prints the plan when the answers cannot be saved' {
+    It 'finishes and writes the reason to the log when the answers cannot be saved' {
         Mock Read-TpmYesNo { 'Y' }
         Mock Save-TpmCabinetState { throw 'disk full' }
         { Invoke-DeviceSurvey -StateRoot $script:State } | Should -Not -Throw
-        Should -Invoke Write-Host -ParameterFilter { $Object -match 'YOUR BINDING PLAN' }
+        Should -Invoke Write-Log -ParameterFilter { $msg -match 'answers could not be saved' }
     }
 }
 
@@ -472,6 +472,47 @@ Describe 'Recognizing the same controllers again' {
     }
 }
 
+Describe 'Learning arcade buttons again only asks for the controls TPM has no key for' {
+    BeforeEach {
+        Mock Write-Host { }
+        Mock Write-Log { }
+        Mock Test-TpmKeyPressAvailable { $true }
+        Mock Read-TpmChoice { '1' }
+        Mock Get-TpmKeysPressedOnTheirOwn { @() }
+        Mock Get-TpmLedBlinkyKeyMap { [pscustomobject]@{ Found = $false; Controls = @() } }
+        Mock Get-TpmStandardArcadeKeys { [ordered]@{} }
+        Mock Get-TpmControllerEvidence { [pscustomobject]@{ EvidenceStatus = 'Observed'; DeviceObservations = @() } }
+        Mock Get-TpmEncoderCount { 0 }
+        Mock Get-TpmEncoderFingerprints { @() }
+    }
+
+    It 'asks only for the missing control, keeps the saved keys, and asks for everything when the player says to press them all again' {
+        # Mutation: start every run with an empty key list -> every control is asked again although the screen says it will not ask again.
+        $state = New-Folder
+        $controls = @(Get-TpmCabinetControlList -Players 1 -Buttons 1)
+        $controls.Count | Should -BeGreaterThan 2
+        $cabinet = Read-TpmCabinetState -StateRoot $state
+        $savedKeys = @{}
+        foreach ($control in @($controls | Select-Object -First ($controls.Count - 1))) { $savedKeys[[string]$control.Control] = @{ Key = ('K' + $savedKeys.Count); Source = 'PressedByPlayer' } }
+        Set-TpmCabinetKeys -State $cabinet -Keys $savedKeys -Players 1 -ButtonsPerPlayer 1
+        Save-TpmCabinetState -State $cabinet -StateRoot $state
+        $missing = [string]$controls[$controls.Count - 1].Control
+        $script:asked = New-Object System.Collections.Generic.List[string]
+        Mock Read-TpmYesNo { if ($Prompt -match 'Save this|Keep those') { 'Y' } else { 'N' } }
+        Mock Invoke-TpmLearnKeys { foreach ($c in @($Controls)) { [void]$script:asked.Add([string]$c.Control) }; $k = @{}; foreach ($c in @($Controls)) { $k[[string]$c.Control] = 'NEWKEY' }; [pscustomobject]@{ Keys = $k; Skipped = @() } }
+        Invoke-TpmButtonLearning -StateRoot $state
+        @($script:asked) | Should -Be @($missing)
+        $after = Read-TpmCabinetState -StateRoot $state
+        foreach ($id in $savedKeys.Keys) { (Get-TpmCabinetKey -State $after -Control $id) | Should -Be $savedKeys[$id].Key }
+        (Get-TpmCabinetKey -State $after -Control $missing) | Should -Be 'NEWKEY'
+
+        $script:asked.Clear()
+        Mock Read-TpmYesNo { if ($Prompt -match 'Save this') { 'Y' } else { 'N' } }
+        Invoke-TpmButtonLearning -StateRoot $state
+        $script:asked.Count | Should -Be $controls.Count
+    }
+}
+
 Describe 'Key suggestions and light colors in a game guide' {
     BeforeEach { Mock Write-Host { }; Mock Write-Log { } }
 
@@ -556,7 +597,7 @@ Describe 'Does the cabinet fit the game, and shared controls (issue #267)' {
         Set-TpmCabinetDevice -State $cabinet -Class 'XboxStylePad' -Has $true
         $text = (Get-TpmCabinetFitLines -ProfileControls (Get-TpmLedProfileControls -Doc $racer) -Cabinet $cabinet) -join ' '
         $text | Should -Match 'needs a steering wheel and pedals. You told TPM you do not have that'
-        $text | Should -Match 'Xbox controller can steer'
+        $text | Should -Match 'gamepad can steer'
         $shooter = New-FitProfile -Name 'shoot' -Buttons (New-FitButton 'P1Button1' 'Trigger') -Gun
         Set-TpmCabinetDevice -State $cabinet -Class 'LightGun' -Has $false
         Set-TpmCabinetDevice -State $cabinet -Class 'PointerOrTrackball' -Has $true
@@ -595,5 +636,160 @@ Describe 'Does the cabinet fit the game, and shared controls (issue #267)' {
         $back.Players | Should -Be 2
         Restore-TpmCabinetBackup -StateRoot $root | Should -BeTrue
         (Get-TpmCabinetKey -State (Read-TpmCabinetState -StateRoot $root) -Control 'Coin1') | Should -Be '9'
+    }
+}
+
+Describe 'Learning arcade buttons from the cabinet files first' {
+    BeforeAll {
+        function script:New-LedFolder {
+            $dir = New-Folder
+            $games = @('g1', 'g2', 'g3') | ForEach-Object { $code = $(if ($_ -eq 'g3') { 'KEYCODE_X' } else { 'KEYCODE_Z' }); '<controlGroup groupName="' + $_ + '" numPlayers="2"><player number="1"><control name="P1_BUTTON3" inputCodes="' + $code + '"/></player></controlGroup>' }
+            $text = '<dat><emulator emuname="TeknoParrot"><controlGroup groupName="DEFAULT" numPlayers="2"><player number="1">' +
+                '<control name="P1_BUTTON1" inputCodes="KEYCODE_LCONTROL|JOYCODE_1_BUTTON1"/><control name="P1_BUTTON2" inputCodes="KEYCODE_FOO"/>' +
+                '<control name="P1_JOYSTICK_UP" inputCodes="KEYCODE_UP"/><control name="START1" inputCodes="KEYCODE_1"/><control name="COIN1" inputCodes="KEYCODE_5"/>' +
+                '</player></controlGroup>' + ($games -join '') + '</emulator></dat>'
+            [System.IO.File]::WriteAllText((Join-Path $dir 'LEDBlinkyControls.xml'), $text, (New-Object System.Text.UTF8Encoding $false))
+            return $dir
+        }
+    }
+    BeforeEach {
+        Mock Write-Host { }
+        Mock Write-Log { }
+        Mock Test-TpmKeyPressAvailable { $true }
+        Mock Get-TpmKeysPressedOnTheirOwn { @() }
+        Mock Get-TpmLedBlinkyKeyMap { [pscustomobject]@{ Found = $false; Controls = @() } }
+        Mock Get-TpmStandardArcadeKeys { [ordered]@{} }
+        Mock Get-TpmControllerEvidence { [pscustomobject]@{ EvidenceStatus = 'Observed'; DeviceObservations = @() } }
+        Mock Get-TpmEncoderCount { 0 }
+        Mock Get-TpmEncoderFingerprints { @() }
+        $script:asked = New-Object System.Collections.Generic.List[string]
+        Mock Read-TpmChoice { if ($Prompt -match 'Use these keys') { 'Y' } else { '1' } }
+        Mock Invoke-TpmLearnKeys { foreach ($c in @($Controls)) { [void]$script:asked.Add([string]$c.Control) }; [pscustomobject]@{ Keys = @{}; Skipped = @() } }
+        $script:ledBlinkyRoot = New-LedFolder
+    }
+    AfterEach { Remove-Variable -Name ledBlinkyRoot -Scope Script -ErrorAction SilentlyContinue }
+
+    It 'suggests keys from the LEDBlinky file, names the source, uses the most common key and says the games disagree' {
+        $found = Get-TpmCabinetFileSuggestions -LedRoot $script:ledBlinkyRoot
+        $found.Keys['P1Button1'].Key | Should -Be 'Left Ctrl'
+        $found.Keys['P1Button1'].From | Should -Be 'your LEDBlinky file'
+        $found.Keys['P1ButtonStart'].Key | Should -Be '1'
+        $found.Keys['Coin1'].Key | Should -Be '5'
+        $found.Keys['P1ButtonUp'].Key | Should -Be 'Up arrow'
+        $found.Keys['P1Button3'].Key | Should -Be 'Z'
+        $found.Keys.Contains('P1Button2') | Should -BeFalse
+        @($found.Unsure | ForEach-Object { $_.Id }) | Should -Contain 'P1Button2'
+        ($found.Notes -join ' ') | Should -Match 'do not all agree on the key for 1 control'
+        ($found.Details -join ' ') | Should -Match 'KEYCODE_Z in 2 games, KEYCODE_X in 1 game'
+        $found.Players | Should -Be 2
+    }
+
+    It 'turns MAME key codes into the key names TPM stores, and leaves unknown codes empty' {
+        ConvertTo-TpmKeyName -Name 'KEYCODE_LCONTROL' -From Mame | Should -Be 'Left Ctrl'
+        ConvertTo-TpmKeyName -Name 'KEYCODE_1_PAD' -From Mame | Should -Be 'Numpad 1'
+        ConvertTo-TpmKeyName -Name 'KEYCODE_RIGHT' -From Mame | Should -Be 'Right arrow'
+        ConvertTo-TpmKeyName -Name 'KEYCODE_FOO' -From Mame | Should -Be ''
+    }
+
+    It 'ignores a LEDBlinky file that is too large' {
+        $big = New-Folder
+        $stream = [System.IO.File]::Create((Join-Path $big 'LEDBlinkyControls.xml'))
+        try { $stream.SetLength(21MB) } finally { $stream.Dispose() }
+        (Read-TpmLedBlinkyControlKeys -Root $big).Found | Should -BeFalse
+    }
+
+    It 'saves nothing when the player does not confirm, and only asks for the controls with no suggested key' {
+        $state = New-Folder
+        Mock Read-TpmYesNo { if ($Prompt -match 'Read my cabinet files') { 'Y' } else { 'N' } }
+        Invoke-TpmButtonLearning -StateRoot $state
+        @((Read-TpmCabinetState -StateRoot $state).Keys.PSObject.Properties).Count | Should -Be 0
+        @($script:asked) | Should -Not -Contain 'P1Button1'
+        @($script:asked) | Should -Not -Contain 'Coin1'
+        @($script:asked) | Should -Contain 'P1ButtonDown'
+    }
+
+    It 'saves the suggested keys with their source after the player confirms' {
+        $state = New-Folder
+        Mock Read-TpmYesNo { if ($Prompt -match 'Read my cabinet files|Save this') { 'Y' } else { 'N' } }
+        Invoke-TpmButtonLearning -StateRoot $state
+        $saved = Read-TpmCabinetState -StateRoot $state
+        (Get-TpmCabinetKey -State $saved -Control 'P1Button1') | Should -Be 'Left Ctrl'
+        $saved.Keys.PSObject.Properties['P1Button1'].Value.Source | Should -Be 'LedBlinkyControls'
+    }
+
+    It 'never replaces a key saved before' {
+        $state = New-Folder
+        $cabinet = Read-TpmCabinetState -StateRoot $state
+        Set-TpmCabinetKeys -State $cabinet -Keys @{ P1Button1 = @{ Key = 'Q'; Source = 'PressedByPlayer' } } -Players 1 -ButtonsPerPlayer 1
+        Save-TpmCabinetState -State $cabinet -StateRoot $state
+        Mock Read-TpmYesNo { if ($Prompt -match 'Read my cabinet files|Keep those|Save this') { 'Y' } else { 'N' } }
+        Invoke-TpmButtonLearning -StateRoot $state
+        $saved = Read-TpmCabinetState -StateRoot $state
+        (Get-TpmCabinetKey -State $saved -Control 'P1Button1') | Should -Be 'Q'
+        (Get-TpmCabinetKey -State $saved -Control 'Coin1') | Should -Be '5'
+    }
+}
+
+Describe 'Picture control guides' {
+    BeforeAll {
+        function script:New-PictureDoc {
+            param([string[]]$Buttons)
+            $doc = New-Object System.Xml.XmlDocument
+            $doc.LoadXml('<GameProfile><GameProfileRevision>1</GameProfileRevision><JoystickButtons>' + (($Buttons | ForEach-Object { $p = $_ -split '\|'; '<JoystickButtons><ButtonName>' + [System.Net.WebUtility]::HtmlEncode($p[0]) + '</ButtonName><InputMapping>' + $p[1] + '</InputMapping><AnalogType>' + $(if ($p.Count -gt 2) { $p[2] } else { 'None' }) + '</AnalogType></JoystickButtons>' }) -join '') + '</JoystickButtons></GameProfile>')
+            return $doc
+        }
+        $script:EveryKind = @('Coin|Coin1', 'Start|P1ButtonStart', 'Up|P1ButtonUp', 'Punch|P1Button1', 'Steering|Analog0|Wheel', 'Gas|Analog1|Gas', 'Gear Shift|P1Button2', 'Trackball|P1Trackball', 'Spinner|P1Spinner',
+            'Wii A|WiiA', 'Nunchuk Z|NZ', 'Guitar Strum|GS', 'Green Fret|GG', 'Snare Drum|DS', 'Dance Up|DU', 'Pointer|PT', 'Microphone|MIC', 'Throttle|Thr|SWThrottle', 'Gun X|GunX|AnalogJoystick', 'Weird Thing|Zork')
+    }
+    BeforeEach { Mock Write-Log { }; Mock Write-Host { } }
+
+    It 'draws a titled picture and a list for every kind of controller the game uses, with every control named' {
+        $cabinet = Read-TpmCabinetState -StateRoot (New-Folder)
+        $guide = Get-TpmGameControlGuide -Doc (New-PictureDoc $script:EveryKind) -Title 'Everything' -Cabinet $cabinet
+        $html = ConvertTo-TpmGuideHtml -Guide $guide
+        foreach ($title in @('Arcade panel', 'Steering wheel and pedals', 'Pointer', 'Flight stick or other stick', 'Trackball', 'Spinner', 'Wii remote and Nunchuk', 'Guitar', 'Drums', 'Dance pad', 'Microphone', 'Other controls')) { $html | Should -Match ('<h2>' + [regex]::Escape($title)) }
+        @([regex]::Matches($html, '<svg ')).Count | Should -Be @($guide.Devices).Count
+        @([regex]::Matches($html, '<svg [^>]*><title [^>]*>[^<]+</title><desc [^>]*>[^<]+</desc>')).Count | Should -Be @($guide.Devices).Count
+        foreach ($label in @('Punch', 'Steering', 'Gear Shift', 'Wii A', 'Guitar Strum', 'Snare Drum', 'Dance Up', 'Microphone', 'Throttle', 'Gun X', 'Weird Thing')) { $html | Should -Match ('<text [^>]*>' + $label + '</text>') }
+        $html | Should -Match '<li><b>Weird Thing</b></li>'
+    }
+
+    It 'puts the player''s pad names on a pad picture, colors the marker with the light color and always prints the color name' {
+        $cabinet = Read-TpmCabinetState -StateRoot (New-Folder)
+        $doc = New-PictureDoc @('Coin|Coin1', 'Start|P1ButtonStart', 'Punch|P1Button1', 'Test|Test')
+        $guide = Get-TpmGameControlGuide -Doc $doc -Title 'Pad game' -Cabinet $cabinet -Baseline (New-TpmBaseline -Preset 'PlayStation') -LedColors @{ P1_BUTTON1 = 'Red'; START1 = '0,255,0'; COIN1 = 'red" onload="x' }
+        $html = ConvertTo-TpmGuideHtml -Guide $guide
+        $html | Should -Match 'Your PlayStation controller'
+        $html | Should -Match '<li><b>Punch</b> - Cross button; Light: Red</li>'
+        $html | Should -Match 'fill="red" stroke'
+        $html | Should -Match 'fill="#00ff00" stroke'
+        $html | Should -Not -Match 'onload=\"'
+        $html | Should -Match 'No button on your controller layout: Test\.'
+    }
+
+    It 'cannot carry markup from a game name or control name, and has no scripts, links or outside files' {
+        $cabinet = Read-TpmCabinetState -StateRoot (New-Folder)
+        $guide = Get-TpmGameControlGuide -Doc (New-PictureDoc @('Shoot <script>alert(1)</script>|P1Button1', 'Start|P1ButtonStart', 'Aim|GunX|AnalogJoystick')) -Title 'Bad <img src=x onerror=y> name' -Cabinet $cabinet
+        $html = ConvertTo-TpmGuideHtml -Guide $guide
+        $html | Should -Not -Match '<script'
+        $html | Should -Not -Match '<img'
+        $html | Should -Match '&lt;script&gt;'
+        $html | Should -Not -Match '(?i)https?:|<[^>]*\b(src|href)=|url\(|<link|<iframe'
+    }
+
+    It 'prints one game per page with a sheet for every game, and keeps pictures whole' {
+        $cabinet = Read-TpmCabinetState -StateRoot (New-Folder)
+        $games = @(
+            [pscustomobject]@{ Code = 'a'; Title = 'Game A'; Doc = (New-PictureDoc @('Start|P1ButtonStart', 'Punch|P1Button1')) },
+            [pscustomobject]@{ Code = 'b'; Title = 'Game B'; Doc = (New-PictureDoc @('Steering|Analog0|Wheel')) })
+        $guide = Get-TpmCabinetGamesGuide -Cabinet $cabinet -Games $games
+        $html = ConvertTo-TpmGuideHtml -Guide $guide
+        @([regex]::Matches($html, '<section class="game">')).Count | Should -Be 2
+        $html | Should -Match '<h2>Controls for Game A</h2>'
+        $html | Should -Match '<h2>Controls for Game B</h2>'
+        $html | Should -Match '@page'
+        $html | Should -Match 'section\.game\{break-before:page;page-break-before:always\}'
+        $html | Should -Match 'figure\{[^}]*break-inside:avoid'
+        $html | Should -Match 'svg\{[^}]*max-width:720px;height:auto'
     }
 }

@@ -5,7 +5,6 @@
 #  Item 4  Required game patches: the game list is one row per game ("Hummer (14 patches)"), not one row per recipe id.
 #  Item 5  Required game patches: results are grouped, in plain words; "No patch was applied... fix it" only for a real
 #          failure; the receipt folder, recipe ids, reason text and result codes are behind the D key and in the log.
-#  Item 6  Propagate Controls: one question, one short result; the technical rows are behind D and in the log.
 #  Item 7  Custom rules notice at start-up: one line, no question (FIX90); the details are in the log.
 #
 # The production script is parsed and only its function definitions are dot-sourced (plus the required-patch engine).
@@ -24,10 +23,6 @@ BeforeAll {
     . $functionFile
     . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     . (Join-Path $PSScriptRoot '..\scripts\TpmRequiredPatchEngine.ps1')
-    # Get-ConfigCarryFlags reads this top-level table of the production script.
-    $carryAssignment = @($script:F81Ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$ConfigCarryWarnings' })
-    if ($carryAssignment.Count -ne 1) { throw 'Expected one production ConfigCarryWarnings assignment.' }
-    . ([scriptblock]::Create($carryAssignment[0].Extent.Text))
     $script:F81EnginePath = (Resolve-Path (Join-Path $PSScriptRoot '..\scripts\TpmRequiredPatchEngine.ps1')).Path
     $script:F81RecipesPath = (Resolve-Path (Join-Path $PSScriptRoot '..\scripts\TpmRequiredPatchRecipes.json')).Path
 
@@ -92,11 +87,6 @@ BeforeAll {
             Add-TpmRequiredPatchResult -Results $list -Entry $spec.Entry -Status $spec.Status -Reason ([string]$spec.Reason) -Receipt ([string]$spec.Receipt) -Registered ($spec.Registered -ne $false)
         }
         return $list.ToArray()
-    }
-
-    function New-F81Source {
-        param([string]$Code, [string]$Family = 'driving', [string]$Api = 'RawInput', [string[]]$Devices = @('ArchPad Btn'), [hashtable]$Carry = @{})
-        return [pscustomobject]@{ Code = $Code; Family = $Family; InputApi = $Api; Devices = @($Devices); ConfigCarry = $Carry; BoundCount = 12 }
     }
 
     $script:F81HummerBuild = 'Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]'
@@ -615,180 +605,10 @@ Describe 'FIX81 required patch menu end to end (mocked, one folder question per 
     }
 }
 
-Describe 'FIX81 Propagate Controls (item 6)' {
-    BeforeAll {
-        $script:F81Reports = @(
-            [pscustomobject]@{ Code = 'GameA'; Status = 'bound'; Family = 'driving'; Archetype = 'RefDriver'; Bound = 3; Manual = @(); ConfigCarried = @('Sensitivity=50'); ArchetypeApi = 'RawInput'; Forced = $false; MismatchSlots = $null }
-            [pscustomobject]@{ Code = 'GameB'; Status = 'bound'; Family = 'driving'; Archetype = 'RefDriver'; Bound = 1; Manual = @('Start'); ConfigCarried = @(); ArchetypeApi = 'RawInput'; Forced = $true; MismatchSlots = $null }
-            [pscustomobject]@{ Code = 'GameC'; Status = 'api-fixed'; ArchetypeApi = 'RawInput'; Archetype = 'RefDriver'; MismatchSlots = $null }
-            [pscustomobject]@{ Code = 'GameD'; Status = 'settings-only'; Bound = 0; ConfigCarried = @('Sensitivity=50'); Manual = @('Start') }
-            [pscustomobject]@{ Code = 'GameE'; Status = 'skipped-no-reference'; ReasonCode = 'NO_USABLE_FAMILY_REFERENCE'; Family = 'lightgun'; MismatchSlots = $null }
-            [pscustomobject]@{ Code = 'GameF'; Status = 'skipped-bound'; MismatchSlots = $null }
-            [pscustomobject]@{ Code = 'GameG'; Status = 'skipped-override'; MismatchSlots = $null }
-            [pscustomobject]@{ Code = 'GameH'; Status = 'save-failed'; Archetype = 'RefDriver'; MismatchSlots = $null }
-        )
-    }
-
-    It 'turns reports into a short summary counting missing family references as design skips' {
-        # Mutation: omit design skips from skipped counts or classify them as Needs -> summary counts and status disagree.
-        $summary = Get-TpmControlPropagationSummary -Reports $script:F81Reports
-        $summary.Title | Should -BeExactly '4 games updated. 1 game could not be saved.'
-        $summary.Status | Should -BeExactly 'Attention'
-        @($summary.Done) | Should -Be @('Controls copied to 2 games.', 'Input API corrected for 1 game.')
-        $summary.NotChanged | Should -Match '^1 game already set up\. 1 game skipped by your own rules\. 1 game skipped: no game of their family has your controls yet'
-        @($summary.Needs) | Should -Be @(
-            'GameB and GameD: set up the controls yourself in TeknoParrotUI.',
-            'GameH: could not be saved. See the log.'
-        )
-        $summary.Next | Should -BeExactly 'Start one updated game in TeknoParrotUI and test its controls. If something is wrong, use Restore backup.'
-        $counts = $summary.Counts
-        $counts.ControlsCopiedCount | Should -Be 2
-        $counts.SettingsOnlyCount | Should -Be 1
-        $counts.ApiFixedCount | Should -Be 1
-        $counts.BoundCount | Should -Be 3
-        $counts.ManualCount | Should -Be 2
-        $counts.SkippedCount | Should -Be 3
-        $counts.FailedCount | Should -Be 1
-        $counts.VerifiedPhysicalBindingsCount | Should -Be 0
-        @($counts.DesignSkippedItems).Count | Should -Be 1
-        $counts.DesignSkippedItems[0].Code | Should -BeExactly 'GameE'
-    }
-
-    It 'does not call a game already set up when nothing was copied and its controls are still missing' {
-        # Mutation: count skipped-unchanged with skipped-bound as "already set up" -> a game with no controls is reported as done and also as needing setup.
-        $summary = Get-TpmControlPropagationSummary -Reports @(
-            [pscustomobject]@{ Code = 'GameK'; Status = 'skipped-unchanged'; Family = 'driving'; Archetype = 'RefDriver'; Manual = @('Start'); MismatchSlots = $null }
-        )
-        $summary.NotChanged | Should -Not -Match 'already set up'
-        @($summary.Needs)[0] | Should -Match '^GameK: set up the controls yourself'
-    }
-
-    It 'says "1 game updated." for one game and "No game needed a change." for none' {
-        # Mutation: hard-code "games" -> "1 games updated."
-        (Get-TpmControlPropagationSummary -Reports @($script:F81Reports[2])).Title | Should -BeExactly '1 game updated.'
-        $none = Get-TpmControlPropagationSummary -Reports @($script:F81Reports[5], $script:F81Reports[6])
-        $none.Title | Should -BeExactly 'No game needed a change.'
-        $none.Status | Should -BeExactly 'Ok'
-        $none.Next | Should -BeExactly ''
-        (Get-TpmControlPropagationSummary -Reports @($script:F81Reports[7])).Status | Should -BeExactly 'Problem'
-        (Get-TpmControlPropagationSummary -Reports @($script:F81Reports[4])).Title | Should -BeExactly 'No game was changed.'
-    }
-
-    It 'words a preview as "would" and says nothing was saved' {
-        # Mutation: reuse the saved wording for a preview -> "Controls copied to 2 games." for a run that saved nothing.
-        $summary = Get-TpmControlPropagationSummary -Reports $script:F81Reports -DryRun $true
-        $summary.Title | Should -BeExactly 'Preview only. Nothing was saved.'
-        @($summary.Done) | Should -Be @('Would copy controls to 2 games.', 'Would correct the Input API of 1 game.')
-        $summary.Next | Should -BeExactly ''
-        $summary.Note | Should -Match 'No game was saved'
-    }
-
-    It 'prints the short result at <Width> columns: inside the console, short paragraphs, no bare TPM, no old counter block' -TestCases @(
-        @{ Width = 40 }, @{ Width = 60 }, @{ Width = 120 }
-    ) {
-        param($Width)
-        # Mutation: bring back the per-game lines or the seven count lines, drop -Spaced, or ignore the width.
-        Install-F81Mocks -Width $Width
-        $counts = Write-ControlPropagationResults -Reports $script:F81Reports -Unattended
-        $counts.ControlsCopiedCount | Should -Be 2
-        $lines = @(Get-F81Lines)
-        $text = $lines -join "`n"
-        $text | Should -Not -Match 'Verified physical bindings|Games still needing manual|Settings carried only|Results:|GameA|GameF'
-        (($text) -cmatch '\bTPM\b') | Should -BeFalse
-        @($lines | Where-Object { $_.Length -ge $Width }).Count | Should -Be 0
-        (Get-F81MaxRun -Lines $lines) | Should -BeLessOrEqual 5
-        $script:F81Prompts.Count | Should -Be 0
-    }
-
-    It 'shows every old fact when D is pressed, and logs them without D' {
-        # Mutation: leave the counts, the per-game rows or the saved-copy folder out of the details.
-        Install-F81Mocks -Width 100 -Answers @('D')
-        [void](Write-ControlPropagationResults -Reports $script:F81Reports -Outcome 'PARTIAL_APPLIED' -BackupPath 'C:\Games\Backups\PropagateControls_x')
-        $script:F81Prompts.Count | Should -Be 1
-        $text = Get-F81Flat
-        $text | Should -Match 'Verified physical bindings: 0 \(TeknoParrot Manager does not launch games or test device input\)\.'
-        $text | Should -Match 'Games with controls copied: 2'
-        $text | Should -Match 'Games still needing manual setup: 2'
-        $text | Should -Match 'Games failed: 1'
-        $text | Should -Match 'Settings copied: Sensitivity=50'
-        $text | Should -Match 'Still manual: Start'
-        $text | Should -Match 'Pinned: you chose its example game'
-        $text | Should -Match 'Folder: C:\\Games\\Backups\\PropagateControls_x'
-        $text | Should -Match 'These counts describe saved settings, not a verified physical device binding\.'
-        ($script:F81Log -join "`n") | Should -Match 'Result detail \[Counts\]: Games failed: 1'
-        Install-F81Mocks -Width 100 -Interactive $false
-        [void](Write-ControlPropagationResults -Reports $script:F81Reports)
-        $script:F81Prompts.Count | Should -Be 0
-        ($script:F81Log -join "`n") | Should -Match 'Result detail \[GameH\]: What happened: Could not be saved\.'
-    }
-
-    It 'writes the directional mismatch as a detail with what to do' {
-        # Mutation: drop the mismatch lines -> the slots the user must fix are lost.
-        Install-F81Mocks -Width 100 -Answers @('D')
-        $report = [pscustomobject]@{ Code = 'GameM'; Status = 'api-fixed'; ArchetypeApi = 'RawInput'; Archetype = 'RefDriver'; MismatchSlots = 'P1 Up, P1 Down' }
-        $summary = Get-TpmControlPropagationSummary -Reports @($report)
-        @($summary.Needs) | Should -Be @('GameM: some buttons do the wrong thing. Set them again in TeknoParrotUI.')
-        [void](Write-ControlPropagationResults -Reports @($report))
-        $text = Get-F81Flat
-        $text | Should -Match 'Needs attention: directional/action mismatch in P1 Up, P1 Down'
-        $text | Should -Match 'What to do: set these slots again by hand'
-    }
-
-    It 'gives the example games as one line, and a warning line only when a copied setting looks wrong' {
-        # Mutation: print the source rows ("api=... device(s): ...") or always warn -> technical rows or a false warning.
-        Install-F81Mocks -Width 100
-        $plain = New-F81Source -Code 'RefWheel' -Carry @{ 'Use Keyboard/Button For Axis' = 'False'; 'Player 1 Relative Sensitivity' = '50' }
-        Write-TpmControlSourceSummary -Pool @($plain, (New-F81Source -Code 'RefPad'), (New-F81Source -Code 'RefGun' -Family 'lightgun'))
-        $lines = @(Get-F81Lines)
-        $lines | Should -Contain '  You have 3 games with their controls set up.'
-        @($lines | Where-Object { $_ -match '\S' }).Count | Should -Be 3
-        $lines | Should -Contain ' driving: copied from RefWheel and RefPad to your other driving games.'
-        $lines | Should -Contain ' lightgun: copied from RefGun to your other lightgun games.'
-        (($lines -join ' ') -match 'api=|device\(s\)|buttons|Sensitivity') | Should -BeFalse
-        Install-F81Mocks -Width 100
-        $bad = New-F81Source -Code 'RefBad' -Carry @{ 'Use Keyboard/Button For Axis' = 'True' }
-        Write-TpmControlSourceSummary -Pool @($bad)
-        $paragraphs = @(Get-F81Paragraphs)
-        $paragraphs.Count | Should -Be 2
-        $paragraphs[0] | Should -Match '^You have 1 game with its controls set up\.'
-        $paragraphs[1] | Should -BeExactly 'Check first: 1 game may have settings that do not match your real controller. Press D to see them.'
-    }
-
-    It 'asks one question with D for details, keeps Y and N, and puts the old rows and advice under D' {
-        # Mutation: drop DetailsAction, or leave the advice or the rows out of the blocks.
-        Install-F81Mocks -Width 100 -Answers @('d', 'y')
-        $bad = New-F81Source -Code 'RefBad' -Carry @{ 'Use Keyboard/Button For Axis' = 'True'; 'Player 1 Relative Sensitivity' = '50' }
-        $answer = Read-TpmControlCopyApproval -Pool @($bad, (New-F81Source -Code 'RefPad' -Api 'DirectInput' -Devices @())) -BackupNote 'A saved copy of your game settings is made when you approve.'
-        $answer | Should -BeExactly 'Y'
-        $script:F81Prompts.Count | Should -Be 2
-        $script:F81Prompts[0] | Should -Be '  Copy controls from 2 games to your other games of the same type? (Y/N, D = details)'
-        $text = Get-F81Flat
-        $text | Should -Match 'Input API: RawInput'
-        $text | Should -Match 'Devices: ArchPad Btn'
-        $text | Should -Match 'Devices: not known'
-        $text | Should -Match 'Settings copied: .*Player 1 Relative Sensitivity=50'
-        $text | Should -Match 'Warning: Use Keyboard/Button For Axis=True'
-        $text | Should -Match 'copied to EVERY other game of that type'
-        $text | Should -Match '"Use Keyboard/Button For Axis" should be False if you set up a real wheel'
-        $text | Should -Match 'A saved copy of your game settings is made when you approve\.'
-        Install-F81Mocks -Width 100 -Answers @('n')
-        (Read-TpmControlCopyApproval -Pool @($bad)) | Should -BeExactly 'N'
-    }
-
-    It 'keeps the long per-game lines out of the source details when no setting is copied' {
-        # Mutation: always print a Settings copied row -> an empty row for a game with nothing to copy.
-        $blocks = @(Get-TpmControlSourceBlocks -Pool @(New-F81Source -Code 'RefPad'))
-        $blocks.Count | Should -Be 2
-        $blocks[1].Heading | Should -BeExactly 'RefPad'
-        (@($blocks[1].Lines) -join "`n") | Should -Not -Match 'Settings copied|Warning'
-        $blocks[1].ContainsKey('Color') | Should -BeFalse
-    }
-}
-
 Describe 'FIX81 custom rules notice (item 7)' {
     BeforeAll {
-        $script:F81NoCounts = [ordered]@{ noSync = 0; onlySync = 0; noPropagate = 0; forceArchetype = 0; familyOverride = 0; canonicalArchetype = 0; subFolderMap = 0 }
-        $script:F81SomeCounts = [ordered]@{ noSync = 2; onlySync = 0; noPropagate = 1; forceArchetype = 0; familyOverride = 0; canonicalArchetype = 0; subFolderMap = 3 }
+        $script:F81NoCounts = [ordered]@{ noSync = 0; onlySync = 0; subFolderMap = 0 }
+        $script:F81SomeCounts = [ordered]@{ noSync = 2; onlySync = 0; subFolderMap = 3 }
     }
 
     It 'prints nothing and asks nothing when the file holds no rules' {
@@ -806,7 +626,7 @@ Describe 'FIX81 custom rules notice (item 7)' {
         Show-TpmOverridesNotice -Counts $script:F81SomeCounts -FilePath 'C:\TPM\TeknoParrot-Manager.overrides.json'
         $lines = @(Get-F81Lines)
         @($lines | Where-Object { $_ -match '\S' }) | Should -Be @('  You have custom rules in TeknoParrot-Manager.overrides.json. The full list is in the log.')
-        (($lines -join ' ') -match '=|pinned|familyOverride|These come from') | Should -BeFalse
+        (($lines -join ' ') -match '=|pinned|These come from') | Should -BeFalse
     }
 
     It 'writes what each rule does, how many there are and the file to the log, once' {
@@ -818,9 +638,8 @@ Describe 'FIX81 custom rules notice (item 7)' {
         $log | Should -Match 'Custom rules \[ZIP files that are never extracted\]: Setting: noSync'
         $log | Should -Match 'Custom rules \[ZIP files that are never extracted\]: How many: 2'
         $log | Should -Match 'What it does: These games are skipped when TeknoParrot Manager extracts ZIP files\.'
-        $log | Should -Match 'Setting: noPropagate'
         $log | Should -Match 'Setting: subFolderMap'
-        $log | Should -Not -Match 'Setting: onlySync|Setting: forceArchetype'
+        $log | Should -Not -Match 'Setting: onlySync'
         ([regex]::Matches($log, 'If you did not make this file yourself')).Count | Should -Be 1
     }
 
