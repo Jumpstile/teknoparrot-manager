@@ -17569,6 +17569,12 @@ function Get-TpmGameDisplayLabel {
     return $Fallback
 }
 
+# The full game names of several profile files, joined for one screen line ("Game A, Game B").
+function Get-TpmProfileNamesText {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProfileFiles)
+    return (@($ProfileFiles | ForEach-Object { Get-TpmGameDisplayLabel -ProfilePath $_.FullName -Fallback $_.BaseName }) -join ', ')
+}
+
 function Get-PostgresProfileDisplayMetadata {
     param([Parameter(Mandatory)][string]$ProfilePath)
     $profileKey = [System.IO.Path]::GetFileNameWithoutExtension($ProfilePath)
@@ -31189,7 +31195,7 @@ function Invoke-PostgresGameSetupLocked {
             $sources = @($members | ForEach-Object { if ($_.BackupFile) { ([string]$_.BackupFile).ToUpperInvariant() } else { '' } } | Select-Object -Unique)
             if ($sources.Count -eq 1) { continue }
             $preflightBlocked = $true
-            $profileKeys = @($members | ForEach-Object { $_.Profile.BaseName }) -join ', '
+            $profileKeys = Get-TpmProfileNamesText -ProfileFiles @($members | ForEach-Object { $_.Profile })
             foreach ($member in $members) {
                 $results.Errors++
                 $memberLabel = Get-TpmGameDisplayLabel -ProfilePath $member.Profile.FullName -Fallback $member.Profile.BaseName

@@ -312,7 +312,7 @@ function New-TPMGameSupportPrerequisitesV12 {
 }
 
 function New-TPMGameSupportContractV1 {
-    param([Parameter(Mandatory = $true)]$Profile, [Parameter(Mandatory = $true)][string]$SnapshotId, [Parameter(Mandatory = $true)][string]$CapturedAtUtc, [string]$Repository = 'teknogods/TeknoParrotUI', [string]$Commit = '5880e019016c5c3a0576e97a6c2a7f14bf54e3d1')
+    param([Parameter(Mandatory = $true)]$Profile, [Parameter(Mandatory = $true)][string]$SnapshotId, [Parameter(Mandatory = $true)][string]$CapturedAtUtc, [string]$Repository = 'TeknoParrot-install', [string]$Commit = '5880e019016c5c3a0576e97a6c2a7f14bf54e3d1')
     $profileCode = [string](Get-TPMGameSupportValueV1 $Profile 'ProfileCode' '')
     if ([string]::IsNullOrWhiteSpace($profileCode)) { throw 'GAME_SUPPORT_CONTRACT_INVALID: ProfileCode is required.' }
     $classification = [string](Get-TPMGameSupportValueV1 $Profile 'Classification' 'UNCLASSIFIED')
@@ -467,7 +467,7 @@ function New-TPMGameSupportExternalSoftwareV13 {
 }
 
 function New-TPMGameSupportContractV13 {
-    param([Parameter(Mandatory = $true)]$Profile, [Parameter(Mandatory = $true)][string]$SnapshotId, [Parameter(Mandatory = $true)][string]$CapturedAtUtc, [string]$Repository = 'teknogods/TeknoParrotUI', [string]$Commit = '5880e019016c5c3a0576e97a6c2a7f14bf54e3d1')
+    param([Parameter(Mandatory = $true)]$Profile, [Parameter(Mandatory = $true)][string]$SnapshotId, [Parameter(Mandatory = $true)][string]$CapturedAtUtc, [string]$Repository = 'TeknoParrot-install', [string]$Commit = '5880e019016c5c3a0576e97a6c2a7f14bf54e3d1')
     $v12 = New-TPMGameSupportContractV1 -Profile $Profile -SnapshotId $SnapshotId -CapturedAtUtc $CapturedAtUtc -Repository $Repository -Commit $Commit
     $contract = [ordered]@{}
     foreach ($key in $v12.Keys) { $contract[$key] = $v12[$key] }

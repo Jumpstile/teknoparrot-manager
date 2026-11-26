@@ -284,9 +284,9 @@ Describe 'TPM catalog-wide game support contracts' {
         $catalogRegistry = Get-Content -LiteralPath (Join-Path $catalogOutput 'game-support-contracts.json') -Raw | ConvertFrom-Json
         $catalogModel = Get-Content -LiteralPath (Join-Path $catalogOutput 'support-posture.json') -Raw | ConvertFrom-Json
         $catalogGoldenDigests = [ordered]@{
-            'game-support-contracts.json' = '99fd0f7c0bbe7aa12146861451af66db2a71ea685777e5af8b6eb42f19a2eac7'
+            'game-support-contracts.json' = 'e666e604a329b8a9da6a017f26e763add39fb81a3601a4ecde6bd26e16881629'
             'game-support-contract-validation.json' = 'b11b5dbeeaa95801de892964aa18be1fcaa68eb58cb6e2c6a5644542d44222e1'
-            'support-posture.json' = '6c72267a83993c07f9991ab043759107c303b80a332cac3d2991bbbcd2376879'
+            'support-posture.json' = '929dd7963620807a1b1f9aa7fffacf4ca5e3e2338bf12384c2aa3ffa8b982dd1'
             'manifest.json' = '8f0afc42ff508f8356f300f6a5d023f71152b86c02f80a0701ab1df5bb337bbd'
         }
     }

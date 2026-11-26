@@ -1241,7 +1241,7 @@ Historical pre-expansion implementation: both parsers unwrapped nested `ConvertE
 
 - Slice contract: `TPM-GAME-SUPPORT-CONTRACTS-001`.
 - Owner report: `TPM_GAME_SUPPORT_CONTRACTS_001`.
-- Pinned source: `teknogods/TeknoParrotUI` commit
+- Pinned source: TeknoParrot profile source commit
   `5880e019016c5c3a0576e97a6c2a7f14bf54e3d1`.
 - Catalog discovery: 695 GameProfiles XML files, 383 GameSetup XML files, and
   693 Metadata JSON files. All 695 GameProfiles parsed in the pinned-corpus

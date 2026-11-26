@@ -565,7 +565,7 @@ Status: IMPLEMENTATION COMPLETE; LOCAL FOCUSED VALIDATION COMPLETE; OWNER-RUNTIM
 Slice contract: `docs/remediation/slices/TPM-GAME-SUPPORT-CONTRACTS-001.md`.
 
 Owner report: `TPM_GAME_SUPPORT_CONTRACTS_001`. The implementation is
-catalog-wide and uses the pinned `teknogods/TeknoParrotUI` commit
+catalog-wide and uses the pinned TeknoParrot profile source commit
 `5880e019016c5c3a0576e97a6c2a7f14bf54e3d1`. The pinned universe contains 695
 GameProfiles XML files, 383 GameSetup XML files, and 693 Metadata JSON files.
 GameSetup and Metadata are case-insensitive auxiliary evidence and do not
