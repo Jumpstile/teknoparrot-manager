@@ -91,6 +91,33 @@ function Test-TpmCoverageRomLoader {
     return ($Loader -like 'Tekno*' -and $Loader -ne 'TeknoParrot' -and $Loader -ne 'TeknoMacaw')
 }
 
+# The guide's steps that the player still has to do. Text is split into sentences; a sentence counts as a step when it starts with an
+# instruction word (Set, Enable, Install, ...) or says "you need" / "must". Not steps: the ZIP or EXE to select (TeknoParrot Manager sets the
+# game file from the catalog profile), "Select Game Revision" (each guide version is its own profile and its Game Revision already holds that
+# set), "Set CD Image Folder" (TeknoParrot Manager sets it after registration when exactly one matching CHD is found), "keep the BIOS ZIP
+# beside it" and "Select CHD Root below the ROM ZIP" or a CHD second game file (Partner: found or checked in Library Health), "user-supplied ROM
+# required" statements, "Development only" and "Latest revision" remarks, and everything after "Controls:" (controls are set up from the controls guide).
+function Get-TpmCoverageManualSteps {
+    param([string[]]$Text)
+    $partnerPattern = '(?i)\.zip\b.*\b(same folder|beside)\b'
+    $donePattern = '(?i)^Select [\w.\-]+\.(zip|exe|elf|xbe|chd)( or the merged [\w.\-]+\.zip)?( \([^)]*\))?( as the game file)?( and [\w.\-]+\.chd as the Game CHD)?( as the first game path and the game CHD as the second)?\.?$|^Select [\w.\-]+\.zip or the merged parent archive [\w.\-]+\.zip\.?$|^Select the merged [\w.\-]+\.zip ROM archive\.?$|^Select [\w.\-]+\.zip from your [\w ]+ ROM folder\.?$|^Select a merged ROM ZIP|^No separate game ROM ZIP|^(Development only|Latest revision)|\b(user-supplied|requires the matching)\b|^Select (the exact set in )?Game Revision\b|^Set CD Image Folder\b|^Select AMD Fix in settings\b'
+    $stepPattern = '(?i)^(set|enable|disable|turn|use|edit|install|download|copy|delete|rename|extract|run|ensure|make sure|press|select|choose|apply|change|add|remove|open|go to|enter|replace|put|place|configure|calibrate|bind|plug|connect|launch|start|unzip|convert|always|read|try|do|don''t|never|switch|update|patch|reference|reset|click|right-click|create|move|unpack|keep|requires?)\b|\b(you(''ll)? need|you must|must be|needs? to be)\b'
+    $steps = New-Object System.Collections.Generic.List[string]
+    $partner = $false
+    foreach ($chunk in @($Text)) {
+        if ([string]::IsNullOrWhiteSpace($chunk)) { continue }
+        $cut = [regex]::Replace($chunk, '(?s)\bControls:.*$', '')
+        foreach ($sentence in @($cut -split '(?<=[.!?])\s+|\r?\n')) {
+            $s = ($sentence -replace '^\s*-\s*', '').Trim()
+            if (-not $s) { continue }
+            if ($s -match $partnerPattern -or $s -match '(?i)^Select CHD Root below|\bas the Game CHD\b|\bthe game CHD as the second\b') { $partner = $true; continue }
+            if ($s -match $donePattern) { continue }
+            if ($s -match $stepPattern) { [void]$steps.Add($s) }
+        }
+    }
+    return [pscustomobject]@{ Steps = $steps.ToArray(); Partner = $partner }
+}
+
 function Get-TpmCoverageDisposition {
     param([Parameter(Mandatory)]$Row, [string[]]$RecipeIds, $Tables)
     $id = [string]$Row.ProfileId
@@ -108,10 +135,13 @@ function Get-TpmCoverageDisposition {
     if ($Row.InGuide -and -not $Row.InCatalog) {
         return [pscustomobject]@{ Disposition = 'Gap'; Reason = 'The pinned catalog has no TeknoParrot profile for this game, so TeknoParrot Manager cannot register it.' }
     }
-    if ($Row.HasGuideText) {
-        return [pscustomobject]@{ Disposition = 'Guided'; Reason = 'The Game Notes file shows the guide steps for this game.' }
+    if ($Row.HasManualStep) {
+        return [pscustomobject]@{ Disposition = 'Guided'; Reason = 'The guide has a step TeknoParrot Manager cannot do safely by itself; the Game Notes file shows it.' }
     }
-    return [pscustomobject]@{ Disposition = 'Handled'; Reason = 'Nothing in the guide needs TeknoParrot Manager; TeknoParrot does the work.' }
+    if ($Row.DoneByCheck) {
+        return [pscustomobject]@{ Disposition = 'Checked'; Reason = 'TeknoParrot Manager finds the second game file or partner ZIP beside the game and reports it in Library Health when it is missing.' }
+    }
+    return [pscustomobject]@{ Disposition = 'Handled'; Reason = 'The guide text is only information, or a step TeknoParrot Manager does itself (it sets the game file from the catalog profile).' }
 }
 
 function Get-TpmCoverageRows {
@@ -134,8 +164,16 @@ function Get-TpmCoverageRows {
         $hasText = [bool]((Get-TpmCoverageText -Row $row -Name 'notes') -or (Get-TpmCoverageText -Row $source -Name 'general_issues') -or
             $secondFile -or (Get-TpmCoverageText -Row $row -Name 'test_exe') -or $gpu.Count -gt 0 -or
             (Get-TpmCoverageText -Row $source -Name 'amd_issues') -or (Get-TpmCoverageText -Row $source -Name 'nvidia_issues') -or (Get-TpmCoverageText -Row $source -Name 'intel_issues'))
+        $stepTexts = @((Get-TpmCoverageText -Row $source -Name 'general_issues'), (Get-TpmCoverageText -Row $row -Name 'notes')) +
+            @('amd', 'nvidia', 'intel' | ForEach-Object { Get-TpmCoverageText -Row $source -Name ($_ + '_issues') })
+        $steps = Get-TpmCoverageManualSteps -Text $stepTexts
+        $manualSteps = @($steps.Steps)
+        # A "works with a fix" card is a step only when the profile has no GPU Fix setting of its own; TeknoParrot Manager's graphics-card fix setup sets that setting for the card it finds.
+        $gpuFixNeeded = (@('amd', 'nvidia', 'intel' | Where-Object { (Get-TpmCoverageText -Row $source -Name ($_ + '_status')) -eq 'WITH_FIX' }).Count -gt 0)
+        if ($gpuFixNeeded -and -not ($null -ne $info -and $info.HasGpuFixField)) { $manualSteps += 'graphics-card fix' }
         $suppCount = 0
         if ($source.PSObject.Properties['supp_count'] -and $null -ne $source.supp_count) { $suppCount = [int]$source.supp_count }
+        if ($suppCount -gt 0) { $manualSteps += 'supplementary archive' }
         $r = [pscustomobject]@{
             ProfileId = $id; GameName = (Get-TpmCoverageText -Row $row -Name 'game_name'); Loader = $loader
             ArcadeSystem = (Get-TpmCoverageText -Row $source -Name 'arcade_system')
@@ -147,6 +185,7 @@ function Get-TpmCoverageRows {
             HasNotes = [bool](Get-TpmCoverageText -Row $row -Name 'notes'); HasGeneralIssues = [bool](Get-TpmCoverageText -Row $source -Name 'general_issues')
             HasTestProgram = [bool](Get-TpmCoverageText -Row $row -Name 'test_exe'); GraphicsNotOk = ($gpu -join ' ')
             SupplementaryArchives = $suppCount; HasGuideText = $hasText
+            HasManualStep = ($manualSteps.Count -gt 0); ManualSteps = ($manualSteps -join ' | '); DoneByCheck = ($steps.Partner -or [bool]$secondFile)
             RomBased = (Test-TpmCoverageRomLoader -Loader $loader)
         }
         $d = Get-TpmCoverageDisposition -Row $r -RecipeIds $RecipeIds -Tables $Tables
@@ -156,7 +195,7 @@ function Get-TpmCoverageRows {
         if ($r.GuideSecondFile -and $r.GuideSecondFile -match '(?i)\.chd$') { [void]$open.Add('the second game file (CHD) is chosen by the player; TeknoParrot Manager only checks it') }
         if ($suppCount -gt 0) { [void]$open.Add('supplementary archive: source, license and hash before TeknoParrot Manager could install it') }
         if ($r.GuideStatus -eq 'Broken') { [void]$open.Add('the guide marks this game as broken in TeknoParrot') }
-        if ($r.GraphicsNotOk -and $d.Disposition -ne 'Applied') { [void]$open.Add('graphics-card fix: guide text only, no reviewed fix') }
+        if ($r.GraphicsNotOk -and $d.Disposition -ne 'Applied') { [void]$open.Add('graphics card: the guide text only; TeknoParrot Manager sets the profile GPU Fix setting when the profile has one') }
         $r | Add-Member -NotePropertyName Disposition -NotePropertyValue $d.Disposition
         $r | Add-Member -NotePropertyName Reason -NotePropertyValue $d.Reason
         $r | Add-Member -NotePropertyName OpenItems -NotePropertyValue ($open -join '; ')
@@ -216,9 +255,9 @@ function Get-TpmCoverageMarkdown {
     [void]$sb.Append('This page counts the games in the Eggman guide and in the TeknoParrot catalog it was checked against, grouped by emulator, and says what TeknoParrot Manager does for each group. It does not list every game by name. The one-row-per-game list is a file (`game-coverage.csv`) that the tool makes in the folder you name (see Details at the bottom). The numbers are made by a tool (`scripts\New-TpmGameCoverage.ps1`), not typed by hand.' + $nl + $nl)
     [void]$sb.Append('## What the words mean' + $nl + $nl)
     [void]$sb.Append('- **Applied**: TeknoParrot Manager applies a reviewed fix for the game (see Required game patches).' + $nl)
-    [void]$sb.Append('- **Checked**: TeknoParrot Manager checks something and warns you (path too long, a pinned file, a graphics card that does not work, emulator startup files).' + $nl)
-    [void]$sb.Append('- **Guided**: the guide has steps for the game. TeknoParrot Manager puts them in your Game Notes file. You do the steps.' + $nl)
-    [void]$sb.Append('- **Handled**: the guide has nothing for the game that TeknoParrot Manager must do. TeknoParrot does the work.' + $nl)
+    [void]$sb.Append('- **Checked**: TeknoParrot Manager checks something and warns you (path too long, a pinned file, a graphics card that does not work, emulator startup files, a BIOS ZIP or second game file that is not beside the game).' + $nl)
+    [void]$sb.Append('- **Guided**: the guide has a step that TeknoParrot Manager cannot safely do for you (for example install a runtime, set a network address, use a card emulator, or download a file). TeknoParrot Manager puts the step in your Game Notes file. You do the step.' + $nl)
+    [void]$sb.Append('- **Handled**: the guide only gives information, or asks for something TeknoParrot Manager does itself (it sets the game file). Nothing is left for you to do except supply the game files the guide names.' + $nl)
     [void]$sb.Append('- **Gap**: TeknoParrot has no game profile for this guide entry, so there is nothing to register. The per-game row in `game-coverage.csv` says exactly what is missing.' + $nl + $nl)
     [void]$sb.Append('## Totals' + $nl + $nl)
     [void]$sb.Append(('{0} game IDs in all: {1} guide games, {2} guide versions (other ROM revisions of a game), and {3} catalog profiles that the guide does not list.' -f $t.Total, ($t.Total - $t.CatalogOnly - $t.Versions), $t.Versions, $t.CatalogOnly) + $nl + $nl)
@@ -232,7 +271,7 @@ function Get-TpmCoverageMarkdown {
     }
     [void]$sb.Append($nl + '## What you do')
     [void]$sb.Append($nl + $nl + '- **PC games and other emulators**: register with TeknoParrot Manager, read your Game Notes file, then set up the controls in TeknoParrot.' + $nl)
-    [void]$sb.Append('- **ROM games (marked ROM)**: the guide asks you to pick the exact ZIP it names, keep the BIOS ZIP in the same folder, pick the matching game revision, and for some games pick a CHD file as a second game file. TeknoParrot Manager sets the game file when a catalog profile exists, shows these steps in the Game Notes file, and reports in Library Health (Game support) when a second game file is missing.' + $nl)
+    [void]$sb.Append('- **ROM games (marked ROM)**: the guide asks you to pick the exact ZIP it names, keep the BIOS ZIP in the same folder, pick the matching game revision, set the CD image folder, and for some games pick a CHD file as a second game file. TeknoParrot Manager sets the game file when a catalog profile exists. Each guide version is its own profile and already holds its game revision. After registration it sets the CD Image Folder when exactly one matching CHD is in your games folder outside the place TeknoParrot searches by itself, and it finds a second-file CHD beside the ZIP or in a folder named after the game below it. Library Health (Game support) reports a BIOS ZIP or second game file that is missing.' + $nl)
     [void]$sb.Append('- **Gap rows**: guide entries that have no TeknoParrot profile of their own. Seven are extra archives that TeknoParrot has no profile for at all (the Sega Rally 3 track mods and Escape from Monster Manor); TeknoParrot Manager lists their folders as "not in TeknoParrot" and does not call that a failure. Two (Battle Gear 3 and Wayne Gretzky''s 3D Hockey Fatality Edition) run through a linked profile.' + $nl)
     [void]$sb.Append('- **Second profile not written**: four games (House of the Dead 4, Raiden III, Raiden IV and Densha de GO) have a first profile that TeknoParrot Manager registers, and the guide also names a second profile for them. The guide does not say what that second profile is for, so TeknoParrot Manager does not write it. These four are not Gap rows. They stay on this page so they are not forgotten. (The one exception is a game whose first profile TeknoParrot has retired: its second profile is written when the game folder has the file that profile starts.)' + $nl)
     [void]$sb.Append(('- **Profiles the guide does not list**: {0} TeknoParrot profiles have no guide entry. TeknoParrot Manager registers them like any other game, so a game TeknoParrot adds later needs no TeknoParrot Manager update. The Game Notes file gives each one a plain entry, with the platform, release year and known issues from TeknoParrot''s own game information when it has them.' -f $t.CatalogOnly) + $nl + $nl)
@@ -260,7 +299,8 @@ if ($ProfilesDir -and (Test-Path -LiteralPath $ProfilesDir -PathType Container))
         $doc.Load($file.FullName)
         $emulatorNode = $doc.SelectSingleNode('/GameProfile/EmulatorType')
         $exeNode = $doc.SelectSingleNode('/GameProfile/ExecutableName')
-        $profileInfo[$file.BaseName] = [pscustomobject]@{ EmulatorType = $(if ($emulatorNode) { $emulatorNode.InnerText.Trim() } else { '' }); ExecutableName = $(if ($exeNode) { $exeNode.InnerText.Trim() } else { '' }) }
+        $fieldNames = @($doc.SelectNodes('/GameProfile/ConfigValues/FieldInformation/FieldName') | ForEach-Object { $_.InnerText.Trim() })
+        $profileInfo[$file.BaseName] = [pscustomobject]@{ EmulatorType = $(if ($emulatorNode) { $emulatorNode.InnerText.Trim() } else { '' }); ExecutableName = $(if ($exeNode) { $exeNode.InnerText.Trim() } else { '' }); HasGpuFixField = (@($fieldNames | Where-Object { $_ -match '^(GPU Fix|EnableAmdFix|AMDCrashFix|AMDFix|NVIDIA Fix)$' }).Count -gt 0) }
     }
 }
 $tables = Get-TpmCoverageCheckTables -ProductScriptPath $ProductScriptPath

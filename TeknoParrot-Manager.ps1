@@ -5607,6 +5607,11 @@ function Set-SecondaryExecutablePath {
             if ([string]::IsNullOrEmpty($exe2Path)) { return $false }
         } else {
             $exe2Path = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($PrimaryExePath), $exe2Name.Trim())
+            # A disc image (CHD) that is not beside the ZIP may sit in a folder below it named after the game ("set/parent subfolder"); only one match is used.
+            if ($exe2Name.Trim() -like '*.chd' -and -not (Test-Path -LiteralPath $exe2Path -PathType Leaf -ErrorAction SilentlyContinue)) {
+                $below = Find-TpmSecondFileByPattern -PrimaryExePath $PrimaryExePath -Pattern $exe2Name.Trim() -ExecutableName ([string]$Doc.GameProfile.ExecutableName) -ProfileCode $ProfileCode
+                if (-not [string]::IsNullOrEmpty($below)) { $exe2Path = $below }
+            }
         }
     } catch { return $false }
 
@@ -39159,6 +39164,110 @@ function Invoke-TpmRegionChoice {
     Write-TpmRegionResult -Region $region -Changed $written.Changed -Failed $written.Failed -NotOffered $notOffered.ToArray() -Kept $kept.ToArray() -Unattended:$Unattended -DeferDetails
 }
 
+# The game CD image a guide names ("CD image: cap-jjk-3.chd." or "CD image: kokoroj2/cdp-00146.chd."), as written. '' when it names none.
+function Get-TpmGuideCdImage {
+    param([string]$Text)
+    $m = [regex]::Match([string]$Text, '(?i)\bCD image:\s*([\w\-]+(?:/[\w\-]+)?\.chd)')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return ''
+}
+
+# The one folder under the games folder that holds a CD image, to put in the game's "CD Image Folder" ("dir/name.chd" gives the folder
+# above dir). '' when there is no match or several (nothing is guessed). Links and junctions are never followed.
+function Find-TpmCdImageFolder {
+    param([Parameter(Mandatory)][string]$InstallFolder, [Parameter(Mandatory)][string]$CdImage)
+    $rel = ($CdImage -replace '/', '\')
+    $hits = @(Get-ChildItem -LiteralPath $InstallFolder -Filter ([System.IO.Path]::GetFileName($rel)) -File -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName.EndsWith('\' + $rel, [System.StringComparison]::OrdinalIgnoreCase) -and (Test-TpmNoReparsePath -Path $_.FullName) })
+    if ($hits.Count -ne 1) { return '' }
+    return $hits[0].FullName.Substring(0, $hits[0].FullName.Length - $rel.Length - 1)
+}
+
+# Sets "CD Image Folder" on each item (Path, Label, Folder). Each profile is read again right before its write, the field must still be
+# empty, and the saved value is read back. With -BackupError nothing is written and every game is reported as failed.
+function Set-TpmProfileCdImageFolders {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items, [string]$BackupError = '')
+    $changed = New-Object System.Collections.Generic.List[string]
+    $failed = New-Object System.Collections.Generic.List[string]
+    $xpath = '/GameProfile/ConfigValues/FieldInformation[FieldName="CD Image Folder"]/FieldValue'
+    foreach ($item in $Items) {
+        if ($BackupError) { [void]$failed.Add(('{0}: {1}' -f $item.Label, $BackupError)); continue }
+        $pre = Get-TpmProfileWriteFingerprint -Path $item.Path
+        $attempted = $false
+        try {
+            $doc = Read-Xml $item.Path
+            $node = $doc.SelectSingleNode($xpath)
+            if ($null -eq $node -or -not [string]::IsNullOrWhiteSpace($node.InnerText)) { throw 'The game no longer has an empty CD Image Folder.' }
+            if (-not (Test-Path -LiteralPath $item.Folder -PathType Container)) { throw 'The folder is no longer there.' }
+            $node.InnerText = [string]$item.Folder
+            $attempted = $true
+            Save-Xml $doc $item.Path
+            $savedNode = (Read-Xml $item.Path).SelectSingleNode($xpath)
+            if ($null -eq $savedNode -or $savedNode.InnerText -cne [string]$item.Folder) { throw 'The saved CD Image Folder did not read back.' }
+            [void]$changed.Add(('{0}: {1}' -f $item.Label, $item.Folder))
+        } catch {
+            $failure = Resolve-TpmRegistrationSaveFailure -WriteAttempted $attempted -PreState $pre -Message $_.Exception.Message
+            [void]$failed.Add(('{0}: {1}' -f $item.Label, $failure.Reason))
+        }
+    }
+    return [pscustomobject]@{ Changed = $changed.ToArray(); Failed = $failed.ToArray() }
+}
+
+# After registration: a game whose guide names its CD image, whose "CD Image Folder" is empty, and whose one matching CHD sits in the games
+# folder OUTSIDE the places TeknoParrot searches by itself (the game ZIP's folder and a game folder inside it) gets that folder set,
+# after a verified backup and with a read-back. A field that already has a value, no match, or several matches: nothing is changed.
+function Invoke-TpmCdImageFolders {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [string]$InstallFolder, [bool]$DryRun = $false, [switch]$Unattended)
+    if ($DryRun -or [string]::IsNullOrWhiteSpace($InstallFolder) -or -not (Test-Path -LiteralPath $InstallFolder -PathType Container -ErrorAction SilentlyContinue)) { return }
+    $guideRows = Read-TpmSavedGuideRows
+    if ($null -eq $guideRows) { return }
+    $imageByCode = @{}
+    foreach ($game in @($guideRows)) {
+        $image = Get-TpmGuideCdImage -Text (Get-TpmGuideText -Row $game -Name 'general_issues')
+        if (-not $image) { continue }
+        $rows = @($game)
+        if ($game.PSObject.Properties['variants']) { $rows += @($game.variants | Where-Object { $_ }) }
+        foreach ($row in $rows) {
+            $code = Get-TpmGuideText -Row $row -Name 'profile_name'
+            if ($code -match '^[\w-]+$') { $imageByCode[$code] = $image }
+        }
+    }
+    $folderByImage = @{}
+    $plan = New-Object System.Collections.Generic.List[object]
+    foreach ($code in @($imageByCode.Keys | Sort-Object)) {
+        $path = Join-Path $UserProfilesDir ($code + '.xml')
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        try {
+            $doc = Read-Xml $path
+            $node = $doc.SelectSingleNode('/GameProfile/ConfigValues/FieldInformation[FieldName="CD Image Folder"]/FieldValue')
+            if ($null -eq $node -or -not [string]::IsNullOrWhiteSpace($node.InnerText)) { continue }
+            $gamePath = $doc.SelectSingleNode('/GameProfile/GamePath')
+            if ($null -eq $gamePath -or [string]::IsNullOrWhiteSpace($gamePath.InnerText)) { continue }
+            $image = $imageByCode[$code]
+            if (-not $folderByImage.ContainsKey($image)) { $folderByImage[$image] = Find-TpmCdImageFolder -InstallFolder $InstallFolder -CdImage $image }
+            $folder = [string]$folderByImage[$image]
+            if (-not $folder) { continue }
+            $zipFolder = [System.IO.Path]::GetDirectoryName($gamePath.InnerText.Trim())
+            if ($folder -ieq $zipFolder -or [System.IO.Path]::GetDirectoryName($folder) -ieq $zipFolder) { continue }
+            [void]$plan.Add([pscustomobject]@{ Path = $path; Label = (Get-TpmGameDisplayLabel -ProfilePath $path -Fallback $code); Folder = $folder })
+        } catch { Write-Log ('CD image folder: {0} could not be checked -- {1}' -f $code, $_.Exception.Message) }
+    }
+    if ($plan.Count -eq 0) { return }
+    $backupError = ''
+    try {
+        $backup = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $UserProfilesDir -Label 'CdImageFolder'
+        if (-not [bool](Get-TpmTransactionField -Object $backup -Name 'Verified' -Default $false)) { $backupError = 'The safety backup could not be verified.' }
+    } catch { $backupError = $_.Exception.Message }
+    $written = Set-TpmProfileCdImageFolders -Items $plan.ToArray() -BackupError $backupError
+    $blocks = New-Object System.Collections.Generic.List[object]
+    if ($written.Changed.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'CD Image Folder set'; Lines = $written.Changed }) }
+    if ($written.Failed.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'Could not be changed'; Lines = $written.Failed }) }
+    $title = if ($written.Changed.Count -gt 0) { 'CD Image Folder set for {0}.' -f (Format-TpmGameCount -Count $written.Changed.Count) } else { 'CD Image Folder was not set for any game.' }
+    $needs = if ($written.Failed.Count -gt 0) { @('{0} could not be changed. See Details.' -f (Format-TpmGameCount -Count $written.Failed.Count)) } else { @() }
+    $status = if ($written.Failed.Count -eq 0) { 'Ok' } elseif ($written.Changed.Count -eq 0) { 'Problem' } else { 'Attention' }
+    Write-TpmOutcome -Title $title -Status $status -Needs $needs -DetailBlocks $blocks.ToArray() -DetailsNote 'CD Image Folder.' -Unattended:$Unattended -DeferDetails
+}
+
 # The Region setup menu item: the user picks a region (or Back to automatic), sees the games that offer it with their current
 # region, picks all or some of them, confirms how many will change, then the change is made after a verified backup.
 # Unlike the question after registration, this may replace a region the user chose earlier: the user asked for it here.
@@ -44288,6 +44397,17 @@ function Get-TpmGuideGpuLines {
     return ,$gpuLines
 }
 
+# The ZIP names a guide says must stay in the same folder as the game ZIP ("Keep qsound.zip in the same folder."). Empty when it names none.
+function Get-TpmGuidePartnerZips {
+    param([string]$Text)
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($sentence in @($Text -split '(?<=[.!?])\s+|\r?\n')) {
+        if ($sentence -notmatch '(?i)\b(same folder|beside)\b') { continue }
+        foreach ($match in [regex]::Matches($sentence, '[\w\-]+\.zip')) { if (-not $names.Contains($match.Value)) { [void]$names.Add($match.Value) } }
+    }
+    return $names.ToArray()
+}
+
 # Returns per-game guide text for every CURRENTLY REGISTERED profile (or registered variant) of the
 # eggmansworld.github.io guide that has something to show: notes, general_issues (setup steps), graphics
 # card notes, a second game file or a test program. Joined on profile_name == ProfileCode (the profile XML's
@@ -44421,6 +44541,7 @@ function Read-TpmSavedGuideRows {
 function Get-TpmGameSupportSummary {
     param([object[]]$ProfileFiles = @(), [string[]]$ValidCodes = @(), [string[]]$PostgresNeededCodes = @(), [object[]]$GuideRows = $null)
     $steps = @{}
+    $partnerZips = @{}
     foreach ($game in @($GuideRows)) {
         if ($null -eq $game) { continue }
         $entries = New-Object System.Collections.Generic.List[object]
@@ -44432,6 +44553,8 @@ function Get-TpmGameSupportSummary {
             $code = Get-TpmGuideText -Row $entry.Row -Name 'profile_name'
             if (-not $code) { continue }
             $source = if ($entry.Parent) { $entry.Parent } else { $entry.Row }
+            $partners = @(Get-TpmGuidePartnerZips -Text (Get-TpmGuideText -Row $source -Name 'general_issues'))
+            if ($partners.Count -gt 0) { $partnerZips[$code] = $partners }
             if ((Get-TpmGuideText -Row $entry.Row -Name 'notes') -or (Get-TpmGuideText -Row $source -Name 'general_issues') -or
                 (Get-TpmGuideGpuLines -Source $source).Count -gt 0 -or (Get-TpmGuideText -Row $entry.Row -Name 'setup_exe2') -or
                 (Get-TpmGuideText -Row $entry.Row -Name 'test_exe')) { $steps[$code] = $true }
@@ -44463,7 +44586,13 @@ function Get-TpmGameSupportSummary {
         if ($fileFound) {
             $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
             $exeNameNode = $doc.GameProfile.SelectSingleNode('ExecutableName')
-            $setMissing = (@(Get-TpmMissingGameSetFiles -GamePath $(if ($null -ne $gamePathNode) { $gamePathNode.InnerText.Trim() } else { '' }) -ExecutableName $(if ($null -ne $exeNameNode) { $exeNameNode.InnerText.Trim() } else { '' })).Count -gt 0)
+            $gamePathText = $(if ($null -ne $gamePathNode) { $gamePathNode.InnerText.Trim() } else { '' })
+            $setMissing = (@(Get-TpmMissingGameSetFiles -GamePath $gamePathText -ExecutableName $(if ($null -ne $exeNameNode) { $exeNameNode.InnerText.Trim() } else { '' })).Count -gt 0)
+            # A ZIP the guide says must stay beside the game ZIP (a BIOS ZIP such as qsound.zip or neogeo.zip).
+            if (-not $setMissing -and $partnerZips.ContainsKey($code) -and $gamePathText) {
+                try { $gameFolder = [System.IO.Path]::GetDirectoryName($gamePathText) } catch { $gameFolder = '' }
+                if ($gameFolder) { $setMissing = (@($partnerZips[$code] | Where-Object { -not (Test-Path -LiteralPath ([System.IO.Path]::Combine($gameFolder, $_)) -PathType Leaf -ErrorAction SilentlyContinue) }).Count -gt 0) }
+            }
         }
         if (-not $fileFound -or $secondMissing -or $setMissing -or ($PostgresNeededCodes -contains $code)) {
             $row.NeedsYou++
@@ -44482,7 +44611,7 @@ function Get-TpmGameSupportLines {
         [void]$lines.Add(('{0}: {1} / {2} / {3} / {4}' -f $row.Emulator, $row.Registered, $row.FilesFound, $row.StepsShown, $row.NeedsYou))
     }
     [void]$lines.Add(('Needs you: {0}' -f (Format-TpmNameList -Names @($Summary.NeedsYouNames) -Max 1000 -WhenEmpty 'none')))
-    [void]$lines.Add('A game needs you when its game file is missing, a second ZIP its profile names is not beside it, its second game file is not chosen, or it still needs PostgreSQL settings.')
+    [void]$lines.Add('A game needs you when its game file is missing, a second ZIP (such as a BIOS ZIP) that its profile or the guide says must be beside it is not there, its second game file is not chosen, or it still needs PostgreSQL settings.')
     if (-not [bool]$Summary.GuideAvailable) {
         [void]$lines.Add('Setup steps were not counted: there is no saved copy of the Game Notes page yet. Run AutoSync or Register once with an internet connection to save one.')
     }
@@ -64481,6 +64610,7 @@ if ($manualRegData.Count -gt 0 -and -not $Unattended -and -not $dryRunActive) {
         -GameProfilesDir $gameProfilesDir -InstallFolder $gamesInstallFolder -Result $result -DryRun $dryRunActive
 }
 Invoke-TpmRegionChoice -Codes @($result.Registered | ForEach-Object { [string]$_.Code } | Select-Object -Unique) -UserProfilesDir $userProfilesDir -Result $result -DryRun $dryRunActive -Unattended:$Unattended
+Invoke-TpmCdImageFolders -UserProfilesDir $userProfilesDir -InstallFolder $gamesInstallFolder -DryRun $dryRunActive -Unattended:$Unattended
 $registrationFollowUp = New-Object System.Collections.Generic.List[string]
 if (@($result.PSTypeNames) -contains 'TPM.TransactionResult.v1' -and $result.Outcome -notin @('SUCCEEDED','NO_OP')) {
     $registrationMessage = 'Registration: ' + $result.Summary
