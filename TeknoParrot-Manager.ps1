@@ -26764,6 +26764,19 @@ function Invoke-AutoSync {
             $upToDate++
             continue
         }
+        # A game from the supplementary list is extracted only when its ZIP really is the version the list describes.
+        $suppLaunchFiles = Get-Variable -Name TpmSuppLaunchFiles -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        if ($suppLaunchFiles -is [hashtable] -and $suppLaunchFiles.ContainsKey($rawName)) {
+            $archiveCheck = Test-TpmZipLaunchFileAgainstDat -ZipPath $zip.FullName -LaunchFile $suppLaunchFiles[$rawName]
+            if (-not $archiveCheck.Matches) {
+                Write-Host "  TeknoParrot Manager skipped '$rawName': this ZIP is not the exact version the supplementary list describes ($($archiveCheck.Reason)). No files were extracted or changed." -ForegroundColor Yellow
+                Write-Log ("AutoSync: refused '{0}' -- the ZIP does not match the supplementary list: {1}" -f $rawName, $archiveCheck.Reason)
+                [void]$failedNames.Add([string]$rawName)
+                [void]$failureNotes.Add(("'{0}': the ZIP is not the exact version the supplementary list describes ({1}), so nothing was changed. Get the matching ZIP and run AutoSync again." -f $rawName, $archiveCheck.Reason))
+                [void](Update-TpmRegistrationLedgerUnit -OperationId $ledgerOperationId -SourceName $rawName -State SKIPPED -Reason 'ARCHIVE_DAT_MISMATCH' -Extraction 'REFUSED')
+                $skipped++; continue
+            }
+        }
         Write-Host "  Verifying transaction ($reason) : $rawName" -ForegroundColor Yellow
         Write-Log "AutoSync: transaction $rawName ($reason)"
         $tx = Invoke-TpmAutoSyncDirectoryTransaction `
@@ -26902,7 +26915,10 @@ function Build-DatIndexFromStream {
         # Rebuild: names of games whose files are collected into EmuRomSink as well (exact name, any case); with StopWhenCaptured
         # the read ends as soon as all of them are collected.
         [string[]]$CaptureGameNames = @(),
-        [switch]$StopWhenCaptured
+        [switch]$StopWhenCaptured,
+        # Supplementary sets: the launch file the list names for each game is collected here, game name -> file (Name, Size, Crc, Md5, Sha1, Sha256).
+        # One file per game, so the check of a player's archive needs no more memory than the game list itself.
+        [hashtable]$LaunchFileSink = $null
     )
     $index    = @{}
     $settings = New-Object System.Xml.XmlReaderSettings
@@ -26983,6 +26999,15 @@ function Build-DatIndexFromStream {
                         if (-not $EmuRomSink.ContainsKey($gameName)) { $EmuRomSink[$gameName] = New-Object System.Collections.Generic.List[object] }
                     }
                 } elseif ($currentElem -eq 'rom' -and $insideGame) {
+                    if ($null -ne $LaunchFileSink -and $exePath -and -not $captureRoms) {
+                        $launchName = [string]$reader.GetAttribute('name')
+                        if ($launchName.Replace('/', '\') -ieq $exePath.Trim().Replace('/', '\').TrimStart('\')) {
+                            $LaunchFileSink[$gameName] = [pscustomobject]@{
+                                Name = $launchName; Size = [string]$reader.GetAttribute('size'); Crc = [string]$reader.GetAttribute('crc')
+                                Md5 = [string]$reader.GetAttribute('md5'); Sha1 = [string]$reader.GetAttribute('sha1'); Sha256 = [string]$reader.GetAttribute('sha256')
+                            }
+                        }
+                    }
                     if ($captureRoms) {
                         [void]$EmuRomSink[$gameName].Add([pscustomobject]@{
                             Name   = [string]$reader.GetAttribute('name')
@@ -27059,7 +27084,7 @@ function Build-DatIndexFromStream {
 # ZipArchive is opened, the matching entry stream is passed to Build-DatIndexFromStream,
 # and the archive is disposed in the finally block regardless of outcome.
 function Build-DatIndexFromZip {
-    param([string]$zipPath, [string]$entryPattern = '*Collection*_RomVault*.dat', [hashtable]$EmuRomSink = $null, [switch]$Quiet, [string[]]$CaptureGameNames = @(), [switch]$StopWhenCaptured)
+    param([string]$zipPath, [string]$entryPattern = '*Collection*_RomVault*.dat', [hashtable]$EmuRomSink = $null, [switch]$Quiet, [string[]]$CaptureGameNames = @(), [switch]$StopWhenCaptured, [hashtable]$LaunchFileSink = $null)
     $za = $null
     try {
         $za    = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
@@ -27071,7 +27096,7 @@ function Build-DatIndexFromZip {
         }
         if (-not $Quiet) { Write-Host ("    Reading: {0}" -f $entry.Name) -ForegroundColor DarkGray }
         $stream = $entry.Open()
-        try   { return Build-DatIndexFromStream $stream -EmuRomSink $EmuRomSink -CaptureGameNames $CaptureGameNames -StopWhenCaptured:$StopWhenCaptured }
+        try   { return Build-DatIndexFromStream $stream -EmuRomSink $EmuRomSink -CaptureGameNames $CaptureGameNames -StopWhenCaptured:$StopWhenCaptured -LaunchFileSink $LaunchFileSink }
         finally { if ($stream) { $stream.Close() } }
     } catch {
         if (-not $Quiet) { Write-Host ("  WARNING: Could not read dat from ZIP -- {0}" -f $_) -ForegroundColor Yellow }
@@ -27087,10 +27112,10 @@ function Build-DatIndexFromZip {
 # Replaces the old DOM-based approach which could not handle the 584 MB collection dat.
 # Returns normalized-name -> { ProfileCode, Executable } hashtable.
 function Build-DatIndex {
-    param([string]$datPath, [hashtable]$EmuRomSink = $null, [switch]$Quiet, [string[]]$CaptureGameNames = @(), [switch]$StopWhenCaptured)
+    param([string]$datPath, [hashtable]$EmuRomSink = $null, [switch]$Quiet, [string[]]$CaptureGameNames = @(), [switch]$StopWhenCaptured, [hashtable]$LaunchFileSink = $null)
     try {
         $fs = [System.IO.File]::OpenRead($datPath)
-        try   { return Build-DatIndexFromStream $fs -EmuRomSink $EmuRomSink -CaptureGameNames $CaptureGameNames -StopWhenCaptured:$StopWhenCaptured }
+        try   { return Build-DatIndexFromStream $fs -EmuRomSink $EmuRomSink -CaptureGameNames $CaptureGameNames -StopWhenCaptured:$StopWhenCaptured -LaunchFileSink $LaunchFileSink }
         finally { if ($fs) { $fs.Close() } }
     } catch {
         if (-not $Quiet) { Write-Host ("  WARNING: Could not parse dat file -- {0}" -f $_) -ForegroundColor Yellow }
@@ -42136,6 +42161,67 @@ function Get-DatEntryForZipName {
         }
     }
     return $primary
+}
+
+# Adds the supplementary list to the collection list. Where both name the same game once the year and tags are removed, the supplementary
+# entry stays the first one (it takes priority, as documented) and the collection entries are kept next to it as alternates, so a ZIP
+# named exactly like a collection game still finds its own profile and game file.
+function Merge-TpmSupplementaryDatIndex {
+    param([Parameter(Mandatory)][hashtable]$DatIndex, [Parameter(Mandatory)][hashtable]$SuppIndex, [Parameter(Mandatory)]$SuppCodes)
+    foreach ($key in @($SuppIndex.Keys)) {
+        $supp = $SuppIndex[$key]
+        if ($DatIndex.ContainsKey($key)) {
+            $main = $DatIndex[$key]
+            # foreach, not @(): on PowerShell an @() around a generic List read from an object can throw.
+            $olds = New-Object System.Collections.Generic.List[object]
+            [void]$olds.Add($main)
+            foreach ($alternate in $main.Alternates) { [void]$olds.Add($alternate) }
+            foreach ($old in $olds) {
+                [void]$supp.Alternates.Add([pscustomobject]@{
+                    ProfileCode = [string]$old.ProfileCode; Executable = [string]$old.Executable; OriginalName = [string]$old.OriginalName
+                    ProfileCode2 = [string]$old.ProfileCode2; Executable2 = [string]$old.Executable2; TestMenuExecutable = [string]$old.TestMenuExecutable
+                })
+            }
+        }
+        $DatIndex[$key] = $supp
+        [void]$SuppCodes.Add([string]$supp.ProfileCode)
+    }
+}
+
+# Is this ZIP the exact set the supplementary list describes? The one file TeknoParrot starts (the launch file the list names) must be
+# inside the ZIP with the listed size and hash. Only reads the ZIP; writes nothing. A wrong version, a missing file or a ZIP that cannot
+# be read all fail, with a plain reason.
+function Test-TpmZipLaunchFileAgainstDat {
+    param([Parameter(Mandatory)][string]$ZipPath, [Parameter(Mandatory)]$LaunchFile)
+    $result = [pscustomobject]@{ Matches = $false; Reason = '' }
+    $algorithm = ''
+    $expected = ''
+    foreach ($pair in @(@('SHA256', [string]$LaunchFile.Sha256), @('SHA1', [string]$LaunchFile.Sha1), @('MD5', [string]$LaunchFile.Md5))) {
+        if (-not [string]::IsNullOrWhiteSpace($pair[1])) { $algorithm = $pair[0]; $expected = $pair[1].Trim(); break }
+    }
+    if (-not $algorithm) { $result.Reason = 'the list gives no hash for the game file'; return $result }
+    [int64]$expectedLength = -1
+    if (-not [int64]::TryParse(([string]$LaunchFile.Size), [ref]$expectedLength)) { $result.Reason = 'the list gives no size for the game file'; return $result }
+    $want = ([string]$LaunchFile.Name).Replace('\', '/').TrimStart('/')
+    $zip = $null
+    try {
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+        # get_Entries(): the property read hides a bad member name on Windows PowerShell 5.1.
+        $hits = @($zip.get_Entries() | Where-Object { $n = ([string]$_.FullName).Replace('\', '/'); $n -ieq $want -or $n.EndsWith('/' + $want, [System.StringComparison]::OrdinalIgnoreCase) })
+        if ($hits.Count -eq 0) { $result.Reason = ('the ZIP does not hold {0}' -f $want); return $result }
+        if ($hits.Count -gt 1) { $result.Reason = ('the ZIP holds {0} more than once' -f $want); return $result }
+        if ([int64]$hits[0].Length -ne $expectedLength) { $result.Reason = ('{0} has size {1}; the list says {2}' -f $want, $hits[0].Length, $expectedLength); return $result }
+        $hasher = [System.Security.Cryptography.HashAlgorithm]::Create($algorithm)
+        $stream = $hits[0].Open()
+        try { $actual = [System.BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-', '') }
+        finally { $stream.Dispose(); $hasher.Dispose() }
+        if ($actual -ine $expected) { $result.Reason = ('{0} is not the file the list describes ({1} differs)' -f $want, $algorithm); return $result }
+    } catch {
+        $result.Reason = ('the ZIP could not be read: {0}' -f $_.Exception.Message)
+        return $result
+    } finally { if ($zip) { $zip.Dispose() } }
+    $result.Matches = $true
+    return $result
 }
 
 # The profile codes the Eggman list names for one game folder (exact name match): the first profile, then the second one (for a
@@ -60995,6 +61081,7 @@ $configuredOnlySyncList = @($onlySyncList)  # the whitelist from the overrides f
 
 $datIndex   = @{}
 $suppIndex  = @{}   # supplementary dat index: normalizedName -> {ProfileCode, Executable}
+$script:TpmSuppLaunchFiles = @{}   # supplementary dat: game name -> launch file with its size and hashes (checks a player's ZIP)
 $suppCodes  = New-Object 'System.Collections.Generic.HashSet[string]'([StringComparer]::OrdinalIgnoreCase)
 $notesIndex = @{}   # game notes index: ProfileCode.ToLowerInvariant() -> notes text string
 
@@ -61012,7 +61099,7 @@ if ($eggmanDatZip) {
         }
         if ($includeSupplementary) {
             Write-Host "  Loading supplementary dat from ZIP..." -ForegroundColor DarkGray
-            $suppIndex = Build-DatIndexFromZip $eggmanDatZip '*Supplementary*_RomVault*.dat'
+            $suppIndex = Build-DatIndexFromZip $eggmanDatZip '*Supplementary*_RomVault*.dat' -LaunchFileSink $script:TpmSuppLaunchFiles
             if ($suppIndex.Count -gt 0) {
                 Write-Host ("  Supplementary dat: {0} entries indexed (override collection)." -f $suppIndex.Count) -ForegroundColor DarkGray
                 Write-Log "SuppIndex (ZIP): $($suppIndex.Count) entries from $eggmanDatZip"
@@ -61046,7 +61133,7 @@ if ($eggmanDatZip) {
         if ($supplementaryDatPath) {
             if (Test-Path -LiteralPath $supplementaryDatPath) {
                 Write-Host "  Loading supplementary dat..." -ForegroundColor DarkGray
-                $suppIndex = Build-DatIndex $supplementaryDatPath
+                $suppIndex = Build-DatIndex $supplementaryDatPath -LaunchFileSink $script:TpmSuppLaunchFiles
                 if ($suppIndex.Count -gt 0) {
                     Write-Host ("  Supplementary dat: {0} entries indexed (override collection)." -f $suppIndex.Count) -ForegroundColor DarkGray
                     Write-Log "SuppIndex: $($suppIndex.Count) entries from $supplementaryDatPath"
@@ -61083,10 +61170,7 @@ if ($eggmanDatZip) {
 # so the alternate version from the supplementary dat is used instead of
 # the collection version (only one version can be installed at a time).
 if ($suppIndex.Count -gt 0) {
-    foreach ($k in $suppIndex.Keys) {
-        $datIndex[$k] = $suppIndex[$k]
-        [void]$suppCodes.Add($suppIndex[$k].ProfileCode)
-    }
+    Merge-TpmSupplementaryDatIndex -DatIndex $datIndex -SuppIndex $suppIndex -SuppCodes $suppCodes
     Write-Log "DatIndex: merged $($suppIndex.Count) supplementary overrides ($($suppCodes.Count) profile codes)."
 }
 

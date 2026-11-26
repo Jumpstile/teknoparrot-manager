@@ -18,7 +18,7 @@ This page counts the games in the Eggman guide and in the TeknoParrot catalog it
 |---|---|---|---|---|
 | 54 | 157 | 2238 | 95 | 9 |
 
-The catalog used is TeknoParrot 1.0.0.2334 with 2544 game profiles. 9 guide IDs have no profile in it; those are the Gap rows. 65 guide entries have supplementary archives that TeknoParrot Manager never downloads.
+The catalog used is TeknoParrot 1.0.0.2334 with 2544 game profiles. 9 guide IDs have no profile in it; those are the Gap rows. 65 guide entries name supplementary archives. These are not a step for you: TeknoParrot Manager never downloads them, but when you own one it finds it by its name, checks its game file against the supplementary list (size and hash), refuses a wrong version, and then sets the game up like the collection game.
 
 ## By emulator
 

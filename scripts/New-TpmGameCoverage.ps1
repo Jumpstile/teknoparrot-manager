@@ -173,7 +173,6 @@ function Get-TpmCoverageRows {
         if ($gpuFixNeeded -and -not ($null -ne $info -and $info.HasGpuFixField)) { $manualSteps += 'graphics-card fix' }
         $suppCount = 0
         if ($source.PSObject.Properties['supp_count'] -and $null -ne $source.supp_count) { $suppCount = [int]$source.supp_count }
-        if ($suppCount -gt 0) { $manualSteps += 'supplementary archive' }
         $r = [pscustomobject]@{
             ProfileId = $id; GameName = (Get-TpmCoverageText -Row $row -Name 'game_name'); Loader = $loader
             ArcadeSystem = (Get-TpmCoverageText -Row $source -Name 'arcade_system')
@@ -193,7 +192,6 @@ function Get-TpmCoverageRows {
         if ($r.InGuide -and -not $r.InCatalog) { [void]$open.Add('the current TeknoParrot profile or ROM catalog file for this game (not in the pinned catalog)') }
         elseif (-not $r.ProfileXmlSeen) { [void]$open.Add('the profile XML (only its hash is in the pinned catalog), to confirm the executable name and any second game file') }
         if ($r.GuideSecondFile -and $r.GuideSecondFile -match '(?i)\.chd$') { [void]$open.Add('the second game file (CHD) is chosen by the player; TeknoParrot Manager only checks it') }
-        if ($suppCount -gt 0) { [void]$open.Add('supplementary archive: source, license and hash before TeknoParrot Manager could install it') }
         if ($r.GuideStatus -eq 'Broken') { [void]$open.Add('the guide marks this game as broken in TeknoParrot') }
         if ($r.GraphicsNotOk -and $d.Disposition -ne 'Applied') { [void]$open.Add('graphics card: the guide text only; TeknoParrot Manager sets the profile GPU Fix setting when the profile has one') }
         $r | Add-Member -NotePropertyName Disposition -NotePropertyValue $d.Disposition
@@ -263,7 +261,7 @@ function Get-TpmCoverageMarkdown {
     [void]$sb.Append(('{0} game IDs in all: {1} guide games, {2} guide versions (other ROM revisions of a game), and {3} catalog profiles that the guide does not list.' -f $t.Total, ($t.Total - $t.CatalogOnly - $t.Versions), $t.Versions, $t.CatalogOnly) + $nl + $nl)
     [void]$sb.Append('| Applied | Checked | Guided | Handled | Gap |' + $nl + '|---|---|---|---|---|' + $nl)
     [void]$sb.Append(('| {0} | {1} | {2} | {3} | {4} |' -f $t.Applied, $t.Checked, $t.Guided, $t.Handled, $t.Gap) + $nl + $nl)
-    [void]$sb.Append(('The catalog used is TeknoParrot {0} with {1} game profiles. {2} guide IDs have no profile in it; those are the Gap rows. {3} guide entries have supplementary archives that TeknoParrot Manager never downloads.' -f $CatalogVersion, $CatalogProfiles, $t.NotInCatalog, $t.SupplementaryArchives) + $nl + $nl)
+    [void]$sb.Append(('The catalog used is TeknoParrot {0} with {1} game profiles. {2} guide IDs have no profile in it; those are the Gap rows. {3} guide entries name supplementary archives. These are not a step for you: TeknoParrot Manager never downloads them, but when you own one it finds it by its name, checks its game file against the supplementary list (size and hash), refuses a wrong version, and then sets the game up like the collection game.' -f $CatalogVersion, $CatalogProfiles, $t.NotInCatalog, $t.SupplementaryArchives) + $nl + $nl)
     [void]$sb.Append('## By emulator' + $nl + $nl)
     [void]$sb.Append('| Emulator (loader) | Game IDs | In catalog | Applied | Checked | Guided | Handled | Gap |' + $nl + '|---|---|---|---|---|---|---|---|' + $nl)
     foreach ($f in $Summary.Families) {
