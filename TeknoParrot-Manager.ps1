@@ -40390,6 +40390,7 @@ function Register-GamesLegacy {
     # The second profile the list names for a folder (GameProfile2), after the first one is registered or found.
     if ($datIndex.Count -gt 0 -and $gameProfilesDir -and -not (Test-TpmRegistrationLedgerStopped)) {
         Register-TpmDatSecondProfiles -Registered $registered -Already $already -SeenCodes $seenCodes -ClaimedBy $codeClaimedBy -ExeFiles $exeFiles -InstallBase $installBase -DatIndex $datIndex -GameProfilesDir $gameProfilesDir -ProfileSet $profileSet -UserProfilesDir $userProfilesDir -DryRun $DryRun -MutationRecords $mutationRecords -BackupState $BackupState
+        Register-TpmTeknoChiTwins -Registered $registered -Already $already -SeenCodes $seenCodes -ClaimedBy $codeClaimedBy -GameProfilesDir $gameProfilesDir -UserProfilesDir $userProfilesDir -DryRun $DryRun -MutationRecords $mutationRecords -BackupState $BackupState
     }
     $unmatched = @($allExeFolders.Keys | Where-Object { -not $matchedFolders.ContainsKey($_) } | Sort-Object)
     $evidenceStopped = (-not $DryRun -and (Test-TpmRegistrationLedgerStopped))
@@ -42340,6 +42341,78 @@ function Register-TpmDatSecondProfiles {
             if ($Registered.Code -notcontains $second) { [void]$MutationRecords.Failures.Add([pscustomobject]@{ Code = $second; WriteAttempted = $saveFailure.WriteAttempted; Reason = 'REGISTRATION_NOT_VERIFIED' }) }
             Write-Host "  FAILED to register $second : $_" -ForegroundColor Red
             Write-Log "Register (dat second profile) FAILED $second -- $_"
+        }
+    }
+}
+
+# TeknoChi is the newer TeknoParrot module for the same SEGA Chihiro games the older cxbxr profiles run. A TeknoChi profile names no
+# game file of its own, and the game list names only the older profile code. So once the player's game is registered under the older
+# profile, its TeknoChi twin gets the SAME game file. The table pairs each TeknoChi profile with its older code(s) by game name and
+# by the older profile's game file name. Where two older versions share one twin (export and Japan versions), only the version the
+# player's own game registered is used: when both are registered, or neither, nothing is written. A twin the player already has is
+# left untouched. Games with no older profile (Ghost Squad, MJ2, MJ3, MJ3 Evolution, Quest of D) are not in the table: no game file
+# is invented for them.
+function Register-TpmTeknoChiTwins {
+    param(
+        [Parameter(Mandatory)]$Registered, [Parameter(Mandatory)]$Already, [Parameter(Mandatory)][hashtable]$SeenCodes, [Parameter(Mandatory)][hashtable]$ClaimedBy,
+        [Parameter(Mandatory)][string]$GameProfilesDir, [Parameter(Mandatory)][string]$UserProfilesDir,
+        [bool]$DryRun = $false, [Parameter(Mandatory)]$MutationRecords, $BackupState = $null
+    )
+    $twins = [ordered]@{
+        TeknoChiCrazyTaxi                  = @('CTHR')
+        TeknoChiGolf2005                   = @('SGC05')
+        TeknoChiGolfNextTours              = @('SGC06')
+        TeknoChiGundam                     = @('GBOS')
+        TeknoChiOllieKing                  = @('OllieKing')
+        TeknoChiOutRun2                    = @('or2')
+        TeknoChiOutRun2RevB                = @('or2b')
+        TeknoChiOutRun2SP                  = @('or2sp')
+        TeknoChiTheHouseOfTheDeadIII       = @('HOTD3')
+        TeknoChiVirtuaCop3                 = @('vc3')
+        TeknoChiWanganMidnightMaximumTune  = @('WMMT1', 'WMMT1J')
+        TeknoChiWanganMidnightMaximumTune2 = @('WMMT2', 'WMMT2j')
+    }
+    foreach ($twin in $twins.Keys) {
+        if (Test-TpmRegistrationLedgerStopped) { break }
+        $templatePath = Join-Path $GameProfilesDir ($twin + '.xml')
+        if (-not (Test-Path -LiteralPath $templatePath -PathType Leaf)) { continue }
+        $userProfile = Join-Path $UserProfilesDir ($twin + '.xml')
+        if ((Test-Path -LiteralPath $userProfile) -or $SeenCodes.ContainsKey($twin)) { continue }
+        $found = New-Object System.Collections.Generic.List[object]
+        foreach ($older in $twins[$twin]) {
+            $path = ''
+            $hit = @($Registered | Where-Object { [string]$_.Code -ieq $older -and [string]$_.GamePath })
+            if ($hit.Count -gt 0) {
+                $path = [string]$hit[0].GamePath
+            } elseif ($Already -contains $older) {
+                try {
+                    $olderNode = (Read-Xml (Join-Path $UserProfilesDir ($older + '.xml'))).GameProfile.SelectSingleNode('GamePath')
+                    if ($null -ne $olderNode) { $path = $olderNode.InnerText.Trim() }
+                } catch { $path = '' }
+            }
+            if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) { [void]$found.Add([pscustomobject]@{ Code = $older; GamePath = $path }) }
+        }
+        if ($found.Count -eq 0) { continue }
+        if ($found.Count -gt 1) { Write-Log ("TeknoChi twin: {0} was left alone because more than one older version ({1}) is registered, so the right one is unclear" -f $twin, (($found | ForEach-Object { $_.Code }) -join ', ')); continue }
+        $older = [string]$found[0].Code
+        $gameFile = [string]$found[0].GamePath
+        $folderName = [string]$ClaimedBy[$older]
+        if (-not $folderName) { $folderName = Split-Path -Leaf (Split-Path -Parent $gameFile) }
+        $SeenCodes[$twin] = $true
+        $ClaimedBy[$twin] = $folderName
+        $writeAttempted = $false; $ledgerMapping = $null; $preWriteState = $null
+        try {
+            $ledgerMapping = Start-TpmRegistrationMapping -Folder $folderName -Code $twin -Match 'teknochi-twin' -IntendedPath $gameFile -TemplatePath $templatePath -DryRun $DryRun
+            Set-TpmRegistrationGamePath -TemplatePath $templatePath -ExePath $gameFile -UserProfile $userProfile -DryRun $DryRun -BackupState $BackupState -UserProfilesDir $UserProfilesDir -MutationRecords $MutationRecords -PreWriteState ([ref]$preWriteState) -WriteAttempted ([ref]$writeAttempted)
+            Complete-TpmRegistrationMapping -MappingId $ledgerMapping -Outcome VERIFIED
+            [void]$Registered.Add([pscustomobject]@{ Code = $twin; GamePath = $gameFile; DatMatch = $true; SecondProfile = $true })
+            Write-Log "Registered (teknochi twin of $older) $twin -> $gameFile"
+        } catch {
+            $saveFailure = Resolve-TpmRegistrationSaveFailure -WriteAttempted $writeAttempted -PreState $preWriteState -Message $_.Exception.Message
+            Complete-TpmRegistrationMapping -MappingId $ledgerMapping -Outcome FAILED -WriteAttempted $saveFailure.WriteAttempted -Reason $saveFailure.Reason
+            if ($Registered.Code -notcontains $twin) { [void]$MutationRecords.Failures.Add([pscustomobject]@{ Code = $twin; WriteAttempted = $saveFailure.WriteAttempted; Reason = 'REGISTRATION_NOT_VERIFIED' }) }
+            Write-Host "  FAILED to register $twin : $_" -ForegroundColor Red
+            Write-Log "Register (teknochi twin) FAILED $twin -- $_"
         }
     }
 }
