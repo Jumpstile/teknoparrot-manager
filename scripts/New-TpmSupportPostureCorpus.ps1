@@ -21,7 +21,7 @@ param(
 $gameSupportContractsModule = Join-Path $PSScriptRoot 'TPMGameSupport.Contracts.psm1'
 if (-not (Test-Path -LiteralPath $gameSupportContractsModule -PathType Leaf)) { throw "Game support contract module is missing: $gameSupportContractsModule" }
 Import-Module $gameSupportContractsModule -Force
-$script:TpmPinnedTeknoParrotRepository = 'teknogods/TeknoParrotUI'
+$script:TpmPinnedTeknoParrotRepository = 'TeknoParrot-install'
 $script:TpmPinnedTeknoParrotCommit = '5880e019016c5c3a0576e97a6c2a7f14bf54e3d1'
 $script:TpmPinnedTeknoParrotProfileCount = 695
 $script:TpmPinnedHistoricalManifestOrderSha256 = 'b7ec88b0de487fbcdcdf697334ccbec154a0f61e8c0a24712f2e99425425f4aa'

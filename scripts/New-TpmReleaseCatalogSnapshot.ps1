@@ -301,7 +301,7 @@ $manifest = [ordered]@{
         AssetUpdatedAt = [string]$release.Current.AssetUpdatedAt
     }
     SourceProof = [ordered]@{
-        Repository = 'teknogods/TeknoParrotUI'
+        Repository = 'TeknoParrot-install'
         Commit = [string]$release.SourceProof.Commit
         Tree = [string]$release.SourceProof.Tree
         Role = 'Immutable semantic content proof; not official release provenance'
@@ -326,7 +326,7 @@ $mutability = [ordered]@{
 }
 $sourceProofRecord = [ordered]@{
     RecordSchemaVersion = '1.0.0'
-    Repository = 'teknogods/TeknoParrotUI'
+    Repository = 'TeknoParrot-install'
     Commit = [string]$release.SourceProof.Commit
     Tree = [string]$release.SourceProof.Tree
     Role = 'Immutable semantic content proof; not official release provenance'

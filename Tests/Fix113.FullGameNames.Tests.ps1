@@ -118,3 +118,15 @@ Describe 'Controls game picker with a run-together profile name' {
         $game.Title | Should -Be 'Golden Tee Live 2019'
     }
 }
+
+Describe 'profile names text for a screen line' {
+    It 'shows each game by its full name, never by its profile code' {
+        # Mutation: join the file base names (the old shared-database message did this).
+        $dir = Join-Path $TestDrive 'users113'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $dir 'profileonly.xml'), '<GameProfile><GameName>Profile Only Game</GameName></GameProfile>')
+        [System.IO.File]::WriteAllText((Join-Path $dir 'nameless_code.xml'), '<GameProfile></GameProfile>')
+        $files = @(Get-ChildItem -LiteralPath $dir -Filter '*.xml' | Sort-Object Name)
+        Get-TpmProfileNamesText -ProfileFiles $files | Should -Be 'nameless_code, Profile Only Game'
+    }
+}

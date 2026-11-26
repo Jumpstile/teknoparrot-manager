@@ -8,4 +8,8 @@ STATUS: v1.0 RC9.4 is the latest published release (v1.0 RC9.3 is the previous o
 - [ ] Verify exact package filename, manifest, assets, and SHA256 only after qualified packaging is authorized.
 - [ ] Owner makes final release decision. Never auto-merge, tag, publish, push public WIP, or alter live TeknoParrot.
 - [ ] Publish README/use instructions and release notes with each owner-approved version; omit AI attribution/coauthor trailers.
+- [ ] Build the release from a local clone on a local disk, never from a network share.
+- [ ] Confirm the origin ref and the exact commit SHA being released, and that `git status` is clean.
+- [ ] Confirm that commit is an ancestor of `origin/main`.
+- [ ] Confirm the finished package reports that same commit SHA.
 A PRE-TEST HOLD does not stop source coding. See the scoped docs/remediation contracts for implementation details.

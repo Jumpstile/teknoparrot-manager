@@ -5,7 +5,7 @@ slice. The published v1.0 RC7 release and final Version 1.0 remain unchanged.
 
 ## Governing sources
 
-- `teknogods/TeknoParrotUI` commit
+- TeknoParrot profile source commit
   `5880e019016c5c3a0576e97a6c2a7f14bf54e3d1`.
 - `TeknoParrotUi.Common/GameProfiles/*.xml` as the complete profile universe.
 - Case-insensitive matching `GameSetup/*.xml` and `Metadata/*.json` as

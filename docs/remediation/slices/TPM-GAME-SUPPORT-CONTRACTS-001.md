@@ -7,7 +7,7 @@ Status: IMPLEMENTATION COMPLETE; OWNER-RUNTIME EVIDENCE REQUIRED
 - Owner report ID: `TPM_GAME_SUPPORT_CONTRACTS_001`
 - Scope: catalog-wide static support contracts plus a separate read-only
   runtime assessment for every pinned TeknoParrotUI GameProfiles profile.
-- Pinned source: `teknogods/TeknoParrotUI` commit `5880e019016c5c3a0576e97a6c2a7f14bf54e3d1`.
+- Pinned source: TeknoParrot profile source commit `5880e019016c5c3a0576e97a6c2a7f14bf54e3d1`.
 - Expected catalog: 695 GameProfiles XML files, joined case-insensitively to optional GameSetup and Metadata evidence.
 - Expected behavior: every pinned profile receives exactly one validated static contract and one final posture: `AUTOMATED_SAFE`, `REVIEW_MANUAL`, or `BLOCKED_UNSUPPORTED`.
 - Hummer and Hummer Extreme are representative seeded `REVIEW_MANUAL` records only; they do not define the slice boundary.
