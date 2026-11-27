@@ -6,6 +6,10 @@
   previous published version. RC9.2 came before it. RC8 was a tester build and
   was never published. Final Version 1.0 comes later.
 
+  TeknoParrot Manager is for beginners and is also useful if you already know
+  TeknoParrot. It hides complexity, not detail: repeatable bulk steps, previews,
+  backups before changes, a log of what was done. See docs\ADVANCED-USERS.md.
+
 
   v1.0 RC9.4 (changes since RC9.3)
   ----------------------------------------------------------------
@@ -782,7 +786,6 @@
   - The graphics card warning list has five more games that do not work
     on an Intel graphics card.
 
-
   v1.0 RC7  (2026-08-22)
   ----------------------------------------------------------------
   Published. https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
@@ -791,19 +794,16 @@
   them before treating the game as ready. Warnings about missing components
   now cover more games than pcsx2x6.
 
-
   v1.0 RC6  (2026-08-16)
   ----------------------------------------------------------------
   The first-run wizard asks fewer questions. dgVoodoo2 and ReShade can be
   downloaded from their official sources and are checked before use; neither
   is bundled in the ZIP.
 
-
   v1.0 RC5  (2026-08-14)
   ----------------------------------------------------------------
   Fixes the RC4 package, which was missing one file that pcsx2x6 crosshair
   setup needs. RC4 is replaced by RC5.
-
 
   v1.0 RC4  (2026-08-13)
   ----------------------------------------------------------------
@@ -812,14 +812,12 @@
   TPM just did" recap, and new installs get a welcome screen. Out-of-date
   profile-field warnings were corrected. Replaced by RC5.
 
-
   v1.0 RC3  (2026-08-08)
   ----------------------------------------------------------------
   Published. pcsx2x6 crosshair setup checks the emulator's own first-run
   setup before it adds files and never writes the emulator's own cursor
   settings. Personal, non-commercial use is allowed; other use needs written
   permission.
-
 
   v1.0 RC2.1  (2026-07-10)
   ----------------------------------------------------------------
@@ -828,12 +826,10 @@
   wording for the Overrides line and the Preview prompt. The menu banner
   scales with the console width.
 
-
   v1.0 RC2  (2026-07-04)
   ----------------------------------------------------------------
   The package shows the right RC2 name. The main menu has a full, standard
   and compact layout chosen by console size.
-
 
   v1.0 RC1 and v0.26 to v0.99.44 BETA  (2026-06-10 to 2026-07-03)
   ----------------------------------------------------------------

@@ -64839,7 +64839,7 @@ if ($registrationFolders.Count -gt 0 -and -not $dryRunActive) {
         Write-Host ("{0} See the Registered lines above." -f $registeredText) -ForegroundColor DarkCyan
     }
     else {
-        Write-Host ("{0} That only means the files were unpacked. At least one game still needs your attention. Check the registration result above." -f $extractedText) -ForegroundColor Yellow
+        Write-Host ("{0} That only means the files were unpacked, not that the game is ready in TeknoParrot. At least one game still needs your attention. Check the registration result above." -f $extractedText) -ForegroundColor Yellow
     }
     Write-Host "  What should I do next?" -ForegroundColor Cyan
     Write-Host "  [N] New game only (default) -- stop here, skip the rest of your games" -ForegroundColor Cyan
