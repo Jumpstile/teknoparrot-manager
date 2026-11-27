@@ -42365,7 +42365,6 @@ function Register-TpmTeknoChiTwins {
         TeknoChiGundam                     = @('GBOS')
         TeknoChiOllieKing                  = @('OllieKing')
         TeknoChiOutRun2                    = @('or2')
-        TeknoChiOutRun2RevB                = @('or2b')
         TeknoChiOutRun2SP                  = @('or2sp')
         TeknoChiTheHouseOfTheDeadIII       = @('HOTD3')
         TeknoChiVirtuaCop3                 = @('vc3')
