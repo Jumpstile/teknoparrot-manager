@@ -24550,7 +24550,7 @@ Describe 'Required patch engine and local recipes' {
         $script:requiredPatchInputQueue = $null
     }
     AfterEach {
-        $script:TpmRequiredPatchCatalogSha256 = 'EE5BDEBB68424069DF51A8A178D2AEA8A7B7326A9643661F597818FF4B1F405D'
+        $script:TpmRequiredPatchCatalogSha256 = '9AF6BF561E62EF08AA822859D1381F0F6A3D71DFAB01790BB81206A6AD668EE3'
         $script:TpmOwnedLayout = $null
         $script:gamesInstallFolder = $null
         $script:requiredPatchInputQueue = $null
@@ -24836,9 +24836,9 @@ Describe 'Required patch engine and local recipes' {
 
     It 'binds all current catalog expansion rows to exact build and source identities' {
         $catalog = Read-TpmRequiredPatchCatalog -ProgramRoot ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')))
-        $catalog.Entries.Count | Should -Be 120
-        @($catalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 54
-        @($catalog.Entries | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProfileId,$_.BuildName,$_.Executable,$_.ExecutableSha256 } | Sort-Object -Unique).Count | Should -Be 71
+        $catalog.Entries.Count | Should -Be 124
+        @($catalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 58
+        @($catalog.Entries | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProfileId,$_.BuildName,$_.Executable,$_.ExecutableSha256 } | Sort-Object -Unique).Count | Should -Be 75
         @($catalog.Entries | ForEach-Object { $_.Operations } | Where-Object Type -CEQ 'CreateFile').Count | Should -Be 108
         @($catalog.Entries | ForEach-Object { $_.Operations } | Where-Object Type -CEQ 'ReplaceFile').Count | Should -Be 12
         $infinityExpectedRows = @(
@@ -25879,7 +25879,7 @@ Describe 'Required patch engine and local recipes' {
         [IO.File]::ReadAllText($requiredPatchFixture.PluginTarget) | Should -Be 'synthetic required plugin'
         Test-Path -LiteralPath $userProfile | Should -BeFalse
         Should -Invoke Read-PathWithBrowse -Times 1 -Exactly
-        $script:TpmRequiredPatchCatalogSha256 = 'EE5BDEBB68424069DF51A8A178D2AEA8A7B7326A9643661F597818FF4B1F405D'
+        $script:TpmRequiredPatchCatalogSha256 = '9AF6BF561E62EF08AA822859D1381F0F6A3D71DFAB01790BB81206A6AD668EE3'
         $script:TpmOwnedLayout = $null
     }
 
@@ -25932,7 +25932,7 @@ Describe 'Required patch engine and local recipes' {
         Invoke-TpmRequiredPatchMenu -TpRoot $tp -UserProfilesDir (Join-Path $tp 'UserProfiles') -ManagerRoot $manager -ProgramRoot $manager -MainSource $source -SupplementarySource ''
         Test-Path -LiteralPath $requiredPatchFixture.PluginTarget | Should -BeFalse
         @(Get-ChildItem -LiteralPath (Join-Path $owned 'Backups\GamePatches') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
-        $script:TpmRequiredPatchCatalogSha256 = 'EE5BDEBB68424069DF51A8A178D2AEA8A7B7326A9643661F597818FF4B1F405D'
+        $script:TpmRequiredPatchCatalogSha256 = '9AF6BF561E62EF08AA822859D1381F0F6A3D71DFAB01790BB81206A6AD668EE3'
         $script:TpmOwnedLayout = $null
     }
     It 'selects exact Cross Elysion GPU recipes and refuses a different executable revision' {

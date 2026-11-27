@@ -87,6 +87,44 @@ Describe 'Game support decisions file' {
     }
 }
 
+Describe 'Third-party items for the guided games' {
+    BeforeAll {
+        $script:f412Checks = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TpmThirdPartyChecks.json') -Raw | ConvertFrom-Json
+    }
+
+    It 'covers exactly the 15 external games, each a guided row, with a message in plain words' {
+        $names = @($script:f412Checks.Entries | ForEach-Object { $_.Profile } | Sort-Object)
+        $names.Count | Should -Be 15
+        @($names | Sort-Object -Unique).Count | Should -Be 15
+        foreach ($entry in @($script:f412Checks.Entries)) {
+            $row = @($script:f412Decisions.Profiles | Where-Object { $_.Profile -eq $entry.Profile })
+            $row.Count | Should -Be 1 -Because $entry.Profile
+            $row[0].Disposition | Should -BeExactly 'guided'
+            $row[0].Reason | Should -Match 'never downloads'
+            $entry.Message | Should -Match 'never (downloads|installs|replaces|runs)' -Because $entry.Profile
+        }
+    }
+
+    It 'checks only files inside the game folder and gives a link only when the guide does' {
+        foreach ($entry in @($script:f412Checks.Entries)) {
+            $entry.CanCheck | Should -Be (@($entry.Checks).Count -gt 0)
+            foreach ($check in @($entry.Checks)) {
+                $check.Type | Should -BeExactly 'File'
+                $check.Path | Should -Not -Match '^[A-Za-z]:|^[\\/]|\.\.'
+                $check.Id | Should -Not -BeNullOrEmpty
+                $check.Description | Should -Not -BeNullOrEmpty
+            }
+            if ($entry.GuideLink) { $entry.Details | Should -Match 'Get it yourself' }
+        }
+    }
+
+    It 'gives every guided game a reason that says what TPM does, not the generic line' {
+        foreach ($row in @($script:f412Decisions.Profiles | Where-Object { $_.Disposition -eq 'guided' })) {
+            $row.Reason | Should -Not -Match 'shows the guide''s notes' -Because $row.Profile
+        }
+    }
+}
+
 Describe 'Graphics card decisions agree with the warning table' {
     It 'has every warning-table game that is in this file as a warning row, and every NO or explicit-text warning row in the table' {
         $profileNames = @($script:f412Decisions.Profiles | ForEach-Object { $_.Profile })

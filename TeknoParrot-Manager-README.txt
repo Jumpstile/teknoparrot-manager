@@ -792,8 +792,8 @@
     TPFIX.ini, or choose the first-launch TeknoParrot.dll path.
     Compatibility and gameplay remain separate checks.
 
-  - Required game patches. Option 13 contains 120 exact-build recipes
-    across 71 exact ProfileId/build/executable identities (54 game
+  - Required game patches. Option 13 contains 124 exact-build recipes
+    across 75 exact ProfileId/build/executable identities (58 game
     profiles).
 
     The list started with 58 earlier recipes and has grown since. Later
@@ -1730,8 +1730,8 @@
     The technical details behind D are: patch names, exact reason, result
     codes, and the folder with your undo copy. They are also in the log.
 
-  Option 13 has 120 exact-build recipes across 71 exact
-  ProfileId/build/executable identities (54 game profiles).
+  Option 13 has 124 exact-build recipes across 75 exact
+  ProfileId/build/executable identities (58 game profiles).
 
   The list started with 58 earlier recipes and has grown since. Later
   additions include absent-only Main restores: MaiMai GreeN

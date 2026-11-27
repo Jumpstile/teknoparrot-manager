@@ -41,14 +41,14 @@ BeforeAll {
 }
 
 Describe 'MaiMai GreeN and Rabbids Hollywood Main-component restores' {
-    It 'binds three exact source members and the integrated 120-entry catalog' {
+    It 'binds three exact source members and the integrated catalog' {
         $script:mainExtrasFragment.BaseCatalog.EntryCount | Should -Be 58
         $script:mainExtrasFragment.BaseCatalog.Sha256 | Should -BeExactly 'F86F09A8BD2749DC9C4531CD1D00A69BF07D85B14A8D281D33767732ED5B720A'
         $script:mainExtrasFragment.Entries.Count | Should -Be 3
         $script:mainExtrasCatalog.Schema | Should -Be 3
-        $script:mainExtrasCatalog.Entries.Count | Should -Be 120
-        @($script:mainExtrasCatalog.Entries.Id | Sort-Object -Unique).Count | Should -Be 120
-        @($script:mainExtrasCatalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 54
+        $script:mainExtrasCatalog.Entries.Count | Should -Be 124
+        @($script:mainExtrasCatalog.Entries.Id | Sort-Object -Unique).Count | Should -Be 124
+        @($script:mainExtrasCatalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 58
         @($script:mainExtrasCatalog.Entries | Where-Object { $_.Operations[0].Type -ceq 'CreateFile' }).Count | Should -Be 108
         @($script:mainExtrasCatalog.Entries | Where-Object { $_.Operations[0].Type -ceq 'ReplaceFile' }).Count | Should -Be 12
         (Get-FileHash -LiteralPath $script:mainExtrasCatalogPath -Algorithm SHA256).Hash | Should -BeExactly $script:TpmRequiredPatchCatalogSha256
