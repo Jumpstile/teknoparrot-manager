@@ -57,7 +57,7 @@ BeforeAll {
         'New-TpmVerifiedUserProfilesBackup',
         'Assert-TpmRegisteredGamePath',
         'Set-TpmRegistrationGamePath', 'Get-DatEntryForZipName', 'Get-TpmZipBaseName', 'Get-TpmBezelNumberText',
-        'Get-TpmProfileFileExtensions', 'Get-TpmDatNamedProfileCodes', 'Register-TpmDatSecondProfiles',
+        'Get-TpmProfileFileExtensions', 'Get-TpmDatNamedProfileCodes', 'Register-TpmDatSecondProfiles', 'Register-TpmTeknoChiTwins',
         'Update-TpmProfileToOwnGameFolder', 'Test-TpmPathInOtherGameFolder', 'Test-PathInside',
         'Get-TpmGameTitle', 'Get-TpmGameTitleWithCode', 'Get-TpmGameDisplayLabel', 'Split-TpmRunTogetherGameName'
     )

@@ -20,10 +20,10 @@ BeforeAll {
         $ast.FindAll({
             param($node)
             $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-                $node.Name -in @('Get-GameFiles', 'Register-GamesLegacy', 'Get-TpmProfileFileExtensions', 'Get-TpmDatNamedProfileCodes', 'Register-TpmDatSecondProfiles')
+                $node.Name -in @('Get-GameFiles', 'Register-GamesLegacy', 'Get-TpmProfileFileExtensions', 'Get-TpmDatNamedProfileCodes', 'Register-TpmDatSecondProfiles', 'Register-TpmTeknoChiTwins')
         }, $true)
     )
-    if ($functions.Count -ne 5) {
+    if ($functions.Count -ne 6) {
         throw "Expected the Get-GameFiles, Register-GamesLegacy and registration helper definitions; found $($functions.Count)."
     }
 
