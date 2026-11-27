@@ -571,6 +571,27 @@ Describe 'FIX59 Library Health separates TeknoParrot-created databases from the 
         Should -Invoke New-PostgresDatabaseFromBackup -Times 0 -Exactly
     }
 
+    # Mutation: treat a profile with no capability value as "TeknoParrot creates it" (or call it a plain missing database) ->
+    # the unknown list is empty, or the user is told to run setup for a database setup will not make.
+    It 'says plainly when the profile does not say who creates the database, and lists the Golden Tee Live 2020 checks, without creating anything' {
+        $fx = [pscustomobject]@{ Root = $script:healthRoot; Profiles = $script:profiles }
+        $null = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2020' -GameName 'Golden Tee Live 2020' -DbName 'GameDB20' -Pass 'synthetic-pass' -AutoCreate '' -Complete
+        [System.IO.File]::WriteAllText((Join-Path $script:PostgresBinDir 'psql.exe'), 'x')
+        Mock Get-Service { [pscustomobject]@{ Status = 'Running' } }
+        Mock Get-PostgresGameDatabaseReadiness { [pscustomobject]@{ Ready = $false; TableCount = 0; Error = 'Could not connect with the settings saved in the game profile: FATAL: database "GameDB20" does not exist' } }
+        Mock New-PostgresDatabaseFromBackup { throw 'health check must never create a database' }
+
+        $result = Invoke-LibraryHealthCheck -UserProfilesDir $script:profiles -TpRoot $script:healthRoot
+
+        @($result.PostgresCapabilityUnknown) | Should -Be @('Golden Tee Live 2020')
+        @($result.PostgresDatabaseProblems)[0] | Should -Match 'no starting database file came with the game'
+        $details = Get-F59HealthPostgresDetail -Result $result
+        $details | Should -Match ([regex]::Escape('The profile does not say who creates the database: Golden Tee Live 2020'))
+        $details | Should -Match ([regex]::Escape('Golden Tee Live 2020 - Database name: GameDB20. No other game uses it.'))
+        $details | Should -Match ([regex]::Escape('Golden Tee Live 2020 - Who makes the database: the profile does not say.'))
+        Should -Invoke New-PostgresDatabaseFromBackup -Times 0 -Exactly
+    }
+
     # Mutation: report OK without checking, or skip the problem list when the check passes.
     It 'says every game database is ready when the check passes' {
         $fx = [pscustomobject]@{ Root = $script:healthRoot; Profiles = $script:profiles }

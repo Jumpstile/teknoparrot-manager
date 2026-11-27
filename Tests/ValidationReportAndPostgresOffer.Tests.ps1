@@ -88,6 +88,31 @@ Describe 'RawInput / RawInputTrackball support reading' {
     }
 }
 
+Describe 'Platform names and PCSX2 window titles (issue #42)' {
+    BeforeAll {
+        function New-PlatformXml { param([string]$Inner) [xml]('<GameProfile>' + $Inner + '</GameProfile>') }
+    }
+    It 'keeps KonamiAcio and KonamiAcioRacing apart and falls back to EmulatorType' {
+        Get-ProfilePlatformName -Doc (New-PlatformXml '<EmulationProfile>KonamiAcioRacing</EmulationProfile>') | Should -BeExactly 'KonamiAcioRacing'
+        Get-ProfilePlatformName -Doc (New-PlatformXml '<EmulationProfile>KonamiAcio</EmulationProfile>') | Should -BeExactly 'KonamiAcio'
+        Get-ProfilePlatformName -Doc (New-PlatformXml '<EmulatorType>ElfLdr2</EmulatorType>') | Should -BeExactly 'ElfLdr2'
+        Get-ProfilePlatformName -Doc (New-PlatformXml '') | Should -BeExactly ''
+    }
+    It 'matches several PCSX2 on TP: titles for a pcsx2x6 profile only' {
+        $pcsx2 = New-PlatformXml '<EmulationProfile>pcsx2x6</EmulationProfile>'
+        Test-ProfileWindowTitleMatch -Doc $pcsx2 -Title 'PCSX2 on TP: Game One.acgame' | Should -BeTrue
+        Test-ProfileWindowTitleMatch -Doc $pcsx2 -Title 'PCSX2 on TP: Another Game' | Should -BeTrue
+        Test-ProfileWindowTitleMatch -Doc $pcsx2 -Title 'My PCSX2 on TP: Game' | Should -BeFalse
+        Test-ProfileWindowTitleMatch -Doc $pcsx2 -Title 'PCSX2 Notes' | Should -BeFalse
+        Test-ProfileWindowTitleMatch -Doc (New-PlatformXml '<EmulationProfile>ElfLdr2</EmulationProfile>') -Title 'PCSX2 on TP: Game' | Should -BeFalse
+    }
+    It 'does not change the Input API when the game does not list the choice' {
+        $doc = New-ProfileXml -ApiOptions 'XInput', 'DirectInput'
+        Set-ProfileInputApi -doc $doc -api 'RawInput' | Should -BeFalse
+        $doc.SelectSingleNode('//FieldValue').InnerText | Should -Be 'XInput'
+    }
+}
+
 Describe 'Validation report' {
     BeforeEach {
         Mock Find-TpmSavedConfigPath { Join-Path $TestDrive 'no-such-settings.json' }

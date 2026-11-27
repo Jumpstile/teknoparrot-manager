@@ -16993,6 +16993,18 @@ function Install-TpmReShadeProfileDeployment {
         if ($staging -and -not $preserveStaging -and (Test-Path -LiteralPath $staging)) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
+# TPM's own known-device table: one list of controller maker (vendor) and model (product) numbers, the kind of device each is, and what
+# it can do. Get-TpmControllerEvidence reads it, so no hardware list is needed up front. An empty Product means every model of that maker
+# (only for makers that build nothing but that kind of device). Class is an evidence class from Get-TpmDeviceKinds. Abilities are plain
+# facts about the device kind; they never prove a game's controls are set up. To add a device, add one row here.
+function Get-TpmKnownControllers {
+    $rows = New-Object System.Collections.Generic.List[object]
+    $add = { param($Vendor, $Product, $Class, $Abilities) [void]$rows.Add([pscustomobject][ordered]@{ Vendor = $Vendor; Product = $Product; Class = $Class; Abilities = @($Abilities) }) }
+    & $add 'D209' '' 'ArcadeEncoder' @('Buttons', 'Joystick', 'SendsKeyboardKeys')
+    foreach ($product in @('05C4', '09CC', '0CE6')) { & $add '054C' $product 'PlayStationPad' @('Buttons', 'Sticks', 'Triggers', 'Rumble') }
+    & $add '057E' '2009' 'NintendoPad' @('Buttons', 'Sticks', 'Triggers', 'Rumble')
+    return @($rows.ToArray())
+}
 # Read-only look at which controller types are connected (contract: docs/architecture/CONTROLLER_EVIDENCE_CONTRACT.md).
 # It only suggests: the Device Survey uses a clear match as the default answer and the user can always change it.
 # It never writes a file, never keeps a serial number or device path, and any failure gives an empty "SourceUnavailable" result.
@@ -17025,11 +17037,13 @@ function Get-TpmControllerEvidence {
                 $n = @($devices | Where-Object { [string]$_.Name -match $hints[$class] }).Count
                 if ($n -gt 0) { & $add $class 'Low' 'NameHint' $n }
             }
-            # A small list of makers that only build arcade keyboard encoders. A match is Medium at most: it says a board of that maker is
-            # plugged in, not what the buttons do. Boards of one model are counted by instance id: every interface of one board shows one
-            # id, so the most ids any single interface shows is the number of boards. A different USB port changes the ids but not the count.
-            $knownVendors = [ordered]@{ 'D209' = 'ArcadeEncoder' }
-            foreach ($vendor in $knownVendors.Keys) {
+            # The known-device table (Get-TpmKnownControllers) says which maker and model numbers are which kind of device. A match is
+            # Medium at most: it says a board of that kind is plugged in, not what the buttons do. Boards of one model are counted by
+            # instance id: every interface of one board shows one id, so the most ids any single interface shows is the number of boards.
+            # A different USB port changes the ids but not the count.
+            $table = @(Get-TpmKnownControllers)
+            $boardsByClass = @{}
+            foreach ($vendor in @($table | ForEach-Object { [string]$_.Vendor } | Select-Object -Unique)) {
                 $interfaces = @{}
                 foreach ($device in $devices) {
                     if ([string]$device.DeviceID -match ('^[^\\]*\\VID_' + $vendor + '&PID_([0-9A-F]{4})([^\\]*)\\(.+)$')) {
@@ -17040,13 +17054,16 @@ function Get-TpmControllerEvidence {
                 }
                 $perModel = @{}
                 foreach ($slot in $interfaces.Keys) { $model = $slot.Split('|')[0]; $perModel[$model] = [Math]::Max([int]$perModel[$model], $interfaces[$slot].Count) }
-                $boards = 0
                 foreach ($model in @($perModel.Keys | Sort-Object)) {
-                    $boards += [int]$perModel[$model]
-                    if ($Salt) { for ($n = 1; $n -le [int]$perModel[$model]; $n++) { [void]$fingerprints.Add([pscustomobject][ordered]@{ DeviceClass = $knownVendors[$vendor]; Fingerprint = (& $hash ('TpmControllerFingerprint|1|{0}|{1}|VID_{2}&PID_{3}|{4}' -f $Salt, $knownVendors[$vendor], $vendor, $model, $n)) }) } }
+                    $row = @($table | Where-Object { [string]$_.Vendor -eq $vendor -and [string]$_.Product -eq $model })[0]
+                    if (-not $row) { $row = @($table | Where-Object { [string]$_.Vendor -eq $vendor -and [string]$_.Product -eq '' })[0] }
+                    if (-not $row) { continue }
+                    $class = [string]$row.Class
+                    $boardsByClass[$class] = [int]$boardsByClass[$class] + [int]$perModel[$model]
+                    if ($Salt -and $class -ceq 'ArcadeEncoder') { for ($n = 1; $n -le [int]$perModel[$model]; $n++) { [void]$fingerprints.Add([pscustomobject][ordered]@{ DeviceClass = $class; Fingerprint = (& $hash ('TpmControllerFingerprint|1|{0}|{1}|VID_{2}&PID_{3}|{4}' -f $Salt, $class, $vendor, $model, $n)) }) } }
                 }
-                if ($boards -gt 0) { & $add $knownVendors[$vendor] 'Medium' 'KnownVendor' $boards }
             }
+            foreach ($class in @($boardsByClass.Keys)) { & $add $class 'Medium' 'KnownVendor' $boardsByClass[$class] }
             $pads = @($devices | Where-Object { [string]$_.Name -match 'game controller' -and [string]$_.DeviceID -notmatch 'IG_' -and [string]$_.Name -notmatch ($hints.Values -join '|') }).Count
             if ($pads -gt 0) { & $add 'OtherGamePad' 'Medium' 'WindowsDeviceClass' $pads }
         } catch { [void]$reasons.Add('DeviceListUnavailable') }
@@ -33540,18 +33557,8 @@ $script:FFBBlasterNamePattern = 'ffb.*blaster|blaster.*ffb'
 function Get-FFBBlasterSupport {
     param([System.Xml.XmlDocument]$Doc, $Categories)
 
-    # Platform identity: prefer EmulationProfile, fall back to EmulatorType
-    # (both carry 'pcsx2x6' on a real PCSX2 fork profile -- confirmed against
-    # real TeknoParrot GameProfiles).
-    $platform = ''
-    if ($Doc.GameProfile) {
-        $epNode = $Doc.GameProfile.SelectSingleNode("EmulationProfile")
-        if ($epNode -and $epNode.InnerText) { $platform = $epNode.InnerText.Trim() }
-        if ([string]::IsNullOrWhiteSpace($platform)) {
-            $etNode = $Doc.GameProfile.SelectSingleNode("EmulatorType")
-            if ($etNode -and $etNode.InnerText) { $platform = $etNode.InnerText.Trim() }
-        }
-    }
+    # Platform identity: EmulationProfile, then EmulatorType (both carry 'pcsx2x6' on a real PCSX2 fork profile).
+    $platform = Get-ProfilePlatformName -Doc $Doc
 
     $emptyChanges = New-Object System.Collections.Generic.List[object]
 
@@ -41144,6 +41151,8 @@ function Invoke-LibraryHealthCheck {
     $postgresConfiguredLabels = New-Object System.Collections.Generic.List[string]
     $postgresAutoCreateLabels = New-Object System.Collections.Generic.List[string]
     $internalDatabaseLabels = New-Object System.Collections.Generic.List[string]
+    $postgresCapabilityUnknownLabels = New-Object System.Collections.Generic.List[string]
+    $postgresGoldenTee2020 = $null
     $postgresConfiguredChecks = New-Object System.Collections.Generic.List[object]
     $postgresDbUsers = New-Object System.Collections.Generic.List[object]
 
@@ -41165,6 +41174,10 @@ function Invoke-LibraryHealthCheck {
                 if (Test-GameNeedsPostgres $doc) {
                     $label = Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
                     [void]$postgresDbUsers.Add([pscustomobject]@{ Label = $label; DbName = [string](Get-PostgresFieldValue $doc 'DbName'); Key = ('{0}|{1}|{2}' -f ([string](Get-PostgresFieldValue $doc 'Address')).Trim(), ([string](Get-PostgresFieldValue $doc 'Port')).Trim(), [string](Get-PostgresFieldValue $doc 'DbName')) })
+                    # Who creates the database is read from the profile only (never from the game's year or title); a missing or odd value is unknown.
+                    $healthCapability = Get-PostgresAutoCreateCapability -Doc $doc
+                    if ($null -eq $healthCapability) { [void]$postgresCapabilityUnknownLabels.Add($label) }
+                    if ($pf.BaseName -ceq 'GoldenTeeLive2020') { $postgresGoldenTee2020 = [pscustomobject]@{ Label = $label; DbName = [string](Get-PostgresFieldValue $doc 'DbName'); Capability = $healthCapability } }
                     $configurationComplete = Test-TpmPostgresSettingsComplete -Doc $doc
                     if (-not $configurationComplete) {
                         [void]$postgresNeeded.Add($pf.BaseName)
@@ -41174,7 +41187,7 @@ function Invoke-LibraryHealthCheck {
                         [void]$postgresConfiguredLabels.Add($label)
                         [void]$postgresConfiguredChecks.Add([pscustomobject]@{ Label = $label; Doc = $doc })
                         # Only an explicit upstream 1 counts as "TeknoParrot creates the database"; a missing or odd field stays unknown.
-                        if ((Get-PostgresAutoCreateCapability -Doc $doc) -eq $true) {
+                        if ($healthCapability -eq $true) {
                             # FIX69 / N18B: setup creates the database itself when the game ships a backup (the newest one); only the other games are left to TeknoParrot.
                             $healthGamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
                             $healthGamePath = if ($healthGamePathNode) { ([string]$healthGamePathNode.InnerText).Trim() } else { '' }
@@ -41382,7 +41395,10 @@ function Invoke-LibraryHealthCheck {
                     Write-Log ('HealthCheck: database of {0} is not made yet; TeknoParrot creates it the first time the game starts.' -f $databaseCheck.Label)
                     continue
                 }
-                $why = if ([string]$readiness.Error -match 'does not exist') { 'its database is missing' } elseif ([string]$readiness.Error -match '^Found 0 tables') { 'its database has no tables' } else { 'the game cannot connect to its database with its own settings' }
+                $why = if ([string]$readiness.Error -match 'does not exist') {
+                    $missingGamePathNode = $databaseCheck.Doc.GameProfile.SelectSingleNode('GamePath')
+                    if (-not (Get-PostgresBackupSelection -GamePath $(if ($missingGamePathNode) { ([string]$missingGamePathNode.InnerText).Trim() } else { '' })).Newest) { 'its database is missing and no starting database file came with the game, so Postgres setup cannot make it' } else { 'its database is missing' }
+                } elseif ([string]$readiness.Error -match '^Found 0 tables') { 'its database has no tables' } else { 'the game cannot connect to its database with its own settings' }
                 [void]$postgresDatabaseProblems.Add(('{0}: {1}' -f $databaseCheck.Label, $why))
                 Write-Log ('HealthCheck: database problem for {0}: {1}' -f $databaseCheck.Label, $readiness.Error)
             }
@@ -41412,6 +41428,13 @@ function Invoke-LibraryHealthCheck {
     foreach ($sharedGroup in @($postgresDbUsers | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.DbName) } | Group-Object -Property Key | Where-Object { $_.Count -gt 1 })) {
         [void]$postgresSharedDatabases.Add(('{0} use the same database, {1}' -f (@($sharedGroup.Group | ForEach-Object { [string]$_.Label }) -join ' and '), [string]$sharedGroup.Group[0].DbName))
         Write-Log ('HealthCheck: {0} use the same database {1}; Postgres setup (menu 12) gives each its own.' -f (@($sharedGroup.Group | ForEach-Object { [string]$_.Label }) -join ' and '), [string]$sharedGroup.Group[0].DbName)
+    }
+    # Golden Tee Live 2020: its database name must be a safe one and its own, and the profile must say who creates the database.
+    $postgresGoldenTee2020Lines = New-Object System.Collections.Generic.List[string]
+    if ($null -ne $postgresGoldenTee2020) {
+        $gtShared = @($postgresDbUsers | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.DbName) -and [string]$_.DbName -ceq $postgresGoldenTee2020.DbName })
+        [void]$postgresGoldenTee2020Lines.Add($(if ([string]::IsNullOrWhiteSpace($postgresGoldenTee2020.DbName)) { 'Database name: none is saved in the profile yet. Postgres setup (menu 12) fills it in.' } elseif (-not (Test-SafePostgresDbName -DbName $postgresGoldenTee2020.DbName)) { 'Problem - the database name in the profile has a character that is not allowed. TeknoParrot Manager will not use it. Reinstall the game profile.' } elseif ($gtShared.Count -gt 1) { ('Database name: {0}. Another game uses the same name. Postgres setup (menu 12) gives each game its own.' -f $postgresGoldenTee2020.DbName) } else { ('Database name: {0}. No other game uses it.' -f $postgresGoldenTee2020.DbName) }))
+        [void]$postgresGoldenTee2020Lines.Add($(if ($postgresGoldenTee2020.Capability -eq $true) { 'Who makes the database: TeknoParrot does, the first time the game starts, unless the game came with a starting database file.' } elseif ($postgresGoldenTee2020.Capability -eq $false) { 'Who makes the database: TeknoParrot does not. Postgres setup (menu 12) makes it from the starting database file that comes with the game.' } else { 'Who makes the database: the profile does not say. Postgres setup will not guess and will not make it.' }))
     }
     # Database problems the check found are findings of a check that finished (exit 0); only a check that could not look at everything is incomplete.
     $healthOutcome = if ($discoveryFailed -or -not $optionalCoverageComplete -or -not $postgresInventoryComplete -or $postgresServiceUnverified -or $postgresDatabaseSkipped.Count -gt 0 -or $postgresDatabaseCheck -eq 'SkippedNoClient' -or $prerequisiteCheckFailed -or $gameTypeFailed -or $gameTypeCheckFailed -or $controlsCheckFailed -or [string]::IsNullOrWhiteSpace([string]$detected.Vendor)) { 'ACTION_REQUIRED' } else { 'SUCCEEDED' }
@@ -41463,6 +41486,8 @@ function Invoke-LibraryHealthCheck {
         PostgresAwaitingFirstStart = $postgresAwaitingFirstStartResult
         PostgresSharedDatabases = @($postgresSharedDatabases.ToArray())
         InternalDatabaseLabels = @($internalDatabaseLabels.ToArray())
+        PostgresCapabilityUnknown = @(if ($postgresInventoryComplete) { $postgresCapabilityUnknownLabels.ToArray() })
+        PostgresGoldenTee2020 = @(if ($postgresInventoryComplete) { $postgresGoldenTee2020Lines.ToArray() })
         PostgresDatabaseProblems = $postgresDatabaseProblemsResult
         PostgresDatabaseCheck = $postgresDatabaseCheck
         PostgresDatabaseNotChecked = @($postgresDatabaseSkipped.ToArray())
@@ -41802,6 +41827,12 @@ function Get-TpmLibraryHealthDetailBlocks {
         [void]$lines.Add(('Games using Internal storage (no PostgreSQL needed): {0}' -f (Format-TpmNameList -Names $internalDatabaseLabels -Max 1000)))
         foreach ($choiceLine in (Get-TpmDatabaseChoiceLines)) { [void]$lines.Add($choiceLine) }
     }
+    $capabilityUnknown = @(Get-TpmTransactionField -Object $Result -Name 'PostgresCapabilityUnknown' -Default @())
+    if ($capabilityUnknown.Count -gt 0) {
+        [void]$lines.Add(('The profile does not say who creates the database: {0}' -f (Format-TpmNameList -Names $capabilityUnknown -Max 1000)))
+        [void]$lines.Add('Postgres setup (menu 12) leaves a database that is already there alone. It will not make a missing one for these games, because it does not know if TeknoParrot would.')
+    }
+    foreach ($goldenTeeLine in @(Get-TpmTransactionField -Object $Result -Name 'PostgresGoldenTee2020' -Default @())) { [void]$lines.Add(('Golden Tee Live 2020 - {0}' -f $goldenTeeLine)) }
     foreach ($sharedText in @(Get-TpmTransactionField -Object $Result -Name 'PostgresSharedDatabases' -Default @())) {
         [void]$lines.Add(('Problem - {0}. Two games keep their saved progress in the same tables, so one database cannot hold both.' -f $sharedText))
         [void]$lines.Add('Postgres setup (menu 12) gives each game its own database. It deletes nothing and keeps both sets of progress.')
@@ -45066,6 +45097,27 @@ function Get-ProfileRawInputCapability {
         elseif ($raw -eq 'Unsupported') { $trackball = 'Unsupported' }
     }
     return [pscustomobject]@{ RawInput = $raw; RawInputTrackball = $trackball }
+}
+
+# The emulation platform a profile names: EmulationProfile first, then EmulatorType ('' when neither is there).
+# The value is returned exactly as written, so 'KonamiAcio' and 'KonamiAcioRacing' stay two different platforms.
+function Get-ProfilePlatformName {
+    param($Doc)
+    if ($null -eq $Doc -or $null -eq $Doc.DocumentElement) { return '' }
+    foreach ($name in 'EmulationProfile', 'EmulatorType') {
+        $node = $Doc.DocumentElement.SelectSingleNode($name)
+        if ($node -and $node.InnerText -and -not [string]::IsNullOrWhiteSpace($node.InnerText)) { return $node.InnerText.Trim() }
+    }
+    return ''
+}
+
+# True when a window title belongs to this profile's game window. Read-only. Only PCSX2 (pcsx2x6) profiles use the
+# start-of-title match 'PCSX2 on TP:' (the rest of the title changes with the game file). Any other profile, and any
+# other title, is a no match.
+function Test-ProfileWindowTitleMatch {
+    param($Doc, [string]$Title)
+    if ((Get-ProfilePlatformName -Doc $Doc) -ine 'pcsx2x6') { return $false }
+    return ($Title -cmatch '^PCSX2 on TP:')
 }
 
 # Sets the "Input API" FieldValue, but only if the field exists AND lists the
