@@ -10,7 +10,7 @@ BeforeAll {
     $parseErrors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { throw 'Controller evidence bootstrap could not parse the production script.' }
-    $wanted = @('Get-TpmControllerEvidence', 'Invoke-DeviceSurvey', 'Get-TpmControlStatePath', 'Read-TpmControlStateFile', 'Save-TpmControlStateFile', 'Get-TpmDeviceKinds', 'Get-TpmDeviceQuestions', 'Read-TpmCabinetState', 'Save-TpmCabinetState', 'Get-TpmCabinetDeviceAnswer', 'Set-TpmCabinetDevice', 'Get-TpmLedBlinkyKeyMap', 'Get-TpmControllerSalt', 'Get-TpmControllerSetNotice', 'Get-TpmEncoderFingerprints', 'Get-TpmEncoderCount', 'Get-TpmEncoderChangeNotice')
+    $wanted = @('Get-TpmControllerEvidence', 'Get-TpmKnownControllers', 'Invoke-DeviceSurvey', 'Get-TpmControlStatePath', 'Read-TpmControlStateFile', 'Save-TpmControlStateFile', 'Get-TpmDeviceKinds', 'Get-TpmDeviceQuestions', 'Read-TpmCabinetState', 'Save-TpmCabinetState', 'Get-TpmCabinetDeviceAnswer', 'Set-TpmCabinetDevice', 'Get-TpmLedBlinkyKeyMap', 'Get-TpmControllerSalt', 'Get-TpmControllerSetNotice', 'Get-TpmEncoderFingerprints', 'Get-TpmEncoderCount', 'Get-TpmEncoderChangeNotice')
     $functionFile = Join-Path $TestDrive 'controller-functions.ps1'
     ($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -in $wanted }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n" | Set-Content -LiteralPath $functionFile -Encoding utf8
     . $functionFile
@@ -79,6 +79,20 @@ Describe 'Get-TpmControllerEvidence' {
             Test-Json -Json ($result | ConvertTo-Json -Depth 6) -SchemaFile $script:schemaPath | Should -BeTrue
         }
         ($result | ConvertTo-Json -Depth 6) | Should -Not -Match '(?i)D209|0301|C52B'
+    }
+
+    It 'uses the known-device table to tell a PlayStation pad, an unlisted model and a maker-wide encoder apart, always at Medium' {
+        Mock Get-CimInstance {
+            @([pscustomobject]@{ Name = 'USB Input Device'; DeviceID = 'HID\VID_054C&PID_09CC&MI_03\7&2' },
+              [pscustomobject]@{ Name = 'USB Input Device'; DeviceID = 'HID\VID_054C&PID_FFFF&MI_03\7&3' },
+              [pscustomobject]@{ Name = 'USB Input Device'; DeviceID = 'HID\VID_D209&PID_1601&MI_00\7&1' },
+              [pscustomobject]@{ Name = 'USB Input Device'; DeviceID = 'HID\VID_D209&PID_0420&MI_00\7&4' })
+        }
+        $seen = @((Get-TpmControllerEvidence).DeviceObservations | Where-Object Basis -eq 'KnownVendor')
+        @($seen | Where-Object DeviceClass -eq 'PlayStationPad')[0].Count | Should -Be 1
+        @($seen | Where-Object DeviceClass -eq 'ArcadeEncoder')[0].Count | Should -Be 2
+        @($seen | Where-Object Confidence -ne 'Medium').Count | Should -Be 0
+        $seen.Count | Should -Be 2
     }
 
     It 'gives the same EvidenceId for the same controllers at a different time' {
