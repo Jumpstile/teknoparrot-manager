@@ -1,0 +1,170 @@
+{
+  "Schema": 1,
+  "Purpose": "For the guided games that need a third-party item, what TPM can check on the player's PC and what it tells the player. Checks use the same Id/Type/Path/Description shape as Prerequisites in scripts/TpmRequiredPatchRecipes.json (kind File, path relative to the game folder). TPM never downloads anything and never runs an installer.",
+  "Source": "TPM-REC351A-RESULT.md (the 15 EXTERNAL games) and the guide data. No hash or URL is listed unless the guide gives it.",
+  "Entries": [
+    {
+      "Profile": "AliensExtermination",
+      "Game": "Aliens: Extermination",
+      "Need": "A 60 FPS frame limiter and the DivX 6.0 video codec",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "Get a frame limiter (RivaTuner or a similar tool) and set it to 60 FPS. Also install the DivX 6.0 codec so the videos play. TeknoParrot Manager cannot see either one and never installs anything.",
+      "GuideLink": "",
+      "Details": "Guide: must limit FPS to 60; DivX 6.0 for video codecs. Both live in Windows, not in the game folder."
+    },
+    {
+      "Profile": "BlockKing",
+      "Game": "Block King Ball Shooter",
+      "Need": "A game.exe made for the JConfig loader (optional)",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "Only if you want the JConfig setup: use the JConfig game.exe from your own copy of the game. TeknoParrot Manager cannot tell which game.exe you have and never replaces it.",
+      "GuideLink": "",
+      "Details": "Guide gives only checksums: clean game.exe CRC32 D81EDC9D, JConfig game.exe CRC32 1E882C69. TPM does not check CRC32 values. The guide also says the game may not start on some PCs."
+    },
+    {
+      "Profile": "Castlevania",
+      "Game": "Castlevania: The Arcade",
+      "Need": "DXVK (only if you see shader problems)",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "If the game shows shader problems, get DXVK yourself and follow the guide. TeknoParrot Manager cannot check for it and never installs it.",
+      "GuideLink": "",
+      "Details": "Guide: use DXVK to fix shader issues (NVIDIA). No file names are given, so TPM does not check for any."
+    },
+    {
+      "Profile": "ChaosBreaker",
+      "Game": "Chaos Breaker",
+      "Need": "A 60 FPS frame limiter",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "Get RivaTuner (or a similar tool) and set it to 60 FPS, or the game runs far too fast. TeknoParrot Manager cannot see it and never installs it. The guide also says this game does not start right now.",
+      "GuideLink": "",
+      "Details": "Guide: needs RivaTuner at 60 FPS. Guide note of 2026-11-24: the game window opens briefly, then closes."
+    },
+    {
+      "Profile": "Deathsmiles2",
+      "Game": "Deathsmiles II: Makai no Merry Christmas",
+      "Need": "A patched cvgame.exe and, if you like, dgVoodoo",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "If your copy has problems, it is probably a patched copy. Use a cvgame.exe that works from your own copy of the game. Optional: dgVoodoo can reduce graphics glitches. TeknoParrot Manager cannot check either one, never replaces the exe and never installs anything.",
+      "GuideLink": "",
+      "Details": "Guide gives only checksums: original (MAME) cvgame.exe CRC32 6d6755f8, working hacked cvgame.exe CRC32 f9f619ae. Neither file is in the DAT files, so no SHA-256 is known."
+    },
+    {
+      "Profile": "DragonDanceNesica",
+      "Game": "Dragon Dance for NESiCAxLive",
+      "Need": "The replacement Game_liong.exe and the DDrawCompat ddraw.dll in the game folder",
+      "CanCheck": true,
+      "Checks": [
+        {
+          "Id": "dragondance-exe",
+          "Type": "File",
+          "Path": "Game_liong.exe",
+          "Description": "Game_liong.exe is missing from the game folder. Use the replacement exe from your own copy of the game."
+        },
+        {
+          "Id": "dragondance-ddraw",
+          "Type": "File",
+          "Path": "ddraw.dll",
+          "Description": "ddraw.dll (DDrawCompat) is missing from the game folder. Get it yourself and put it in the game folder."
+        }
+      ],
+      "Message": "TeknoParrot Manager checks that Game_liong.exe and ddraw.dll are in the game folder. If one is missing, get it yourself from your own copy or from the DDrawCompat project, and put it in the game folder. TeknoParrot Manager never downloads it.",
+      "GuideLink": "",
+      "Details": "Guide: new exe CRC32 B2836DB7; the game now uses DDrawCompat as a fix. TPM checks only that the files exist, not their contents. Neither file is in the DAT files."
+    },
+    {
+      "Profile": "FarCryParadiseLost",
+      "Game": "Far Cry Paradise Lost",
+      "Need": "A video codec (only if videos do not play)",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "If the videos do not play, install the video codec named on the TeknoParrot wiki. TeknoParrot Manager cannot check for it and never installs it.",
+      "GuideLink": "https://teknoparrot.com/wiki/compatibility/FarCryParadiseLost.htm",
+      "Details": "Link is from the guide. Get it yourself; TPM does not open or download it."
+    },
+    {
+      "Profile": "FNFDrift",
+      "Game": "The Fast and the Furious Drift",
+      "Need": "A resolution-patched sdaemon.exe (optional)",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "Only if you want a higher resolution: use a patched sdaemon.exe from your own source. The menus stay small at higher resolutions. TeknoParrot Manager cannot check which sdaemon.exe you have and never replaces it.",
+      "GuideLink": "",
+      "Details": "Guide: replace sdaemon.exe with the patched version you want. No checksum is given and the file is not in the DAT files."
+    },
+    {
+      "Profile": "FZeroAX",
+      "Game": "F-Zero AX",
+      "Need": "cycraftemu.exe (probably not needed any more)",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "The guide says this is probably fixed, so try the game first. If it still fails, get cycraftemu.exe yourself and run it before the game. TeknoParrot Manager cannot check it and never runs it for you. The game also needs an XInput controller.",
+      "GuideLink": "https://crediar.dev/crediar/misc/-/blob/master/Cycraft/cycraftemu.exe?ref_type=heads",
+      "Details": "Link is from the guide. Get it yourself; TPM does not open or download it."
+    },
+    {
+      "Profile": "HauntedMuseum",
+      "Game": "Haunted Museum",
+      "Need": "Movie-fix codecs and Windows XP (SP2) mode for game.exe",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "If the movies do not play, get the movie-fix codecs from the #fixes channel on the TeknoParrot Discord. Then right-click game.exe, open Properties, then Compatibility, and choose Windows XP (Service Pack 2). TeknoParrot Manager cannot check either one and never installs anything.",
+      "GuideLink": "",
+      "Details": "Guide text. The codecs live in Windows, and the compatibility setting is stored in the Windows registry, which TPM does not edit."
+    },
+    {
+      "Profile": "MaximumHeat",
+      "Game": "Maximum Heat 3D",
+      "Need": "A 60 FPS frame limiter",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "Get RivaTuner (or another frame limiter) and set it to 60 FPS. TeknoParrot Manager cannot see it and never installs it.",
+      "GuideLink": "",
+      "Details": "Guide: must use RivaTuner 60 FPS or another frame limiter. The profile has no frame limit field."
+    },
+    {
+      "Profile": "NitroplusBlasterz",
+      "Game": "Nitro+ Blasterz: Heroines Infinite Duel",
+      "Need": "XAUDIO2_5.DLL and XACTENGINE3_5.DLL registered in Windows (only on some PCs)",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "Only if the game has no sound or will not start: open a Command Prompt as administrator in the game folder and run the two regsvr32 lines from the guide. TeknoParrot Manager cannot see the Windows registration and never runs it for you.",
+      "GuideLink": "",
+      "Details": "Guide: REGSVR32 /s XAUDIO2_5.DLL and REGSVR32 /s XACTENGINE3_5.DLL before the first start. This changes the Windows registry, which TPM does not do."
+    },
+    {
+      "Profile": "Showdown",
+      "Game": "Showdown",
+      "Need": "The Rapture3D audio software installed",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "The game needs Rapture3D audio software. The installer is in the Rapture3D audio installer folder inside your game folder. Run it yourself. TeknoParrot Manager cannot see if it is installed and never runs installers.",
+      "GuideLink": "",
+      "Details": "Guide text. The installer sits in the game folder, but whether it was run is stored in Windows, which TPM cannot see."
+    },
+    {
+      "Profile": "SR3",
+      "Game": "SEGA Rally 3",
+      "Need": "The Windows 10 1809 fix",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "Only if you use Windows 10 version 1809: get the fix described on the TeknoParrot wiki yourself. TeknoParrot Manager cannot check for it and never installs it.",
+      "GuideLink": "",
+      "Details": "Guide: Win10 1809 fix available on the wiki. No link or file name is given, so none is listed."
+    },
+    {
+      "Profile": "Swarm",
+      "Game": "The Swarm",
+      "Need": "Visual C++ 2005 and 2008 (x86) and .NET Framework 3.5",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "Install Visual C++ 2005 and 2008 (x86) and .NET Framework 3.5 from Microsoft yourself. TeknoParrot Manager cannot check them and never installs them. The guide also says the game shows a black screen right now.",
+      "GuideLink": "",
+      "Details": "Guide: needs vcredist 2005 and 2008 (x86) and .NET Framework 3.5. These are Windows components, not files in the game folder."
+    }
+  ]
+}

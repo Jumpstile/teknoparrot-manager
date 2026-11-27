@@ -206,12 +206,15 @@
       "Profile": "AAA",
       "Game": "America's Army Arcade",
       "Loader": "ElfLdr2",
-      "Disposition": "guided",
-      "Also": [],
+      "Disposition": "tpm-applies-patch",
+      "Also": [
+        "guided"
+      ],
       "Signals": [
+        "recipe",
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "abc",
@@ -294,7 +297,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a Windows registry change. Game Notes shows the steps. TPM does not edit the registry."
     },
     {
       "Profile": "airwlkrs",
@@ -351,7 +354,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM fixes this setting in the profile. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "Aleste",
@@ -392,7 +395,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "AlpineRacer",
@@ -412,7 +415,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "AquapazzaAquaplusDreamMatch",
@@ -443,7 +446,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "ArcanaHeart3Exboard",
@@ -545,7 +548,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a change in a game file. Game Notes shows the exact line. TPM does not edit it."
     },
     {
       "Profile": "BattleFantasia",
@@ -619,7 +622,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "BBHHome",
@@ -804,7 +807,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "BorderBreakScramble",
@@ -829,7 +832,7 @@
       "Signals": [
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's setup steps for this game once it is registered."
+      "Reason": "Needs a change on your PC. Game Notes shows the steps."
     },
     {
       "Profile": "BowlORama",
@@ -858,7 +861,7 @@
       "Signals": [
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's setup steps for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "ByonByon",
@@ -869,7 +872,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "CaladriusAC",
@@ -903,7 +906,7 @@
       "Signals": [
         "gpu-text"
       ],
-      "Reason": "Game Notes shows the guide's graphics card notes for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "CC",
@@ -915,7 +918,7 @@
         "notes",
         "test_exe"
       ],
-      "Reason": "Game Notes shows the guide's notes, a test program for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "Centipede",
@@ -926,7 +929,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "ChaosBreaker",
@@ -937,7 +940,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "ChaosBreakerNesica",
@@ -948,7 +951,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "ChaosCodeNSOC103",
@@ -988,7 +991,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs files from your own copy of the game. Game Notes shows the steps. TPM never downloads them."
     },
     {
       "Profile": "ChronoRegalia",
@@ -1044,7 +1047,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "Contra",
@@ -1064,7 +1067,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "CottonRnR",
@@ -1076,7 +1079,7 @@
         "notes",
         "test_exe"
       ],
-      "Reason": "Game Notes shows the guide's notes, a test program for this game once it is registered."
+      "Reason": "Needs your own account or card. TPM does not store personal values."
     },
     {
       "Profile": "CrazyRide",
@@ -1087,7 +1090,7 @@
       "Signals": [
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's setup steps for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "CrazySpeed",
@@ -1098,7 +1101,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "CrimzonClover",
@@ -1109,7 +1112,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a change on your PC. Game Notes shows the steps."
     },
     {
       "Profile": "CrossbeatsRev",
@@ -1121,7 +1124,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's notes, setup steps for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "CrossfirePaintball",
@@ -1132,7 +1135,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "CruisnBlast",
@@ -1166,7 +1169,7 @@
       "Signals": [
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's setup steps for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "CTHR",
@@ -1192,7 +1195,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's notes, setup steps for this game once it is registered."
+      "Reason": "Needs your own account or card. TPM does not store personal values."
     },
     {
       "Profile": "D1GP",
@@ -1203,7 +1206,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM fixes this setting in the profile. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "DaemonBrideAG",
@@ -1223,7 +1226,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "DanceDanceRevolution2013",
@@ -1234,7 +1237,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "DariusBurst",
@@ -1310,7 +1313,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "Daytona3NSE",
@@ -1344,7 +1347,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "DeadHeatRiders",
@@ -1394,7 +1397,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's notes, setup steps for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "DengekiBunkoFightingClimax",
@@ -1415,7 +1418,7 @@
         "general_issues",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's setup steps, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "DenshaDeGoRetro",
@@ -1427,7 +1430,7 @@
         "general_issues",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's setup steps, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "desert",
@@ -1447,7 +1450,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "dirtdvls",
@@ -1540,7 +1543,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "Drakons",
@@ -1603,7 +1606,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "eca",
@@ -1648,7 +1651,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "EnEinsPerfektewelt",
@@ -1668,7 +1671,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "EXVS2",
@@ -1680,7 +1683,7 @@
         "notes",
         "gpu-text"
       ],
-      "Reason": "Game Notes shows the guide's notes, graphics card notes for this game once it is registered."
+      "Reason": "Needs a change on your PC. Game Notes shows the steps."
     },
     {
       "Profile": "EXVS2IB",
@@ -1691,7 +1694,7 @@
       "Signals": [
         "gpu-text"
       ],
-      "Reason": "Game Notes shows the guide's graphics card notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "EXVS2OB",
@@ -1702,7 +1705,7 @@
       "Signals": [
         "gpu-text"
       ],
-      "Reason": "Game Notes shows the guide's graphics card notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "EXVS2XB",
@@ -1714,7 +1717,7 @@
         "notes",
         "gpu-text"
       ],
-      "Reason": "Game Notes shows the guide's notes, graphics card notes for this game once it is registered."
+      "Reason": "Needs a change on your PC. Game Notes shows the steps."
     },
     {
       "Profile": "FamilyGuyBowling",
@@ -1753,7 +1756,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "fateulc",
@@ -1855,7 +1858,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "FNFSB",
@@ -1905,7 +1908,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a change on your PC. Game Notes shows the steps."
     },
     {
       "Profile": "FrenzyExpress",
@@ -1968,7 +1971,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "FZeroAXMonster",
@@ -1988,7 +1991,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM fixes this setting in the profile. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "GaiaAttack4",
@@ -2014,7 +2017,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "Gashaaaan",
@@ -2025,7 +2028,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "Gashaaaan2",
@@ -2101,7 +2104,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "GGS",
@@ -2218,7 +2221,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "GoldenTeeLive2006",
@@ -2230,7 +2233,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's notes, setup steps for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "GoldenTeeLive2007",
@@ -2241,7 +2244,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "GoldenTeeLive2008",
@@ -2252,7 +2255,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "GoldenTeeLive2009",
@@ -2263,7 +2266,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "GoldenTeeLive2010",
@@ -2274,7 +2277,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "GoldenTeeLive2011",
@@ -2442,7 +2445,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a change in a game file. Game Notes shows the exact line. TPM does not edit it."
     },
     {
       "Profile": "GrooveCoaster2",
@@ -2453,7 +2456,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "gsd",
@@ -2479,7 +2482,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "GSEVOELF2",
@@ -2491,7 +2494,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "Needs files from your own copy of the game. Game Notes shows the steps. TPM never downloads them."
     },
     {
       "Profile": "GtiClub3",
@@ -2502,7 +2505,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "gunblade",
@@ -2531,7 +2534,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "GundamUC",
@@ -2590,7 +2593,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "Harley",
@@ -2619,7 +2622,7 @@
       "Signals": [
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's setup steps for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "HauntedMuseumII",
@@ -2645,7 +2648,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "HogWild",
@@ -2656,7 +2659,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "Homura",
@@ -2701,7 +2704,7 @@
         "linked_profile",
         "gpu-text"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile, graphics card notes for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "HOTD4ELF2",
@@ -2714,7 +2717,7 @@
         "linked_profile",
         "gpu-text"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile, graphics card notes for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "HOTD4SP",
@@ -2726,7 +2729,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "HOTD4SPELF2",
@@ -2737,7 +2740,7 @@
       "Signals": [
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "HOTDEX",
@@ -2748,7 +2751,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs files from your own copy of the game. Game Notes shows the steps. TPM never downloads them."
     },
     {
       "Profile": "HOTDSD",
@@ -2774,7 +2777,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "hpyagu98",
@@ -2836,7 +2839,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "HyperStreetFighterII",
@@ -2847,7 +2850,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a change on your PC. Game Notes shows the steps."
     },
     {
       "Profile": "ID4Exp",
@@ -2859,7 +2862,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "ID4ExpElf2",
@@ -2871,7 +2874,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "ID4Jap",
@@ -2883,7 +2886,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "ID4JapElf2",
@@ -2895,7 +2898,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "ID5",
@@ -2906,7 +2909,7 @@
       "Signals": [
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "ID5Elf2",
@@ -2919,7 +2922,7 @@
         "general_issues",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, setup steps, a linked profile for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "ID6",
@@ -2930,7 +2933,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "ID7",
@@ -2941,7 +2944,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "ID8",
@@ -2952,7 +2955,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "IDTA",
@@ -3057,7 +3060,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "indy500",
@@ -3105,7 +3108,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "JurassicPark",
@@ -3130,7 +3133,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a change in a game file. Game Notes shows the exact line. TPM does not edit it."
     },
     {
       "Profile": "KanColle740",
@@ -3142,7 +3145,7 @@
         "general_issues",
         "gpu-text"
       ],
-      "Reason": "Game Notes shows the guide's setup steps, graphics card notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "Kasiori",
@@ -3153,7 +3156,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs your own account or card. TPM does not store personal values."
     },
     {
       "Profile": "KeyOfAvalon",
@@ -3178,7 +3181,7 @@
       "Signals": [
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's setup steps for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "KingofFighters98UltimateMatchFinalEditionNesica",
@@ -3189,7 +3192,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "KingofFighters98UnlimitedMatch",
@@ -3223,7 +3226,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "KingofFightersXII",
@@ -3243,7 +3246,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "KingofFightersXIIIClimax",
@@ -3254,7 +3257,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "KingofFightersXIIIClimaxNesica",
@@ -3265,7 +3268,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "KingOfFightersXIV",
@@ -3313,7 +3316,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM fixes this setting in the profile. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "Koihime",
@@ -3324,7 +3327,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "KoihimeEnbuAPM3",
@@ -3351,18 +3354,21 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "LadyLuck",
       "Game": "Lady Luck",
       "Loader": "TeknoParrot",
-      "Disposition": "guided",
-      "Also": [],
+      "Disposition": "tpm-applies-patch",
+      "Also": [
+        "guided"
+      ],
       "Signals": [
+        "recipe",
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "lamachin",
@@ -3392,7 +3398,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's notes, setup steps for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "lemans24",
@@ -3412,7 +3418,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "LGI",
@@ -3423,7 +3429,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "LGI3D",
@@ -3434,7 +3440,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "LGJ",
@@ -3494,12 +3500,15 @@
       "Profile": "LostLand",
       "Game": "Lost Land Adventure",
       "Loader": "TeknoParrot",
-      "Disposition": "guided",
-      "Also": [],
+      "Disposition": "tpm-applies-patch",
+      "Also": [
+        "guided"
+      ],
       "Signals": [
+        "recipe",
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "lostwsga",
@@ -3519,7 +3528,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "LuigisMansion",
@@ -3530,7 +3539,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "MagicalBeat",
@@ -3541,7 +3550,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a change on your PC. Game Notes shows the steps."
     },
     {
       "Profile": "magictg",
@@ -3634,7 +3643,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "MB",
@@ -3654,7 +3663,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "MedaruNoGunman",
@@ -3666,7 +3675,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's notes, setup steps for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "MeltyBloodRE2",
@@ -3686,7 +3695,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a change on your PC. Game Notes shows the steps."
     },
     {
       "Profile": "MIB",
@@ -3759,7 +3768,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "MKDX",
@@ -3798,7 +3807,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "MKDXUSA106",
@@ -3823,7 +3832,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "motogp2000",
@@ -3858,7 +3867,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "MusicGunGun2",
@@ -3909,7 +3918,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's notes, setup steps for this game once it is registered."
+      "Reason": "Needs your own archives. Game Notes shows which ones. Never downloaded."
     },
     {
       "Profile": "NFSHeatTakedown",
@@ -3959,7 +3968,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "Nosferatu",
@@ -4017,7 +4026,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "OllieKing",
@@ -4042,7 +4051,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "OmatsuriYasanKingyoSukui",
@@ -4053,7 +4062,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "or2",
@@ -4123,7 +4132,7 @@
         "test_exe",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's a test program, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "Otomedius",
@@ -4222,7 +4231,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a change on your PC. Game Notes shows the steps."
     },
     {
       "Profile": "Persona4U",
@@ -4256,7 +4265,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs files from your own copy of the game. Game Notes shows the steps. TPM never downloads them."
     },
     {
       "Profile": "PinkPanther",
@@ -4267,7 +4276,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "PlantsVsZombies",
@@ -4278,7 +4287,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "pltkids",
@@ -4298,7 +4307,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "PokkenTournament",
@@ -4333,7 +4342,7 @@
         "notes",
         "setup_exe2"
       ],
-      "Reason": "Game Notes shows the guide's notes, a second file for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "PowerInstinctV",
@@ -4344,7 +4353,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "PowerPuttLive2012",
@@ -4514,7 +4523,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "R-TunedElf2",
@@ -4526,7 +4535,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "RabbidsHollywood",
@@ -4566,7 +4575,7 @@
       "Signals": [
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's setup steps for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "RaidenIII",
@@ -4578,7 +4587,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "RaidenIIINesica",
@@ -4605,7 +4614,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "RaidenIVNesica",
@@ -4648,7 +4657,7 @@
         "linked_profile",
         "gpu-text"
       ],
-      "Reason": "Game Notes shows the guide's notes, setup steps, a linked profile, graphics card notes for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "RamboElf2",
@@ -4661,7 +4670,7 @@
         "linked_profile",
         "gpu-text"
       ],
-      "Reason": "Game Notes shows the guide's setup steps, a linked profile, graphics card notes for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "Rampage",
@@ -4681,7 +4690,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "RazingStorm",
@@ -4790,7 +4799,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "SamuraiShodown",
@@ -4812,7 +4821,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "SAO",
@@ -4823,7 +4832,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "SavageQuest",
@@ -4834,7 +4843,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "SB3",
@@ -4882,7 +4891,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a change on your PC. Game Notes shows the steps."
     },
     {
       "Profile": "scpt",
@@ -4922,7 +4931,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "SeaWolf",
@@ -4933,7 +4942,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "SegaOlympic2016",
@@ -4976,7 +4985,7 @@
       "Signals": [
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "segartvelf2",
@@ -4987,7 +4996,7 @@
       "Signals": [
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "segawski",
@@ -5159,7 +5168,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "SilentHill",
@@ -5185,7 +5194,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's notes, setup steps for this game once it is registered."
+      "Reason": "Needs your own account or card. TPM does not store personal values."
     },
     {
       "Profile": "SilverStrikeBowlingLive",
@@ -5200,12 +5209,15 @@
       "Profile": "SiN",
       "Game": "SiN",
       "Loader": "TeknoParrot",
-      "Disposition": "guided",
-      "Also": [],
+      "Disposition": "tpm-applies-patch",
+      "Also": [
+        "guided"
+      ],
       "Signals": [
+        "recipe",
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "skichamp",
@@ -5234,7 +5246,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "SkyCurser",
@@ -5260,7 +5272,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "skytargt",
@@ -5475,7 +5487,7 @@
       "Signals": [
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's setup steps for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "SR3_3B",
@@ -5609,7 +5621,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "SSASR",
@@ -5620,7 +5632,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a change in a game file. Game Notes shows the exact line. TPM does not edit it."
     },
     {
       "Profile": "StarTrekVoyager",
@@ -5632,7 +5644,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "StarTrekVoyagerElf2",
@@ -5644,7 +5656,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "StarWars",
@@ -5655,7 +5667,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "StarWarsTFA",
@@ -5666,7 +5678,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "stcc",
@@ -5686,7 +5698,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a change on your PC. Game Notes shows the steps."
     },
     {
       "Profile": "StormRider",
@@ -5733,7 +5745,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs files from your own copy of the game. Game Notes shows the steps. TPM never downloads them."
     },
     {
       "Profile": "StreetFighterVTypeArcade353",
@@ -5803,7 +5815,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "SuperStreetFighterIVArcadeEditionEXP",
@@ -5814,7 +5826,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "SuperStreetFighterIVArcadeEditionVer2012",
@@ -5825,7 +5837,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "swa",
@@ -5847,7 +5859,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's notes, setup steps for this game once it is registered."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "SWDC",
@@ -5859,7 +5871,7 @@
         "general_issues",
         "setup_exe2"
       ],
-      "Reason": "Game Notes shows the guide's setup steps, a second file for this game once it is registered."
+      "Reason": "Needs your own account or card. TPM does not store personal values."
     },
     {
       "Profile": "swtrilgy",
@@ -5879,7 +5891,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "Taiko",
@@ -6138,7 +6150,7 @@
       "Signals": [
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's setup steps for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "TargetBravo",
@@ -6149,7 +6161,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "TargetTerrorGold",
@@ -6196,7 +6208,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs files from your own copy of the game. Game Notes shows the steps. TPM never downloads them."
     },
     {
       "Profile": "TC5",
@@ -6207,7 +6219,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "technicb",
@@ -6345,7 +6357,7 @@
       "Signals": [
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's setup steps for this game once it is registered."
+      "Reason": "Needs your own archives. Game Notes shows which ones. Never downloaded."
     },
     {
       "Profile": "Terminator",
@@ -6371,7 +6383,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's notes, setup steps for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "TetrisTheGrandMaster3TerrorInstinct",
@@ -6409,7 +6421,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "timecrs3",
@@ -6448,7 +6460,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "TMNT",
@@ -6488,7 +6500,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a Windows registry change. Game Notes shows the steps. TPM does not edit the registry."
     },
     {
       "Profile": "topskatr",
@@ -6508,7 +6520,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "Transformers",
@@ -6520,7 +6532,7 @@
         "general_issues",
         "test_exe"
       ],
-      "Reason": "Game Notes shows the guide's setup steps, a test program for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "TransformersShadowsRising",
@@ -6620,7 +6632,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs a step in the game. Game Notes shows it."
     },
     {
       "Profile": "Umifresh",
@@ -6708,7 +6720,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs your own archives. Game Notes shows which ones. Never downloaded."
     },
     {
       "Profile": "vf2",
@@ -6760,7 +6772,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "VF5B",
@@ -6787,7 +6799,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "VF5C",
@@ -6813,7 +6825,7 @@
       "Signals": [
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "VF5Esports",
@@ -6847,7 +6859,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Needs your own account or card. TPM does not store personal values."
     },
     {
       "Profile": "VF5FSOffline",
@@ -6858,7 +6870,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "VF5R",
@@ -6883,7 +6895,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Nothing for TPM to change. The guide only reports how the game runs."
     },
     {
       "Profile": "vformula",
@@ -6894,7 +6906,7 @@
       "Signals": [
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's setup steps for this game once it is registered."
+      "Reason": "Needs your own archives. Game Notes shows which ones. Never downloaded."
     },
     {
       "Profile": "VirtuaRLimit",
@@ -7010,7 +7022,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's notes, a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "VT3ELF2",
@@ -7021,7 +7033,7 @@
       "Signals": [
         "linked_profile"
       ],
-      "Reason": "Game Notes shows the guide's a linked profile for this game once it is registered."
+      "Reason": "Pick the right version or setup. Game Notes shows which one."
     },
     {
       "Profile": "VT4",
@@ -7173,7 +7185,7 @@
       "Signals": [
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's setup steps for this game once it is registered."
+      "Reason": "Needs your own archives. Game Notes shows which ones. Never downloaded."
     },
     {
       "Profile": "WinningEleven08",
@@ -7184,7 +7196,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM fixes this setting in the profile. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "WMMT1",
@@ -7280,7 +7292,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "WMMT5DX",
@@ -7291,7 +7303,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "WMMT5DXPlus",
@@ -7302,7 +7314,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "WMMT6",
@@ -7314,7 +7326,7 @@
         "notes",
         "setup_exe2"
       ],
-      "Reason": "Game Notes shows the guide's notes, a second file for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "WMMT6R",
@@ -7325,7 +7337,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "WMMT6RR",
@@ -7337,7 +7349,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "Game Notes shows the guide's notes, setup steps for this game once it is registered."
+      "Reason": "TPM's shipped profile already sets this. Game Notes shows the rest of the guide."
     },
     {
       "Profile": "WonderlandWars",
@@ -7370,7 +7382,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Game Notes shows the guide's notes for this game once it is registered."
+      "Reason": "Depends on your screen and setup. Game Notes shows the tips."
     },
     {
       "Profile": "YugiohDT6U",

@@ -380,7 +380,7 @@ ReShade, BepInEx and download details:
 
 Required game patches details:
 
-- It installs 120 evidence-pinned recipes across 71 exact ProfileId/build/executable identities (54 game profiles) from local ZIPs.
+- It installs 124 evidence-pinned recipes across 75 exact ProfileId/build/executable identities (58 game profiles). Most use files from your own local ZIPs; four change one setting in a game settings file instead.
 
 - One hundred eight operations create only absent files. Twelve require an exact known before-state.
 

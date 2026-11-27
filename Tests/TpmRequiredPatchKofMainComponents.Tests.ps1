@@ -82,10 +82,10 @@ Describe 'KOF Maximum Impact Regulation A exact Main component restorations' {
         $script:kofFragment.BaseCatalog.Sha256 | Should -BeExactly '214415946FBD9C64EE37A673119A43DE9334F54F42E4B7910DF3784F6908D250'
         $script:kofFragment.Entries.Count | Should -Be 4
         $script:kofCatalog.Schema | Should -Be 3
-        $script:kofCatalog.Entries.Count | Should -Be 120
-        @($script:kofCatalog.Entries.Id|Sort-Object -Unique).Count | Should -Be 120
-        @($script:kofCatalog.Entries.ProfileId|Sort-Object -Unique).Count | Should -Be 54
-        @($script:kofCatalog.Entries|ForEach-Object{'{0}|{1}|{2}|{3}' -f $_.ProfileId,$_.BuildName,$_.Executable,$_.ExecutableSha256}|Sort-Object -Unique).Count | Should -Be 71
+        $script:kofCatalog.Entries.Count | Should -Be 124
+        @($script:kofCatalog.Entries.Id|Sort-Object -Unique).Count | Should -Be 124
+        @($script:kofCatalog.Entries.ProfileId|Sort-Object -Unique).Count | Should -Be 58
+        @($script:kofCatalog.Entries|ForEach-Object{'{0}|{1}|{2}|{3}' -f $_.ProfileId,$_.BuildName,$_.Executable,$_.ExecutableSha256}|Sort-Object -Unique).Count | Should -Be 75
         @($script:kofCatalog.Entries|ForEach-Object{$_.Operations}|Where-Object Type -CEQ 'CreateFile').Count | Should -Be 108
         @($script:kofCatalog.Entries|ForEach-Object{$_.Operations}|Where-Object Type -CEQ 'ReplaceFile').Count | Should -Be 12
         (Get-FileHash -LiteralPath $script:kofCatalogPath -Algorithm SHA256).Hash | Should -BeExactly $script:TpmRequiredPatchCatalogSha256

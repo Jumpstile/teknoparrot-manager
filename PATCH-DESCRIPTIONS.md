@@ -1,11 +1,12 @@
 # What every patch recipe does, in plain words
 
-Last updated: 2026-11-07 (round 2). This file covers all 120 recipes in `scripts/TpmRequiredPatchRecipes.json` (54 game profiles).
+Last updated: 2026-11-07 (round 2). This file covers all 124 recipes in `scripts/TpmRequiredPatchRecipes.json` (58 game profiles).
 
-Two kinds of recipe:
+Three kinds of recipe:
 
 - **Repair** - TPM puts back a file the game should already have. If the right file is already there, TPM does nothing and says so. Most of these come from the game's own ZIP; a few need a separate patch ZIP that you provide.
 - **Change** - TPM replaces one exact file with a different one (a fix or a mod). It only acts if the file on disk is the exact version listed, so it never touches a version it does not know.
+- **Setting change** - TPM changes one line (or a few lines) in a game's own settings file, such as a `.ini` or `.cfg` file. It checks that exactly the expected line is there, saves a full copy of the file first, and can put it back. Nothing is downloaded.
 
 Nothing here is downloaded and nothing is installed without asking. The patch ZIPs are yours and stay yours.
 
@@ -74,3 +75,7 @@ Words used below: a "shader" is a small file that tells your graphics card how t
 | Walking Dead "105_ELFfix" (`gamed`) | The payload is byte-identical to the game's own `pm/game`; nobody can show which path the loader wants. Writing a duplicate file would not fix anything. |
 | Super Bikes 2 "Fix exe" (142 MB), Spider-Man "Spiderman Fix" (175 MB) | No recipe has been written for them yet. |
 | Resolution-variant packs, bezels, configs, installers, translation installers, `.reg` files | Not game-file repairs or swaps; they are choices or tools, so they are not "required" recipes. |
+| Lady Luck (2.00.01) | I/O board COM port off | Sets one line in the game script file `game_conf.lua` so the game does not look for an I/O board COM port. TPM saves a copy first and can undo it. |
+| Lost Land Adventure (1.00) | Shader reload off (optional) | Sets one line in `BaseEngine.ini` (automatic shader reload off). Only use it if the game crashes. |
+| SiN (2001) | Fullscreen on | Sets the fullscreen line in `config.cfg` to 1 so the game starts full screen. |
+| America's Army Arcade (1.01.082) | Display and gore settings | Sets seven lines in `ArmyOps.ini`: the window, full screen and menu sizes to 640 by 480, and the gore level to 1. All seven change together or none do. |

@@ -1,0 +1,8 @@
+{
+  "Schema": 1,
+  "Entries": [
+    { "ProfileId": "D1GP", "GameName": "D1GP Arcade", "Category": "General", "Field": "UseD3DWrapper", "From": "0", "To": "1" },
+    { "ProfileId": "KODrive", "GameName": "K.O. Drive (Prototype)", "Category": "General", "Field": "DongleRegion", "From": "CHINA", "To": "JAPAN" },
+    { "ProfileId": "WinningEleven08", "GameName": "Winning Eleven 08", "Category": "General", "Field": "FpsLimitEnable", "From": "0", "To": "1" }
+  ]
+}

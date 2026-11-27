@@ -201,10 +201,11 @@ Describe 'A patch ZIP is found even when a folder name differs only in letter ca
         { New-TpmRequiredPatchPayloadStage -Entry $entry -SourceRoot $script:ds16Source } | Should -Throw '*absent, duplicated, or has a different size*'
     }
 
-    It 'every one of the 120 recipes pulls a file with the same name as the file it installs' {
+    It 'every recipe that pulls a file pulls one with the same name as the file it installs' {
         $catalog = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TpmRequiredPatchRecipes.json') -Raw | ConvertFrom-Json
-        @($catalog.Entries).Count | Should -Be 120
-        $mismatch = @(foreach ($recipe in @($catalog.Entries)) {
+        @($catalog.Entries).Count | Should -Be 124
+        # A one-line settings edit (SetIniValue) pulls no file, so it has no source member to compare.
+        $mismatch = @(foreach ($recipe in @($catalog.Entries | Where-Object { $_.Operations[0].Type -cne 'SetIniValue' })) {
             # The two shader recipes of one game keep the card name on the ZIP member (shader.farc.AMD), so that suffix is ignored.
             $member = [string]$recipe.SourceEntry -replace '\.(AMD|NVIDIA|Intel)$', ''
             $target = [string]$recipe.Operations[0].Target

@@ -1,4 +1,4 @@
-$script:TpmRequiredPatchCatalogSha256 = 'EE5BDEBB68424069DF51A8A178D2AEA8A7B7326A9643661F597818FF4B1F405D'
+$script:TpmRequiredPatchCatalogSha256 = '9AF6BF561E62EF08AA822859D1381F0F6A3D71DFAB01790BB81206A6AD668EE3'
 # Largest single patch file the engine will stage, back up or replace (512 MiB). Files are always streamed and hashed in 64 KiB blocks, never read whole into memory.
 $script:TpmPatchMaxBytes = 536870912
 # Largest receipt.json any reader accepts (256 KiB). One limit for every reader, so a long receipt is never skipped by one and read by another.
@@ -359,7 +359,8 @@ function Get-TpmPatchPlan {
         [Parameter(Mandatory)][string]$RecoveryRoot,
         [Parameter(Mandatory)][string[]]$ProtectedRoots,
         [AllowNull()][object]$HardwareEvidence = $null,
-        [switch]$ForUndo
+        [switch]$ForUndo,
+        [string]$ReceiptDirectory = ''
     )
     try {
         # Length checks come first so a long root gets the plain message, not the generic "Invalid or reparse root." from the path walk below.
@@ -426,7 +427,10 @@ function Get-TpmPatchPlan {
             if ($variantDecision.Status -cne 'SELECTED') { throw $variantDecision.Reason }
             if ($variantDecision.SelectedId -cne $PatchId) { throw ("A different exclusive hardware variant applies: {0}" -f $variantDecision.SelectedId) }
         }
-        if ([string]::IsNullOrWhiteSpace($entry.SourceUrl) -and [string]::IsNullOrWhiteSpace($entry.SourceRevision)) {
+        $editOnly = ($entry.Operations -is [array] -and $entry.Operations.Count -gt 0 -and @($entry.Operations | Where-Object { $_.Type -cne 'SetIniValue' }).Count -eq 0)
+        if ($editOnly -and [string]::IsNullOrWhiteSpace($entry.SourceUrl) -and [string]::IsNullOrWhiteSpace($entry.SourceRevision)) {
+            # A one-line settings edit downloads and copies no file, so there is no source to pin. Its own exact checks guard the game.
+        } elseif ([string]::IsNullOrWhiteSpace($entry.SourceUrl) -and [string]::IsNullOrWhiteSpace($entry.SourceRevision)) {
             $localSource = $entry.PSObject.Properties['SourceRole'] -and $entry.PSObject.Properties['SourceSet'] -and $entry.PSObject.Properties['SourceEntry']
             if (-not $localSource -or $entry.SourceRole -cnotin @('Main','Supplementary','UserSelected') -or
                 [string]::IsNullOrWhiteSpace($entry.SourceSet) -or [string]::IsNullOrWhiteSpace($entry.SourceEntry)) {
@@ -439,7 +443,7 @@ function Get-TpmPatchPlan {
                 $source.Scheme -ne 'https' -or $source.UserInfo -or -not $source.Host -or
                 $entry.SourceRevision -notmatch '^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$') { throw 'Unpinned source provenance.' }
         }
-        return (Get-TpmMultiPatchPlan -Entry $entry -PatchId $PatchId -ProfileId $ProfileId -GameRoot $game -PayloadRoot $payloadRootPath -RecoveryRoot $recovery -CatalogSha256 $CatalogSha256 -CatalogEntries @($catalog.Entries) -ForUndo:$ForUndo)
+        return (Get-TpmMultiPatchPlan -Entry $entry -PatchId $PatchId -ProfileId $ProfileId -GameRoot $game -PayloadRoot $payloadRootPath -RecoveryRoot $recovery -CatalogSha256 $CatalogSha256 -CatalogEntries @($catalog.Entries) -ForUndo:$ForUndo -ReceiptDirectory $ReceiptDirectory)
     } catch {
         return [pscustomobject]@{ Status = 'Unavailable'; Reason = $_.Exception.Message }
     }
@@ -615,24 +619,141 @@ function Assert-TpmMultiPatchExclusive {
     }
 }
 
+# SetIniValue: change ONE line of a plain text settings file (ini, cfg, lua) and nothing else.
+# The recipe gives LinePattern, a whole-line regex (^...$) with a named group (?<v>...) that holds the value, and the new Value.
+# Exactly one line in the file must match. Everything outside that group (other lines, line endings, a UTF-8 BOM) stays byte for byte.
+# No file hash is pinned because the guide gives none; the one-matching-line rule, the full-file backup, the receipt hashes and the
+# exact-result check on undo protect the player instead. BeforeValue (optional) refuses a file whose line holds any other value.
+$script:TpmSetIniMaxBytes = 1MB
+
+function Get-TpmPatchBytesSha256 {
+    param([Parameter(Mandatory)][byte[]]$Bytes)
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($hasher.ComputeHash($Bytes))).Replace('-', '') }
+    finally { $hasher.Dispose() }
+}
+
+function Read-TpmSetIniBytes {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not [IO.File]::Exists($Path)) { throw 'The settings file was not found in this game folder. Run the game once, then try again.' }
+    if ((New-Object IO.FileInfo($Path)).Length -gt $script:TpmSetIniMaxBytes) { throw 'The settings file is too large to edit safely.' }
+    return ,[IO.File]::ReadAllBytes($Path)
+}
+
+function Get-TpmSetIniValueEdit {
+    # Settings: one or more objects with LinePattern, Value and (optional) BeforeValue. All are applied to the same text; if any one fails, nothing is returned.
+    param([Parameter(Mandatory)][byte[]]$Bytes,[Parameter(Mandatory)][object[]]$Settings)
+    if ($Bytes.Length -gt $script:TpmSetIniMaxBytes) { throw 'The settings file is too large to edit safely.' }
+    if ($Bytes.Length -ge 2 -and (($Bytes[0] -eq 0xFF -and $Bytes[1] -eq 0xFE) -or ($Bytes[0] -eq 0xFE -and $Bytes[1] -eq 0xFF))) { throw 'The settings file uses a text format TeknoParrot Manager does not edit.' }
+    $bomLength = if ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xEF -and $Bytes[1] -eq 0xBB -and $Bytes[2] -eq 0xBF) { 3 } else { 0 }
+    try { $text = (New-Object Text.UTF8Encoding($false, $true)).GetString($Bytes, $bomLength, $Bytes.Length - $bomLength) }
+    catch { throw 'The settings file is not plain text that TeknoParrot Manager can edit.' }
+    if ($text.Contains([string][char]0)) { throw 'The settings file is not plain text that TeknoParrot Manager can edit.' }
+    $changed = $false
+    foreach ($setting in $Settings) {
+        $pattern = New-Object Text.RegularExpressions.Regex($setting.LinePattern, [Text.RegularExpressions.RegexOptions]::CultureInvariant, [TimeSpan]::FromSeconds(1))
+        $found = @()
+        foreach ($line in [regex]::Matches($text, '[^\r\n]+')) {
+            $m = $pattern.Match($line.Value)
+            if ($m.Success -and $m.Groups['v'].Success) { $found += @([pscustomobject]@{ Start = $line.Index + $m.Groups['v'].Index; Length = $m.Groups['v'].Length; Current = $m.Groups['v'].Value }) }
+        }
+        if ($found.Count -ne 1) { throw ('TeknoParrot Manager expected exactly one matching line in the settings file and found {0}. Nothing was changed.' -f $found.Count) }
+        $hit = $found[0]
+        $beforeValue = $setting.BeforeValue
+        if ($null -ne $beforeValue -and $hit.Current -cne [string]$beforeValue -and $hit.Current -cne $setting.Value) { throw 'The setting in the file is not the value TeknoParrot Manager expects. Nothing was changed.' }
+        if ($hit.Current -cne $setting.Value) { $changed = $true }
+        $text = $text.Substring(0, $hit.Start) + $setting.Value + $text.Substring($hit.Start + $hit.Length)
+    }
+    $body = (New-Object Text.UTF8Encoding($false)).GetBytes($text)
+    $out = New-Object byte[] ($bomLength + $body.Length)
+    if ($bomLength) { [Array]::Copy($Bytes, 0, $out, 0, $bomLength) }
+    [Array]::Copy($body, 0, $out, $bomLength, $body.Length)
+    return [pscustomobject]@{ Bytes = $out; Changed = $changed }
+}
+
+# Turns one SetIniValue recipe operation into the ReplaceFile shape the rest of the engine already backs up, receipts and undoes.
+# Apply: before = the file now, after = the file with the one line changed (staged in PayloadRoot under its own hash).
+# Undo/inspect: before = the saved original in the receipt's copy, after = that original with the same edit; the file must equal it.
+function Resolve-TpmSetIniValueOperation {
+    param([Parameter(Mandatory)]$Operation,[Parameter(Mandatory)][int]$Index,[Parameter(Mandatory)][string]$GameRoot,[Parameter(Mandatory)][string]$PayloadRoot,[switch]$ForUndo,[string]$ReceiptDirectory='')
+    $names = @($Operation.PSObject.Properties.Name)
+    $required = @('Type', 'Target', 'LinePattern', 'Value')
+    if (@($required | Where-Object { $_ -notin $names }).Count -or @($names | Where-Object { $_ -notin ($required + 'BeforeValue' + 'MoreSettings') }).Count) { throw 'Unknown or missing catalog fields.' }
+    foreach ($name in $names) { if ($name -cne 'MoreSettings' -and $Operation.PSObject.Properties[$name].Value -isnot [string]) { throw 'Invalid grouped operation field.' } }
+    # The first setting sits on the operation itself; MoreSettings (optional) lists more pattern/value pairs for the same file.
+    $settings = @([pscustomobject]@{ LinePattern = $Operation.LinePattern; Value = $Operation.Value; BeforeValue = $(if ($names -contains 'BeforeValue') { [string]$Operation.BeforeValue } else { $null }) })
+    if ($names -contains 'MoreSettings') {
+        if ($Operation.MoreSettings -isnot [array] -or $Operation.MoreSettings.Count -lt 1 -or $Operation.MoreSettings.Count -gt 16) { throw 'Invalid grouped operation field.' }
+        foreach ($more in $Operation.MoreSettings) {
+            $moreNames = @($more.PSObject.Properties.Name)
+            if (@(@('LinePattern', 'Value') | Where-Object { $_ -notin $moreNames }).Count -or @($moreNames | Where-Object { $_ -notin @('LinePattern', 'Value', 'BeforeValue') }).Count) { throw 'Unknown or missing catalog fields.' }
+            foreach ($name in $moreNames) { if ($more.PSObject.Properties[$name].Value -isnot [string]) { throw 'Invalid grouped operation field.' } }
+            $settings += @([pscustomobject]@{ LinePattern = $more.LinePattern; Value = $more.Value; BeforeValue = $(if ($moreNames -contains 'BeforeValue') { [string]$more.BeforeValue } else { $null }) })
+        }
+    }
+    foreach ($setting in $settings) {
+        if ($setting.LinePattern.Length -gt 300 -or $setting.LinePattern -cnotmatch '^\^.*\$$' -or $setting.LinePattern -cnotmatch '\(\?<v>') { throw 'Invalid settings-line pattern.' }
+        if ($setting.Value -cnotmatch '^[^\x00-\x1F\x7F]{1,100}$') { throw 'Invalid settings value.' }
+    }
+    $target = Resolve-TpmPatchPath $GameRoot $Operation.Target -ForUndo:$ForUndo
+    if ($ForUndo) {
+        if ([string]::IsNullOrWhiteSpace($ReceiptDirectory)) { throw 'Undo of a settings edit needs its saved copy.' }
+        $receiptPath = Join-Path $ReceiptDirectory 'receipt.json'
+        if (-not (Test-TpmNoReparsePath $receiptPath) -or -not [IO.File]::Exists($receiptPath) -or (New-Object IO.FileInfo($receiptPath)).Length -gt $script:TpmReceiptMaxBytes) { throw 'The saved copy of this settings edit could not be read.' }
+        $saved = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json -ErrorAction Stop
+        $record = @($saved.Operations)[$Index]
+        if ($null -eq $record -or $record.Target -cne $Operation.Target -or $record.Backup -isnot [string] -or [string]::IsNullOrWhiteSpace($record.Backup) -or
+            -not (Test-PathInside $record.Backup $ReceiptDirectory) -or -not (Test-TpmNoReparsePath $record.Backup)) { throw 'The saved copy of this settings edit could not be read.' }
+        $source = Read-TpmSetIniBytes $record.Backup
+    } else {
+        $source = Read-TpmSetIniBytes $target
+    }
+    $edit = Get-TpmSetIniValueEdit -Bytes $source -Settings $settings
+    $beforeSha = Get-TpmPatchBytesSha256 $source
+    if (-not $edit.Changed) {
+        if ($ForUndo) { throw 'The saved copy of this settings edit does not match this recipe.' }
+        $afterSha = $beforeSha
+    } else {
+        $afterSha = Get-TpmPatchBytesSha256 $edit.Bytes
+        if (-not $ForUndo) {
+            $stage = Resolve-TpmPatchPath $PayloadRoot ('setini-' + $afterSha.ToLowerInvariant() + '.tmp') -Staging
+            [IO.File]::WriteAllBytes($stage, $edit.Bytes)
+        }
+    }
+    $shaped = [pscustomobject]@{ Type = 'ReplaceFile'; Target = [string]$Operation.Target; BeforeSha256 = $beforeSha; AfterSha256 = $afterSha; Payload = ('setini-' + $afterSha.ToLowerInvariant() + '.tmp'); PayloadSha256 = $afterSha }
+    return [pscustomobject]@{ Operation = $shaped; NoOp = (-not $edit.Changed) }
+}
+
 function Get-TpmMultiPatchPlan {
     param([Parameter(Mandatory)]$Entry,[Parameter(Mandatory)][string]$PatchId,[Parameter(Mandatory)][string]$ProfileId,
         [Parameter(Mandatory)][string]$GameRoot,[Parameter(Mandatory)][string]$PayloadRoot,[Parameter(Mandatory)][string]$RecoveryRoot,
-        [Parameter(Mandatory)][string]$CatalogSha256,[Parameter(Mandatory)][array]$CatalogEntries,[switch]$ForUndo,[switch]$Probe,[switch]$Historical,[string]$ReceiptChainTarget='')
+        [Parameter(Mandatory)][string]$CatalogSha256,[Parameter(Mandatory)][array]$CatalogEntries,[switch]$ForUndo,[switch]$Probe,[switch]$Historical,[string]$ReceiptChainTarget='',[string]$ReceiptDirectory='')
     if($Historical -and (-not $ForUndo -or -not $Probe)){throw 'Historical plans are only valid for completed receipt inspection.'}
     if($ReceiptChainTarget -and (-not $ForUndo -or -not $Probe -or @($Entry.Operations|Where-Object Target -CEQ $ReceiptChainTarget).Count -ne 1)){throw 'Receipt-chain structural inspection is internal to the exclusive gate.'}
     if($ReceiptChainTarget -and (Get-PSCallStack)[1].FunctionName -cne 'Test-TpmMultiPatchReceiptChain'){throw 'Receipt-chain structural inspection is internal to the exclusive gate.'}
     if($Entry.Operations -isnot [array] -or $Entry.Operations.Count -lt 1 -or $Entry.Operations.Count -gt 256){throw 'Grouped recipes require 1..256 file operations.'}
     if($Entry.ExclusiveGroup -isnot [string] -or ($Entry.ExclusiveGroup -and $Entry.ExclusiveGroup -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$')){throw 'Invalid exclusive group.'}
     $selfExecutable = $Entry.PSObject.Properties['AllowExecutableSelfPatch'] -and $Entry.AllowExecutableSelfPatch
+    $editOnly=(@($Entry.Operations|Where-Object {$_.Type -cne 'SetIniValue'}).Count -eq 0)
     $exe=Resolve-TpmPatchPath $GameRoot $Entry.Executable -ForUndo:$ForUndo
-    if($Entry.ExecutableSha256 -notmatch '^[a-fA-F0-9]{64}$'){throw 'Executable revision mismatch.'}
-    $executableSha256=(Get-TpmPatchPayloadFacts $exe -MaximumBytes ([int64]::MaxValue)).Sha256
-    if(-not $selfExecutable -and $executableSha256 -ine $Entry.ExecutableSha256){throw 'Executable revision mismatch.'}
+    if($editOnly -and $Entry.ExecutableSha256 -ceq ''){
+        # No exact program hash is known for these games; the program file only has to be present so the right game folder is proven.
+        if(-not $ForUndo -and -not [IO.File]::Exists($exe)){throw 'The game program was not found in this folder.'}
+        $executableSha256=''
+    }else{
+        if($Entry.ExecutableSha256 -notmatch '^[a-fA-F0-9]{64}$'){throw 'Executable revision mismatch.'}
+        $executableSha256=(Get-TpmPatchPayloadFacts $exe -MaximumBytes ([int64]::MaxValue)).Sha256
+        if(-not $selfExecutable -and $executableSha256 -ine $Entry.ExecutableSha256){throw 'Executable revision mismatch.'}
+    }
     if($selfExecutable -and ($Entry.Operations.Count -ne 1 -or $Entry.Operations[0].Type -cne 'ReplaceFile' -or
         $Entry.Operations[0].BeforeSha256 -ine $Entry.ExecutableSha256)){throw 'Executable self-patch requires one exact ReplaceFile before-state.'}
-    $targets=@{};$payloads=@{};$operations=@();$ready=0;$applied=0;$total=0L
-    foreach($operation in $Entry.Operations){
+    $targets=@{};$payloads=@{};$operations=@();$ready=0;$applied=0;$total=0L;$opIndex=-1
+    foreach($declared in $Entry.Operations){
+        $opIndex++;$operation=$declared;$noOp=$false
+        if($declared.Type -ceq 'SetIniValue'){
+            $resolved=Resolve-TpmSetIniValueOperation -Operation $declared -Index $opIndex -GameRoot $GameRoot -PayloadRoot $PayloadRoot -ForUndo:$ForUndo -ReceiptDirectory $ReceiptDirectory
+            $operation=$resolved.Operation;$noOp=$resolved.NoOp
+        }
         $create=($operation.Type -ceq 'CreateFile')
         $pre=if($create){'BeforeState'}else{'BeforeSha256'}
         Assert-TpmPatchFields $operation @('Type','Target',$pre,'AfterSha256','Payload','PayloadSha256')
@@ -640,7 +761,7 @@ function Get-TpmMultiPatchPlan {
         if($operation.Type -cnotin @('ReplaceFile','CreateFile') -or ($create -and $operation.BeforeState -cne 'Absent')){throw 'Unsupported grouped operation/pre-state.'}
         $pins=@($operation.AfterSha256,$operation.PayloadSha256);if(-not $create){$pins+=@($operation.BeforeSha256)}
         foreach($pin in $pins){if($pin -notmatch '^[a-fA-F0-9]{64}$'){throw 'Invalid grouped content pin.'}}
-        if($operation.AfterSha256 -ine $operation.PayloadSha256 -or (-not $create -and $operation.BeforeSha256 -ieq $operation.AfterSha256)){throw 'Conflicting/no-op grouped pins.'}
+        if($operation.AfterSha256 -ine $operation.PayloadSha256 -or (-not $create -and -not $noOp -and $operation.BeforeSha256 -ieq $operation.AfterSha256)){throw 'Conflicting/no-op grouped pins.'}
         $target=Resolve-TpmPatchPath $GameRoot $operation.Target -ForUndo:$ForUndo
         if(-not $ForUndo){Assert-TpmPatchFolderBudget ([IO.Path]::GetDirectoryName($target)) 'Game'}
         $payload=Resolve-TpmPatchPath $PayloadRoot $operation.Payload -Staging -ForUndo:$ForUndo
@@ -652,13 +773,13 @@ function Get-TpmMultiPatchPlan {
         foreach($other in $targets.Keys){if(Test-TpmPathOverlap $target $other){throw 'Overlapping grouped target paths.'}}
         $targets[$target]=$true;$payloads[$payload]=$true
         if(-not [IO.Directory]::Exists([IO.Path]::GetDirectoryName($target))){throw 'Grouped targets require existing safe parents.'}
-        if(-not $ForUndo){
+        if(-not $ForUndo -and -not $noOp){
             $facts=Get-TpmPatchPayloadFacts $payload
             if($facts.IsDirectory){throw 'Grouped payload is not a file.'}
             $total+=$facts.Length
             if($total -gt $script:TpmPatchMaxBytes -or $facts.Sha256 -ine $operation.PayloadSha256){throw 'Grouped payload hash/size bound mismatch.'}
         }
-        if(-not $Historical){
+        if($noOp){$applied++}elseif(-not $Historical){
             $state=Get-TpmFileState $target
             if(-not $state.Readable -or $state.IsDirectory -or ($state.Exists -and ($state.Attributes -band [int][IO.FileAttributes]::ReadOnly))){throw 'Grouped target is unknown, a directory or read-only.'}
             if($selfExecutable -and $target -ieq $exe -and $state.Sha256 -ine $executableSha256){throw 'Executable changed while planning self-patch.'}
@@ -820,8 +941,11 @@ function Invoke-TpmPatchFileBatch {
             $locks+=@(Open-TpmPatchDirectoryBoundary $parent)
         }
         $exeGuard=Open-TpmPatchCreationFile $Plan.Executable -MaximumBytes ([int64]::MaxValue)
-        $exePin=if($Plan.ExecutableSelfPatch){if($apply){$Plan.Operations[0].BeforeSha256}else{$Plan.Operations[0].AfterSha256}}else{$Plan.ExecutableSha256}
-        if((Get-TpmPatchStreamSha256 $exeGuard) -ine $exePin){throw 'Grouped executable identity changed.'}
+        # Games recorded without an exact program hash only prove the program file is there.
+        if($Plan.ExecutableSha256){
+            $exePin=if($Plan.ExecutableSelfPatch){if($apply){$Plan.Operations[0].BeforeSha256}else{$Plan.Operations[0].AfterSha256}}else{$Plan.ExecutableSha256}
+            if((Get-TpmPatchStreamSha256 $exeGuard) -ine $exePin){throw 'Grouped executable identity changed.'}
+        }
         $sourceTotal=0L;$beforeTotal=0L
         for($i=0;$i -lt $Plan.Operations.Count;$i++){
             $operation=$Plan.Operations[$i]
@@ -1196,7 +1320,7 @@ function Undo-TpmCatalogPatch {
     )
     $inputs = @{}; foreach ($key in $PSBoundParameters.Keys) { if ($key -notin @('RecoveryDirectory', 'WhatIf', 'Confirm', 'ValidationAction')) { $inputs[$key] = $PSBoundParameters[$key] } }
     try {
-        $plan = Get-TpmPatchPlan @inputs -ForUndo
+        $plan = Get-TpmPatchPlan @inputs -ForUndo -ReceiptDirectory $RecoveryDirectory
         if ($plan.Status -eq 'Unavailable') { throw $plan.Reason }
     } catch {
         $failure = [string]$_.Exception.Message
@@ -1677,7 +1801,8 @@ function Show-TpmRequiredPatchGameList {
     Write-TpmText -Text 'Pick your game:' -Color Cyan -BlankBefore -BlankAfter
     for ($index = 0; $index -lt $groupList.Count; $index++) {
         $prefix = ('{0}) ' -f ($index + 1)).PadLeft($numberWidth + 2)
-        $label = '{0} ({1})' -f $groupList[$index].Name, (Format-TpmCountNoun -Count $groupList[$index].Count -Singular 'patch')
+        $optionalNote = if (@($groupList[$index].Entries | Where-Object { -not (Test-TpmRequiredPatchOptional -Entry $_) }).Count -eq 0) { ', optional' } else { '' }
+        $label = '{0} ({1}{2})' -f $groupList[$index].Name, (Format-TpmCountNoun -Count $groupList[$index].Count -Singular 'patch'), $optionalNote
         Write-TpmText -Text $label -Prefix $prefix -Indent 2
     }
     Write-Host ''
@@ -1743,10 +1868,31 @@ function Get-TpmRequiredPatchSourceRootOnce {
     return $Cache[$key]
 }
 
+# A settings-line edit (SetIniValue) changes one line in a game file: no ZIP, no source folder, and no program hash when the recipe has none.
+function Test-TpmRequiredPatchEditOnly {
+    param([Parameter(Mandatory)]$Entry)
+    $operations = @($Entry.Operations)
+    return ($operations.Count -gt 0 -and @($operations | Where-Object { $_.Type -cne 'SetIniValue' }).Count -eq 0)
+}
+
+# Optional edits (the game works without them) are never installed by "all my registered games"; the player picks them with M.
+function Test-TpmRequiredPatchOptional {
+    param([Parameter(Mandatory)]$Entry)
+    return ([string]$Entry.Id -cin @('lost-land-adventure-shader-reload-off'))
+}
+
+# An empty staging folder for a settings-line edit: the engine puts the edited file here. No ZIP is read.
+function New-TpmRequiredPatchEditStage {
+    $root = Join-Path $script:TpmOwnedLayout.Temp ('RequiredPatchEdit-' + [guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($root)
+    return [pscustomobject]@{ Root = $root; Payload = '' }
+}
+
 # The installed executable is checked before any ZIP is asked for or staged, so a build the user does not have never asks for its ZIP.
 # Returns $true when the installed build is the one this recipe is for; otherwise it records the result and returns $false.
 function Test-TpmRequiredPatchBuild {
     param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)][string]$GamePath, [Parameter(Mandatory)][object[]]$Entries, [Parameter(Mandatory)]$Results)
+    if ((Test-TpmRequiredPatchEditOnly -Entry $Entry) -and [string]::IsNullOrWhiteSpace([string]$Entry.ExecutableSha256)) { return $true }
     $installed = (Get-FileHash -LiteralPath $GamePath -Algorithm SHA256 -ErrorAction Stop).Hash
     $isInstalledBuild = {
         param($candidate)
@@ -1801,6 +1947,9 @@ function Get-TpmRequiredPatchPlainReason {
         @('The drive [A-Za-z]: is not connected', 'The drive for this game is not connected, so nothing was changed. Connect it, or point the game at its new folder in 13) Library health check.'),
         @('^ACTION REQUIRED', 'An earlier patch install stopped part way, so some game files may already be changed. Check Details before you try again. This run changed nothing.'),
         @('Close the game', 'The game is running. Close it and try again.'),
+        @('saved copy of this settings edit|needs its saved copy', 'The saved copy for undo was not found or is not correct. Nothing was changed.'),
+        @('settings file was not found', 'The game settings file was not found in that folder. Run the game once, then try again. Nothing was changed.'),
+        @('settings file|setting in the file', 'The game settings file is not the way TeknoParrot Manager expects, so it was left alone. Nothing was changed.'),
         @('BepInEx is not installed|BepInEx must be installed', 'BepInEx is not installed for this game. Set it up first with BepInEx setup in the main menu.'),
         @('Run the game once so BepInEx|BepInEx must run its preloader', 'BepInEx needs one more setting. Details have the steps.'),
         @('different exclusive hardware variant|No bundled variant applies', 'This version of the patch is for a different graphics card.'),
@@ -1964,6 +2113,11 @@ function Write-TpmRequiredPatchPlan {
     $names = Format-TpmNameList -Names @($games | ForEach-Object { $_.Name })
     $patches = Format-TpmCountNoun -Count (@($Candidates).Count) -Singular 'patch'
     Write-TpmText -Text ('Ready to install {0} for {1}: {2}.' -f $patches, (Format-TpmGameCount -Count $games.Count), $names) -Color Cyan -BlankBefore -HangingIndent 2
+    foreach ($edit in @($Candidates | Where-Object { Test-TpmRequiredPatchEditOnly -Entry $_.Entry })) {
+        $editText = '{0}: TeknoParrot Manager will change one line in a game settings file.' -f (Get-TpmRequiredPatchShortName -BuildName (Get-TpmRequiredPatchBuildName -Entry $edit.Entry))
+        if (Test-TpmRequiredPatchOptional -Entry $edit.Entry) { $editText += ' This is optional. Use it only if the game crashes.' }
+        Write-TpmText -Text $editText -BlankBefore -HangingIndent 2
+    }
     Write-TpmText -Text 'TeknoParrot Manager keeps a saved copy of the original files, so you can undo this later.' -BlankBefore -BlankAfter
 }
 
@@ -1975,13 +2129,17 @@ function Get-TpmRequiredPatchPlanBlocks {
         $lines = New-Object System.Collections.Generic.List[string]
         [void]$lines.Add('Patches: ' + $game.Count)
         [void]$lines.Add('Patch ids: ' + ((@($game.Entries | ForEach-Object { [string]$_.Id })) -join ', '))
-        foreach ($zip in @($game.Entries | ForEach-Object { [string]$_.SourceSet } | Where-Object { $_ } | Select-Object -Unique)) { [void]$lines.Add('ZIP file: ' + $zip) }
-        foreach ($zip in @($game.Entries | ForEach-Object { @(Get-TpmRequiredPatchSourceChoices -Entry $_ | Select-Object -Skip 1) | ForEach-Object { [string]$_.SourceSet } } | Where-Object { $_ } | Select-Object -Unique)) { [void]$lines.Add('Or this ZIP file: ' + $zip) }
-        $queuedIds = @($Candidates | Where-Object { -not $_.Plan } | ForEach-Object { [string]$_.Entry.Id })
-        if (@($game.Entries | Where-Object { [string]$_.Id -in $queuedIds }).Count -gt 0) {
-            [void]$lines.Add('Checked: the file inside the ZIP matches what the patch expects. A patch that builds on an earlier patch in this list will match the game file only after the earlier patch is installed.')
+        if (@($game.Entries | Where-Object { -not (Test-TpmRequiredPatchEditOnly -Entry $_) }).Count -eq 0) {
+            [void]$lines.Add('Checked: the settings file has exactly one line that TeknoParrot Manager can change. Nothing else in the file is touched.')
         } else {
-            [void]$lines.Add('Checked: the game file and the file inside the ZIP match what the patch expects.')
+            foreach ($zip in @($game.Entries | ForEach-Object { [string]$_.SourceSet } | Where-Object { $_ } | Select-Object -Unique)) { [void]$lines.Add('ZIP file: ' + $zip) }
+            foreach ($zip in @($game.Entries | ForEach-Object { @(Get-TpmRequiredPatchSourceChoices -Entry $_ | Select-Object -Skip 1) | ForEach-Object { [string]$_.SourceSet } } | Where-Object { $_ } | Select-Object -Unique)) { [void]$lines.Add('Or this ZIP file: ' + $zip) }
+            $queuedIds = @($Candidates | Where-Object { -not $_.Plan } | ForEach-Object { [string]$_.Entry.Id })
+            if (@($game.Entries | Where-Object { [string]$_.Id -in $queuedIds }).Count -gt 0) {
+                [void]$lines.Add('Checked: the file inside the ZIP matches what the patch expects. A patch that builds on an earlier patch in this list will match the game file only after the earlier patch is installed.')
+            } else {
+                [void]$lines.Add('Checked: the game file and the file inside the ZIP match what the patch expects.')
+            }
         }
         [void]$lines.Add('Saved copy: TeknoParrot Manager keeps a backup and an undo receipt.')
         [void]$blocks.Add(@{ Heading = $game.BuildName; Lines = $lines.ToArray() })
@@ -2094,9 +2252,11 @@ function Invoke-TpmRequiredPatchMenu {
         }
         $candidates = New-Object System.Collections.Generic.List[object]
         $waiting = New-Object System.Collections.Generic.List[object]
+        $optionalSkipped = New-Object System.Collections.Generic.List[object]
         foreach ($entry in $selectedEntries) {
             $profilePath = Join-Path $UserProfilesDir ($entry.ProfileId + '.xml')
             if ($choice -eq 'A' -and -not (Test-Path -LiteralPath $profilePath -PathType Leaf -ErrorAction SilentlyContinue)) { continue }
+            if ($choice -eq 'A' -and (Test-TpmRequiredPatchOptional -Entry $entry)) { [void]$optionalSkipped.Add($entry); continue }
             if ($choice -ne 'U') {
                 # The graphics card question comes first, so a patch made for another card never asks for its ZIP file.
                 $variant = Resolve-TpmPatchVariantDecision -Entries @($catalog.Entries) -PatchId $entry.Id -ProfileId $entry.ProfileId -HardwareEvidence $hardwareEvidence
@@ -2113,8 +2273,11 @@ function Invoke-TpmRequiredPatchMenu {
                     Assert-TpmPatchGameOutsideSourceFolders -GameRoot $gameRoot -SourceFolders $sourceFolders
                     $context = Get-TpmManualPatchContext -Entry $entry -TpRoot $TpRoot -UserProfilesDir $UserProfilesDir -ManagerRoot $ManagerRoot -GameRoot $gameRoot
                     if (-not (Test-TpmRequiredPatchBuild -Entry $entry -GamePath $context.GamePath -Entries @($catalog.Entries) -Results $reported)) { continue }
-                    $sourceRoot = Get-TpmRequiredPatchSourceRootOnce -Cache $sourceRoots -Entry $entry -MainSource $MainSource -SupplementarySource $SupplementarySource
-                    $stageInfo = New-TpmRequiredPatchPayloadStage -Entry $entry -SourceRoot $sourceRoot
+                    if (Test-TpmRequiredPatchEditOnly -Entry $entry) { $sourceRoot = ''; $stageInfo = New-TpmRequiredPatchEditStage }
+                    else {
+                        $sourceRoot = Get-TpmRequiredPatchSourceRootOnce -Cache $sourceRoots -Entry $entry -MainSource $MainSource -SupplementarySource $SupplementarySource
+                        $stageInfo = New-TpmRequiredPatchPayloadStage -Entry $entry -SourceRoot $sourceRoot
+                    }
                     [void]$stages.Add($stageInfo.Root)
                     $context = Get-TpmManualPatchContext -Entry $entry -TpRoot $TpRoot -UserProfilesDir $UserProfilesDir -ManagerRoot $ManagerRoot -GameRoot $gameRoot -SourceRoots @($sourceRoot)
                 } catch {
@@ -2127,10 +2290,13 @@ function Invoke-TpmRequiredPatchMenu {
                         $context = Get-TpmRegisteredPatchContext -Entry $entry -TpRoot $TpRoot -UserProfilesDir $UserProfilesDir -ManagerRoot $ManagerRoot
                         Assert-TpmPatchGameOutsideSourceFolders -GameRoot $context.GameRoot -SourceFolders $sourceFolders
                         if (-not (Test-TpmRequiredPatchBuild -Entry $entry -GamePath $context.GamePath -Entries @($catalog.Entries) -Results $reported)) { continue }
-                        $sourceRoot = Get-TpmRequiredPatchSourceRootOnce -Cache $sourceRoots -Entry $entry -MainSource $MainSource -SupplementarySource $SupplementarySource
-                        $stageInfo = New-TpmRequiredPatchPayloadStage -Entry $entry -SourceRoot $sourceRoot
+                        if (Test-TpmRequiredPatchEditOnly -Entry $entry) { $sourceRoot = ''; $stageInfo = New-TpmRequiredPatchEditStage }
+                        else {
+                            $sourceRoot = Get-TpmRequiredPatchSourceRootOnce -Cache $sourceRoots -Entry $entry -MainSource $MainSource -SupplementarySource $SupplementarySource
+                            $stageInfo = New-TpmRequiredPatchPayloadStage -Entry $entry -SourceRoot $sourceRoot
+                        }
                         [void]$stages.Add($stageInfo.Root)
-                        $context.ProtectedRoots = @($context.ProtectedRoots) + @($sourceRoot)
+                        if ($sourceRoot) { $context.ProtectedRoots = @($context.ProtectedRoots) + @($sourceRoot) }
                     } else {
                         $context = Get-TpmManualPatchContext -Entry $entry -TpRoot $TpRoot -UserProfilesDir $UserProfilesDir -ManagerRoot $ManagerRoot -GameRoot $gameRoot -ForUndo
                         Assert-TpmPatchGameOutsideSourceFolders -GameRoot $gameRoot -SourceFolders $sourceFolders
@@ -2145,7 +2311,13 @@ function Invoke-TpmRequiredPatchMenu {
                         [void][IO.Directory]::CreateDirectory($emptyStage)
                         [void]$stages.Add($emptyStage)
                         try {
-                            $plan = Get-TpmPatchPlan -CatalogContent $catalog.Content -CatalogSha256 $catalog.CatalogSha256 -PatchId $entry.Id -ProfileId $entry.ProfileId -GameRoot $context.GameRoot -PayloadRoot $emptyStage -RecoveryRoot $context.RecoveryRoot -ProtectedRoots $context.ProtectedRoots -ForUndo
+                            # A settings edit is rebuilt from its saved copy, so the probe is given each saved copy folder in turn.
+                            $probeDirectories = if (Test-TpmRequiredPatchEditOnly -Entry $entry) { @(Get-TpmPatchRecoveryDirectories -Request ([pscustomobject]@{Context=$context}) -PatchId $entry.Id) } else { @() }
+                            if ($probeDirectories.Count -eq 0) { $probeDirectories = @('') }
+                            foreach ($probeDirectory in $probeDirectories) {
+                                $plan = Get-TpmPatchPlan -CatalogContent $catalog.Content -CatalogSha256 $catalog.CatalogSha256 -PatchId $entry.Id -ProfileId $entry.ProfileId -GameRoot $context.GameRoot -PayloadRoot $emptyStage -RecoveryRoot $context.RecoveryRoot -ProtectedRoots $context.ProtectedRoots -ForUndo -ReceiptDirectory $probeDirectory
+                                if ($plan.Status -ne 'Unavailable') { break }
+                            }
                             if ($plan.Status -eq 'Unavailable') { throw $plan.Reason }
                         } catch {
                             $receiptDirectories = @(Get-TpmPatchRecoveryDirectories -Request ([pscustomobject]@{Context=$context}) -PatchId $entry.Id)
@@ -2203,7 +2375,8 @@ function Invoke-TpmRequiredPatchMenu {
                             if ($plan.PSObject.Properties['ExecutableSelfPatch'] -and $plan.ExecutableSelfPatch) {
                                 $expectedExecutable = if ($validationState -ceq 'published') { [string]$entry.Operations[0].BeforeSha256 } else { [string]$entry.Operations[0].AfterSha256 }
                             }
-                            if ((Get-FileHash -LiteralPath $context.GamePath -Algorithm SHA256 -ErrorAction Stop).Hash -ine $expectedExecutable) { throw 'The exact game executable changed before undo.' }
+                            if ($expectedExecutable -or -not (Test-TpmRequiredPatchEditOnly -Entry $entry)) { if ((Get-FileHash -LiteralPath $context.GamePath -Algorithm SHA256 -ErrorAction Stop).Hash -ine $expectedExecutable) { throw 'The exact game executable changed before undo.' } }
+                            elseif (-not (Test-Path -LiteralPath $context.GamePath -PathType Leaf)) { throw 'The game program was not found in this folder.' }
                         }
                         $result = Undo-TpmCatalogPatch -CatalogContent $catalog.Content -CatalogSha256 $catalog.CatalogSha256 -PatchId $entry.Id -ProfileId $entry.ProfileId -GameRoot $context.GameRoot -PayloadRoot $emptyStage -RecoveryRoot $context.RecoveryRoot -ProtectedRoots $context.ProtectedRoots -RecoveryDirectory $validReceipts[0] -ValidationAction $validation -Confirm:$false
                         Add-TpmRequiredPatchResult -Results $reported -Entry $entry -Status 'UNDONE' -Reason (('Undo result: {0}. The receipt and current target state were verified. {1}' -f $result.Status,$(if($result.PSObject.Properties['LeftoverNote']){[string]$result.LeftoverNote})).Trim())
@@ -2255,6 +2428,9 @@ function Invoke-TpmRequiredPatchMenu {
             }
             [void]$candidates.Add([pscustomobject]@{Entry=$later.Entry;Context=$later.Context;Stage=$later.Stage;SourceRoot=$later.SourceRoot;Plan=$null;Prerequisites=$prerequisites})
         }
+        if ($optionalSkipped.Count -gt 0) {
+            Write-TpmText -Text ('Optional, not installed: {0}. Use it only if the game crashes. To use it, choose M and pick the game.' -f (Format-TpmNameList -Names @(Get-TpmRequiredPatchGameGroups -Entries $optionalSkipped.ToArray() | ForEach-Object { $_.Name }))) -Color DarkGray -BlankBefore -HangingIndent 2
+        }
         $detailBlocks.AddRange([object[]]@(Show-TpmRequiredPatchResults -Results $reported.ToArray() -Action $action))
         $detailBlocks.AddRange([object[]]@(Write-TpmRequiredPatchResidueNote -Owners $residueOwners))
         if ($choice -eq 'U') { Write-TpmRequiredPatchSummary -Results $reported.ToArray(); Wait-TpmRequiredPatchReturn -DetailBlocks $detailBlocks.ToArray() -DetailsNote $detailsNote;return }
@@ -2282,12 +2458,12 @@ function Invoke-TpmRequiredPatchMenu {
                     if ($candidate.Plan -and $candidate.Plan.PSObject.Properties['ExecutableSelfPatch'] -and $candidate.Plan.ExecutableSelfPatch) {
                         $expectedExecutable = if ($validationState -ceq 'published') { [string]$candidate.Entry.Operations[0].AfterSha256 } else { [string]$candidate.Entry.Operations[0].BeforeSha256 }
                     }
-                    if ((Get-FileHash -LiteralPath $candidate.Context.GamePath -Algorithm SHA256 -ErrorAction Stop).Hash -ine $expectedExecutable) {
-                        throw 'The exact game executable changed before publication.'
-                    }
+                    if ($expectedExecutable -or -not (Test-TpmRequiredPatchEditOnly -Entry $candidate.Entry)) {
+                        if ((Get-FileHash -LiteralPath $candidate.Context.GamePath -Algorithm SHA256 -ErrorAction Stop).Hash -ine $expectedExecutable) { throw 'The exact game executable changed before publication.' }
+                    } elseif (-not (Test-Path -LiteralPath $candidate.Context.GamePath -PathType Leaf)) { throw 'The game program was not found in this folder.' }
                     $check = Test-TpmRequiredPatchPrerequisites -Entry $candidate.Entry -GameRoot $candidate.Context.GameRoot
                     if (-not $check.Satisfied) { throw ($check.Guidance -join ' ') }
-                    if ((Get-FileHash -LiteralPath $candidate.Stage.Payload -Algorithm SHA256 -ErrorAction Stop).Hash -ine $candidate.Entry.SourceSha256) {
+                    if ($candidate.Stage.Payload -and (Get-FileHash -LiteralPath $candidate.Stage.Payload -Algorithm SHA256 -ErrorAction Stop).Hash -ine $candidate.Entry.SourceSha256) {
                         throw 'The staged local payload changed before publication.'
                     }
                     if ($candidate.Context.Registered -and

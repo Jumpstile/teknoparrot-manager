@@ -39300,6 +39300,81 @@ function Invoke-TpmCdImageFolders {
     Write-TpmOutcome -Title $title -Status $status -Needs $needs -DetailBlocks $blocks.ToArray() -DetailsNote 'CD Image Folder.' -Unattended:$Unattended -DeferDetails
 }
 
+# Profile setting fixes (#351): the guide for a few games says to change one setting in the game's TeknoParrot profile. Each fix is a row in
+# scripts\TpmProfileSettingFixes.json (ProfileId, Category, Field, From = the stock value, To = the guide's value). A game is changed only
+# when its profile holds exactly the stock value: a value the player already chose (or the guide value itself) is never touched.
+function Read-TpmProfileSettingFixes {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { Write-Log ('Profile setting fixes: WARNING -- the list is missing ({0}), so no guide setting was applied.' -f $Path); return @() }
+    try { return @((Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json).Entries) }
+    catch { Write-Log ('Profile setting fixes: the list could not be read -- {0}' -f $_.Exception.Message); return @() }
+}
+
+# Sets each item's field (Path, Label, Category, Field, From, To). The profile is read again right before its write, the field must still hold
+# From and offer To, and the saved value is read back. With -BackupError nothing is written and every game is reported as failed.
+function Set-TpmProfileSettingFixes {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items, [string]$BackupError = '')
+    $changed = New-Object System.Collections.Generic.List[string]
+    $failed = New-Object System.Collections.Generic.List[string]
+    foreach ($item in $Items) {
+        if ($BackupError) { [void]$failed.Add(('{0}: {1}' -f $item.Label, $BackupError)); continue }
+        $xpath = '/GameProfile/ConfigValues/FieldInformation[CategoryName={0} and FieldName={1}]' -f (ConvertTo-XPathStringLiteral $item.Category), (ConvertTo-XPathStringLiteral $item.Field)
+        $pre = Get-TpmProfileWriteFingerprint -Path $item.Path
+        $attempted = $false
+        try {
+            $doc = Read-Xml $item.Path
+            $fi = $doc.SelectSingleNode($xpath)
+            $node = if ($null -ne $fi) { $fi.SelectSingleNode('FieldValue') } else { $null }
+            if ($null -eq $node -or ([string]$node.InnerText).Trim() -cne [string]$item.From) { throw 'The setting changed since it was checked.' }
+            $options = @($fi.SelectNodes('FieldOptions/string') | ForEach-Object { [string]$_.InnerText })
+            if ($options.Count -gt 0 -and @($options | Where-Object { $_ -ceq [string]$item.To }).Count -eq 0) { throw 'The game no longer offers this value.' }
+            $node.InnerText = [string]$item.To
+            $attempted = $true
+            Save-Xml $doc $item.Path
+            $savedNode = (Read-Xml $item.Path).SelectSingleNode($xpath + '/FieldValue')
+            if ($null -eq $savedNode -or ([string]$savedNode.InnerText).Trim() -cne [string]$item.To) { throw 'The saved value did not read back.' }
+            [void]$changed.Add(('{0}: the setting "{1}" was changed from {2} to {3}.' -f $item.Label, $item.Field, $item.From, $item.To))
+        } catch {
+            $failure = Resolve-TpmRegistrationSaveFailure -WriteAttempted $attempted -PreState $pre -Message $_.Exception.Message
+            [void]$failed.Add(('{0}: {1}' -f $item.Label, $failure.Reason))
+        }
+    }
+    return [pscustomobject]@{ Changed = $changed.ToArray(); Failed = $failed.ToArray() }
+}
+
+# After registration: every registered game in the list whose profile still holds the stock value gets the guide's value, after a verified
+# backup (the undo) and with a read-back. A game that is not registered, has no such setting, or holds any other value is not changed.
+function Invoke-TpmProfileSettingFixes {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [string]$DefinitionPath = (Join-Path $PSScriptRoot 'scripts\TpmProfileSettingFixes.json'), [bool]$DryRun = $false, [switch]$Unattended)
+    if ($DryRun) { return }
+    $plan = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @(Read-TpmProfileSettingFixes -Path $DefinitionPath)) {
+        $path = Join-Path $UserProfilesDir (([string]$entry.ProfileId) + '.xml')
+        if (([string]$entry.ProfileId) -notmatch '^[\w-]+$' -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        try {
+            $fi = (Read-Xml $path).SelectSingleNode(('/GameProfile/ConfigValues/FieldInformation[CategoryName={0} and FieldName={1}]' -f (ConvertTo-XPathStringLiteral ([string]$entry.Category)), (ConvertTo-XPathStringLiteral ([string]$entry.Field))))
+            $node = if ($null -ne $fi) { $fi.SelectSingleNode('FieldValue') } else { $null }
+            if ($null -eq $node) { continue }
+            if (([string]$node.InnerText).Trim() -cne [string]$entry.From) { Write-Log ('Profile setting fix: {0} {1} holds "{2}" and was left as it is.' -f $entry.ProfileId, $entry.Field, $node.InnerText); continue }
+            [void]$plan.Add([pscustomobject]@{ Path = $path; Label = [string]$entry.GameName; Category = [string]$entry.Category; Field = [string]$entry.Field; From = [string]$entry.From; To = [string]$entry.To })
+        } catch { Write-Log ('Profile setting fix: {0} could not be checked -- {1}' -f $entry.ProfileId, $_.Exception.Message) }
+    }
+    if ($plan.Count -eq 0) { return }
+    $backupError = ''
+    try {
+        $backup = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $UserProfilesDir -Label 'ProfileSettingFixes'
+        if (-not [bool](Get-TpmTransactionField -Object $backup -Name 'Verified' -Default $false)) { $backupError = 'The safety backup could not be verified.' }
+    } catch { $backupError = $_.Exception.Message }
+    $written = Set-TpmProfileSettingFixes -Items $plan.ToArray() -BackupError $backupError
+    $blocks = New-Object System.Collections.Generic.List[object]
+    if ($written.Failed.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'Could not be changed'; Lines = $written.Failed }) }
+    $title = if ($written.Changed.Count -gt 0) { 'Guide setting applied for {0}.' -f (Format-TpmGameCount -Count $written.Changed.Count) } else { 'The guide setting was not applied for any game.' }
+    $needs = if ($written.Failed.Count -gt 0) { @('{0} could not be changed. See Details.' -f (Format-TpmGameCount -Count $written.Failed.Count)) } else { @() }
+    $status = if ($written.Failed.Count -eq 0) { 'Ok' } elseif ($written.Changed.Count -eq 0) { 'Problem' } else { 'Attention' }
+    $next = if ($written.Changed.Count -gt 0) { 'To undo this, use Restore backup and pick the newest ProfileSettingFixes backup.' } else { '' }
+    Write-TpmOutcome -Title $title -Status $status -Done $written.Changed -Needs $needs -Next $next -DetailBlocks $blocks.ToArray() -DetailsNote 'Guide settings.' -Unattended:$Unattended -DeferDetails
+}
+
 # The Region setup menu item: the user picks a region (or Back to automatic), sees the games that offer it with their current
 # region, picks all or some of them, confirms how many will change, then the change is made after a verified backup.
 # Unlike the question after registration, this may replace a region the user chose earlier: the user asked for it here.
@@ -60072,7 +60147,7 @@ function Invoke-TpmMappingEvidenceReport {
 
 function Get-TpmValidationShippedFiles {
     param([Parameter(Mandatory)][string]$ScriptRoot)
-    $names = @('scripts\TpmProgress.psm1', 'scripts\TpmRequiredPatchEngine.ps1', 'scripts\TpmRequiredPatchRecipes.json', 'tools\TpmAutoUpdate.Core.psm1', 'tools\Invoke-TpmAutoUpdate.ps1', 'TeknoParrot-Manager-CHANGELOG.txt', 'TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt')
+    $names = @('scripts\TpmProgress.psm1', 'scripts\TpmRequiredPatchEngine.ps1', 'scripts\TpmRequiredPatchRecipes.json', 'scripts\TpmProfileSettingFixes.json', 'scripts\TpmThirdPartyChecks.json', 'tools\TpmAutoUpdate.Core.psm1', 'tools\Invoke-TpmAutoUpdate.ps1', 'TeknoParrot-Manager-CHANGELOG.txt', 'TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt')
     $missing = @($names | Where-Object { -not (Test-Path -LiteralPath (Join-Path $ScriptRoot $_) -PathType Leaf) })
     return [pscustomobject]@{ Checked = $names.Count; Missing = $missing }
 }
@@ -64819,6 +64894,7 @@ if ($manualRegData.Count -gt 0 -and -not $Unattended -and -not $dryRunActive) {
 }
 Invoke-TpmRegionChoice -Codes @($result.Registered | ForEach-Object { [string]$_.Code } | Select-Object -Unique) -UserProfilesDir $userProfilesDir -Result $result -DryRun $dryRunActive -Unattended:$Unattended
 Invoke-TpmCdImageFolders -UserProfilesDir $userProfilesDir -InstallFolder $gamesInstallFolder -DryRun $dryRunActive -Unattended:$Unattended
+Invoke-TpmProfileSettingFixes -UserProfilesDir $userProfilesDir -DryRun $dryRunActive -Unattended:$Unattended
 $registrationFollowUp = New-Object System.Collections.Generic.List[string]
 if (@($result.PSTypeNames) -contains 'TPM.TransactionResult.v1' -and $result.Outcome -notin @('SUCCEEDED','NO_OP')) {
     $registrationMessage = 'Registration: ' + $result.Summary
@@ -66599,6 +66675,34 @@ if ($wizardAdviceLines.Count -gt 0 -and -not $Unattended -and -not $dryRunActive
 }
 
 
+# Third-party items (#351): scripts\TpmThirdPartyChecks.json says, per game, what the player must get from someone else. TPM shows the plain
+# Message, runs the file Checks it can see (same checker as recipe prerequisites) and shows a guide link as text only. It never downloads,
+# installs or opens anything.
+function Get-TpmThirdPartyNoteLines {
+    param([Parameter(Mandatory)][string]$Code, [string]$UserProfilesDir = '', [string]$DefinitionPath = (Join-Path $PSScriptRoot 'scripts\TpmThirdPartyChecks.json'))
+    if (-not (Test-Path -LiteralPath $DefinitionPath -PathType Leaf)) { Write-Log ('Third-party checks: WARNING -- the list is missing ({0}).' -f $DefinitionPath); return @() }
+    try { $entry = @((Get-Content -LiteralPath $DefinitionPath -Raw -Encoding UTF8 | ConvertFrom-Json).Entries | Where-Object { [string]$_.Profile -ceq $Code } | Select-Object -First 1) }
+    catch { Write-Log ('Third-party checks: the list could not be read -- {0}' -f $_.Exception.Message); return @() }
+    if ($entry.Count -eq 0) { return @() }
+    $item = $entry[0]
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add('Get this yourself: ' + [string]$item.Message)
+    if ([bool]$item.CanCheck -and @($item.Checks).Count -gt 0 -and $UserProfilesDir -and $Code -match '^[\w-]+$') {
+        try {
+            $profilePath = Join-Path $UserProfilesDir ($Code + '.xml')
+            $gameNode = if (Test-Path -LiteralPath $profilePath -PathType Leaf) { (Read-Xml $profilePath).SelectSingleNode('/GameProfile/GamePath') } else { $null }
+            $gamePath = if ($null -ne $gameNode) { ([string]$gameNode.InnerText).Trim() } else { '' }
+            if ($gamePath) {
+                $check = Test-TpmRequiredPatchPrerequisites -Entry ([pscustomobject]@{ Prerequisites = @($item.Checks) }) -GameRoot ([IO.Path]::GetDirectoryName($gamePath))
+                if ($check.Satisfied) { [void]$lines.Add('TPM looked in the game folder and found it.') }
+                else { [void]$lines.Add('TPM looked in the game folder and did not find it. ' + (@($check.Guidance) -join ' ')) }
+            }
+        } catch { Write-Log ('Third-party checks: {0} could not be checked -- {1}' -f $Code, $_.Exception.Message) }
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$item.GuideLink)) { [void]$lines.Add('Guide link (TPM does not open it): ' + [string]$item.GuideLink) }
+    return $lines.ToArray()
+}
+
 function New-TpmGameNotesReportText {
     param([object[]]$SetupNotes = @())
     $builder = New-Object System.Text.StringBuilder
@@ -66629,6 +66733,8 @@ function New-TpmGameNotesReportText {
         if ($secondFile) { [void]$builder.AppendLine(("Second file: {0}" -f $secondFile)) }
         $testProgram = & $textOf $sn 'TestProgram'
         if ($testProgram) { [void]$builder.AppendLine(("Test program: {0}" -f $testProgram)) }
+        $userProfilesForNotes = if ($null -ne (Get-Variable -Name userProfilesDir -Scope Script -ErrorAction SilentlyContinue)) { [string]$script:userProfilesDir } else { '' }
+        foreach ($thirdPartyLine in @(Get-TpmThirdPartyNoteLines -Code ([string]$sn.Code) -UserProfilesDir $userProfilesForNotes)) { [void]$builder.AppendLine($thirdPartyLine) }
         & $writeSection 'Source notes:' ([string]$sn.Notes)
         & $writeSection $(if ($baseGame) { 'Setup steps and known issues (base game):' } else { 'Setup steps and known issues:' }) (& $textOf $sn 'GeneralIssues')
         $gpuLines = @(); if ($sn.PSObject.Properties['GpuIssues']) { $gpuLines = @($sn.GpuIssues) }

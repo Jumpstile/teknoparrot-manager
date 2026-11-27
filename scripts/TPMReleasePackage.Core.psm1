@@ -36,7 +36,7 @@ function Get-TPMReleasePackageFileMapV1 {
         $path = "tools/$name"
         $map.Add([pscustomobject]@{ ZipPath = $path; SourcePath = $path })
     }
-    foreach ($name in @('TpmRequiredPatchEngine.ps1','TpmRequiredPatchRecipes.json','TPMCertification.Contracts.psm1','TPMCertification.Authority.psm1','TpmProgress.psm1')) {
+    foreach ($name in @('TpmRequiredPatchEngine.ps1','TpmRequiredPatchRecipes.json','TpmProfileSettingFixes.json','TpmThirdPartyChecks.json','TPMCertification.Contracts.psm1','TPMCertification.Authority.psm1','TpmProgress.psm1')) {
         $path = "scripts/$name"
         $map.Add([pscustomobject]@{ ZipPath = $path; SourcePath = $path })
     }

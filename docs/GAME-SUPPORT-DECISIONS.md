@@ -32,6 +32,12 @@ Each row in `Profiles` has one `Disposition`. It is the first rule that applies,
 
 `NotGpuConditions` lists notes that say "Intel" but mean the processor, or do not say which. They never become a graphics card warning.
 
+## Guided games and third-party items
+
+The `Reason` of each `guided` row says what TPM does for that game: the shipped profile already sets it, TPM fixes a profile setting, TPM changes one line in a game file (with a backup and an undo), the player needs a step in the game or on the PC, or the player needs files from their own copy. Rows that depend on other work (profile fixes, one-line file edits) say so only after that work is in.
+
+`scripts\TpmThirdPartyChecks.json` covers the 15 games that need something from a third party (a frame limiter, a codec, a patched exe, a Windows component). For each game it has the plain message shown to the player and, where the guide names a file in the game folder, a `File` check in the same shape as the `Prerequisites` of the patch recipes. Where TPM cannot see the item, `CanCheck` is false and the message stays a shown step. TPM never downloads anything and never runs an installer. A `GuideLink` is only there when the guide itself gives it, and the player opens it themselves.
+
 ## Keeping it right
 
 `Tests\Fix412.GameSupportDecisions.Tests.ps1` re-applies the rules to the signals, checks that the patch catalog and the graphics card warning table agree with this file, and checks that no CPU wording became a graphics card warning. Rebuild the file from the current guide at the release freeze.
