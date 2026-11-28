@@ -9,7 +9,7 @@ BeforeAll {
     $ast = [System.Management.Automation.Language.Parser]::ParseInput([System.IO.File]::ReadAllText($productionPath), [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { throw 'R94AT test could not parse the production script.' }
     $script:Strings = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $args[0] -is [System.Management.Automation.Language.ExpandableStringExpressionAst] }, $true) | ForEach-Object { [string]$_.Value })
-    $script:Allowed = @('Xbox controller', 'Arcade stick that shows up as an Xbox controller', 'TPM''s built-in layouts (Xbox, PlayStation, Nintendo, arcade stick) with any change you made. Buttons use the standard Xbox button codes. Coin on Back, Start on Start, and the six action buttons follow the common arcade-to-gamepad layout used by public emulator guides. No data was copied from another program.')
+    $script:Allowed = @('Xbox controller', 'Arcade stick that shows up as an Xbox controller', 'Arcade stick, 8 buttons, that shows up as an Xbox controller', 'TPM''s built-in layouts (Xbox, PlayStation, Nintendo, arcade stick) with any change you made. Buttons use the standard Xbox button codes. Coin on Back, Start on Start, and the six action buttons follow the common arcade-to-gamepad layout used by public emulator guides. The 8-button arcade stick adds Button 7 and Button 8 on the left and right stick clicks. No data was copied from another program.')
 }
 
 Describe 'R94AT screens do not make controls sound Xbox-only' {

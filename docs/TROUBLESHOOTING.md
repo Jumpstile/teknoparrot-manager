@@ -755,6 +755,18 @@ Who does what: TeknoParrot Manager adds your games to TeknoParrot and, after you
 
 Mouse and keyboard only for now? Set the controls for one game in TeknoParrotUI and choose its input type there, and test that game. If you add Sinden lightguns later, that setup happens in TeknoParrot and in the gun's own software. TeknoParrot Manager does not set up a lightgun.
 
+## My arcade stick needs Button 7 and Button 8
+
+Symptom: your arcade stick shows up to Windows as an Xbox controller and has eight buttons, but TeknoParrot Manager only set Buttons 1 to 6.
+
+1. Choose **4) Controls**, then choice **2**, then the 8-button arcade stick (choice 6). Keep it, then set up your games again.
+
+   You will see: Button 7 on L3 (the left stick click) and Button 8 on R3 (the right stick click), for each game that has a Button 7 and Button 8.
+
+2. If your stick is in keyboard or DirectInput mode, choose choice 5, "My learned arcade controls", instead.
+
+   Next: a game that has no Button 7 or 8 is left alone for them. TPM does not set triggers (LT and RT). Set those in TeknoParrotUI.
+
 ## You forgot the PostgreSQL password
 
 Symptom: Postgres setup says PostgreSQL rejected the saved password, and nobody knows the right one.

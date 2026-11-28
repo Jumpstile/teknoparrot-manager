@@ -2482,6 +2482,21 @@
 
   Press Enter to take choice 3, the check. It changes nothing.
 
+  ARCADE STICK LAYOUTS (Controls, choice 2)
+
+    The layout screen has two arcade stick choices for a stick that shows up
+    to Windows as an Xbox controller.
+      Choice 4, 6 buttons: Button 1 = X, Button 2 = Y, Button 3 = RB,
+        Button 4 = A, Button 5 = B, Button 6 = LB, Coin = Back.
+      Choice 6, 8 buttons: the same, plus Button 7 = L3 (left stick click)
+        and Button 8 = R3 (right stick click).
+    A game that has no Button 7 or 8 is left alone for them. A layout you
+    saved earlier still works. With choice 6, a game that has Button 7 or 8
+    gets L3 and R3 there, so TPM leaves that game's Volume Up and Volume
+    Down for you to set. TPM does not write trigger (LT and RT) settings.
+    A stick in keyboard or DirectInput mode should use choice 5, "My
+    learned arcade controls".
+
   CHANGE A CONTROL BY HAND (Controls, choice 5)
 
     Pick a game, then one control from the list (each line shows what it is

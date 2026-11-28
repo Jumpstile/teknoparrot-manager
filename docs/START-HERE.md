@@ -609,7 +609,7 @@ Do these steps in order. Test after each change, so you know which change helped
 
    Use RetroBat? A game that works from TeknoParrot can still fail when RetroBat starts it, because they are two different ways to start a game. See "A game works in TeknoParrot but not from RetroBat" in docs/TROUBLESHOOTING.md. TeknoParrot Manager does not change RetroBat.
 
-7. In TeknoParrot Manager, choose **4) Controls**, then choice **2** to choose your controller layout (Xbox, PlayStation, Nintendo or arcade stick), then choice **1** to set up your games with it.
+7. In TeknoParrot Manager, choose **4) Controls**, then choice **2** to choose your controller layout (Xbox, PlayStation, Nintendo or arcade stick; an arcade stick has a 6-button choice and an 8-button choice), then choice **1** to set up your games with it.
 
    You will see: a preview of what would change, then a question asking you to approve. A backup is made first.
 

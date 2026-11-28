@@ -45896,18 +45896,24 @@ function Get-TpmBaselineSlots {
     return [ordered]@{
         'Coin1' = 'Coin'; 'P1ButtonStart' = 'Start'; 'P1ButtonUp' = 'Up'; 'P1ButtonDown' = 'Down'; 'P1ButtonLeft' = 'Left'; 'P1ButtonRight' = 'Right'
         'P1Button1' = 'Button 1'; 'P1Button2' = 'Button 2'; 'P1Button3' = 'Button 3'; 'P1Button4' = 'Button 4'; 'P1Button5' = 'Button 5'; 'P1Button6' = 'Button 6'
+        'P1Button7' = 'Button 7'; 'P1Button8' = 'Button 8'
         'Test' = 'Test'; 'Service1' = 'Service'
     }
 }
 
-# The five built-in starting layouts. Names changes only what the screen calls a pad button; the codes are the same.
+# The built-in starting layouts. Names changes only what the screen calls a pad button; the codes are the same.
 # PlayStation and Nintendo pads need something that shows them to Windows as an Xbox (XInput) controller; the buttons are
-# matched by position (the bottom face button is Button 1). The arcade stick layout is only for a stick that shows up as an Xbox
-# (XInput) controller. LearnedArcade writes nothing: the learned keys and the input type (keyboard or DirectInput) stay as they are.
+# matched by position (the bottom face button is Button 1). The arcade stick layouts are only for a stick that shows up as an Xbox
+# (XInput) controller. ArcadeStick8 is last so the numbers of the older choices never change: it adds Button 7 and Button 8 on the
+# left and right stick clicks (L3 and R3); a game that has no Button 7 or 8 never gets them. TPM writes no trigger (LT/RT) binding.
+# LearnedArcade writes nothing: the learned keys and the input type (keyboard or DirectInput) stay as they are.
 function Get-TpmBaselinePresets {
     $shared = [ordered]@{ Coin1 = 'Back'; P1ButtonStart = 'Start'; P1ButtonUp = 'D-pad Up'; P1ButtonDown = 'D-pad Down'; P1ButtonLeft = 'D-pad Left'; P1ButtonRight = 'D-pad Right' }
     $pad = [ordered]@{ P1Button1 = 'A'; P1Button2 = 'B'; P1Button3 = 'Y'; P1Button4 = 'X'; P1Button5 = 'LB'; P1Button6 = 'RB' }
     $stick = [ordered]@{ P1Button1 = 'X'; P1Button2 = 'Y'; P1Button3 = 'RB'; P1Button4 = 'A'; P1Button5 = 'B'; P1Button6 = 'LB' }
+    $stick8 = [ordered]@{}
+    foreach ($key in $stick.Keys) { $stick8[$key] = $stick[$key] }
+    $stick8['P1Button7'] = 'L3'; $stick8['P1Button8'] = 'R3'
     $none = [ordered]@{ Test = ''; Service1 = '' }
     $build = {
         param($Buttons)
@@ -45923,6 +45929,7 @@ function Get-TpmBaselinePresets {
         Nintendo    = [pscustomobject]@{ Title = 'Nintendo controller'; Names = @{ A = 'B'; B = 'A'; X = 'Y'; Y = 'X'; LB = 'L'; RB = 'R'; Back = 'Minus'; Start = 'Plus' }; Slots = (& $build $pad) }
         ArcadeStick = [pscustomobject]@{ Title = 'Arcade stick that shows up as an Xbox controller'; Names = @{ X = 'Button 1'; Y = 'Button 2'; RB = 'Button 3'; A = 'Button 4'; B = 'Button 5'; LB = 'Button 6'; Back = 'Coin' }; Slots = (& $build $stick) }
         LearnedArcade = [pscustomobject]@{ Title = 'My learned arcade controls (keep keyboard or DirectInput mode)'; Names = @{}; Slots = $learned }
+        ArcadeStick8 = [pscustomobject]@{ Title = 'Arcade stick, 8 buttons, that shows up as an Xbox controller'; Names = @{ X = 'Button 1'; Y = 'Button 2'; RB = 'Button 3'; A = 'Button 4'; B = 'Button 5'; LB = 'Button 6'; L3 = 'Button 7'; R3 = 'Button 8'; Back = 'Coin' }; Slots = (& $build $stick8) }
     }
 }
 
@@ -46012,15 +46019,16 @@ function Get-TpmBaselineSummaryLines {
     [void]$lines.Add('Your controller layout: ' + $title)
     $layout = @(Get-TpmBaselineLayout -Baseline $Baseline)
     foreach ($row in $layout) { [void]$lines.Add(('{0}  ->  {1}' -f $row.Slot, $row.Label)) }
-    $empty = @((Get-TpmBaselineSlots).Keys | Where-Object { [string]::IsNullOrEmpty([string]$Baseline.Slots[$_]) } | ForEach-Object { (Get-TpmBaselineSlots)[$_] })
+    $empty = @((Get-TpmBaselineSlots).Keys | Where-Object { $Baseline.Slots.Contains($_) -and [string]::IsNullOrEmpty([string]$Baseline.Slots[$_]) } | ForEach-Object { (Get-TpmBaselineSlots)[$_] })
     if ($empty.Count -gt 0) { [void]$lines.Add('Left empty on purpose: ' + ($empty -join ', ') + '. A stick click should not open a test menu.') }
-    [void]$lines.Add('Volume up and down use the left and right stick clicks, unless a game already uses them.')
+    if ([string]$Baseline.Slots['P1Button7'] -eq 'L3') { [void]$lines.Add('Button 7 and Button 8 use the left and right stick clicks (L3 and R3). In a game that has Button 7 or 8, TPM leaves its Volume Up and Volume Down for you to set.') }
+    else { [void]$lines.Add('Volume up and down use the left and right stick clicks, unless a game already uses them.') }
     return @($lines)
 }
 
 # Where the layout comes from, in plain words. Shown behind Details and written to the log.
 function Get-TpmBaselineLayoutSource {
-    return 'TPM''s built-in layouts (Xbox, PlayStation, Nintendo, arcade stick) with any change you made. Buttons use the standard Xbox button codes. Coin on Back, Start on Start, and the six action buttons follow the common arcade-to-gamepad layout used by public emulator guides. No data was copied from another program.'
+    return 'TPM''s built-in layouts (Xbox, PlayStation, Nintendo, arcade stick) with any change you made. Buttons use the standard Xbox button codes. Coin on Back, Start on Start, and the six action buttons follow the common arcade-to-gamepad layout used by public emulator guides. The 8-button arcade stick adds Button 7 and Button 8 on the left and right stick clicks. No data was copied from another program.'
 }
 
 # Plain words for each reason a game is left alone.
@@ -46350,7 +46358,8 @@ function Get-TpmBaselineChooserNotes {
     param([bool]$XboxPadFound = $false)
     $notes = New-Object System.Collections.Generic.List[string]
     [void]$notes.Add('PlayStation and Nintendo controllers work here only when something shows them to Windows as an XInput controller. XInput is the standard mode most pads use, including PlayStation and Nintendo pads through Windows.')
-    if ($XboxPadFound) { [void]$notes.Add('An arcade stick can use choice 4 only while it is switched to its XInput mode.') }
+    if ($XboxPadFound) { [void]$notes.Add('An arcade stick can use choice 4 (6 buttons) or choice 6 (8 buttons) only while it is switched to its XInput mode.') }
+    [void]$notes.Add('Choice 6 adds Button 7 on L3 and Button 8 on R3 (the left and right stick clicks). A game that has no Button 7 or 8 is left alone for them.')
     [void]$notes.Add('If your arcade encoder is in keyboard or DirectInput mode, choose 5. TPM then uses your learned arcade controls as they are and does not ask you to change the mode.')
     return @($notes)
 }
@@ -48669,7 +48678,7 @@ function Get-TpmGuideDevices {
         if ($mapping -match '^P(\d)') { $player = [int]$Matches[1] }
         [void]$controls.Add([pscustomobject]@{ Mapping = $mapping; Label = $label; Voice = ''; Player = $player; Kind = 'Axis'; Number = 0; Exact = '' })
     }
-    $padPreset = $(if ($null -ne $Baseline -and [string]$Baseline.Preset -in @('Xbox', 'PlayStation', 'Nintendo', 'ArcadeStick')) { [string]$Baseline.Preset } else { '' })
+    $padPreset = $(if ($null -ne $Baseline -and [string]$Baseline.Preset -in @('Xbox', 'PlayStation', 'Nintendo', 'ArcadeStick', 'ArcadeStick8')) { [string]$Baseline.Preset } else { '' })
     $items = New-Object System.Collections.Generic.List[object]
     foreach ($control in $controls) {
         $mapping = [string]$control.Mapping
