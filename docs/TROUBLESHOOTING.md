@@ -606,6 +606,28 @@ A short ReShade version banner at game start is normal. ReShade has no setting t
 
 Expected result: no welcome window, counters or messages when the game starts.
 
+## ReShade set up fewer games than the first check said
+
+Symptom: the first check said, for example, 88 games could get ReShade, but the result says fewer were set up.
+
+Cause: TeknoParrot Manager checks every game again right before it installs, because a game folder can change in between. TeknoParrot Manager names every game it leaves out and says why. It never drops a game without telling you.
+
+Fix:
+
+1. Read the result screen. It shows the first check, how many were set up, and each game that was skipped at the last check, with its reason.
+
+   You will see: lines like `Of the 88 ready, 84 were set up and 4 were skipped at the last check`, then the four game names with a reason for each.
+
+   Next: press **D** to see every game and the reason for each one.
+
+2. If a reason says TeknoParrot Manager could not read the game's type, nothing was changed and the game is not damaged. Check that the saved game file is the real game program, then run ReShade setup again.
+
+   You will see: the game set up on the next run, or the same reason again.
+
+   Next: if it says the same, use the Library Health Check to point the game at the right file.
+
+Expected result: the games set up, plus the games left out, add up to the games you picked, and each left-out game has a reason.
+
 ## Your games start in the wrong country or language
 
 Symptom: a game starts in Japan or in the wrong language.

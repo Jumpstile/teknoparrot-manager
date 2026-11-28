@@ -15389,6 +15389,14 @@ function Show-TpmReShadeSetupResult {
             Write-TpmText -Text $leftAloneText -Color DarkGray
         }
     }
+    $countRows = if ($null -ne $Result) { @(Get-TpmReShadeLastCheckRows -Result $Result) } else { @() }
+    if ($countRows.Count -gt 0) {
+        Write-Host ''
+        foreach ($countRow in $countRows) { Write-TpmText -Text $countRow -Color DarkGray -Indent 4 -HangingIndent 2 }
+    }
+    if ($reShadeResult.UnknownArch -gt 0) {
+        Write-TpmText -Text 'For the games whose program type could not be read, nothing was changed. Check that the saved game file is the real game program, then run ReShade setup again.' -Color Yellow -BlankBefore -HangingIndent 4
+    }
     if ($reShadeResult.SourceFolder -gt 0) {
         Write-TpmText -Text 'TeknoParrot Manager never changes your source folder. Move the game out of it, or fix the game folder in its profile.' -Color Yellow -BlankBefore -HangingIndent 4
     }
@@ -18906,6 +18914,43 @@ function Get-TpmReShadeBulkFacts {
     }
 }
 
+# The rows that make the numbers add up from the first check to the end, and name every game that was left out after it (with its reason):
+# the games skipped at the last check, the games the user answered No for one by one, and the games that did not finish.
+# Both result screens use these rows. Up to 10 names are shown; the Details list every one.
+function Get-TpmReShadeLastCheckRows {
+    param([Parameter(Mandatory)]$Result)
+    $facts = Get-TpmReShadeBulkFacts -Result $Result
+    $rows = New-Object 'System.Collections.Generic.List[string]'
+    $readyAtCheck = [int](Get-TpmTransactionField -Object $Result -Name 'ReadyAtCheck' -Default 0)
+    if ($readyAtCheck -gt 0) {
+        $dropped = @((Get-TpmTransactionField -Object $Result -Name 'DroppedAfterCheck' -Default @()) | Where-Object { $_ })
+        $failedReady = [Math]::Max(0, $readyAtCheck - $facts.Installed - $dropped.Count)
+        [void]$rows.Add(('First check, before you confirmed: {0} ready, {1} left out.' -f $readyAtCheck, [Math]::Max(0, $facts.Selected - $readyAtCheck)))
+        $lastCheckText = ('Of the {0} ready, {1} were set up and {2} were skipped at the last check, right before installing' -f $readyAtCheck, $facts.Installed, $dropped.Count)
+        if ($failedReady -gt 0) { $lastCheckText += (', and {0} did not finish' -f $failedReady) }
+        [void]$rows.Add($lastCheckText + '.')
+        if ($dropped.Count -gt 0) {
+            $droppedProtected = @($dropped | Where-Object { [string]$_.Kind -eq 'Protected' }).Count
+            if ($droppedProtected -gt 0) {
+                $protectedAll = [int](Get-TpmTransactionField -Object $Result -Name 'Protected' -Default 0)
+                [void]$rows.Add(('Protected: {0} in all, {1} at the first check and {2} more found at the last check.' -f $protectedAll, ($protectedAll - $droppedProtected), $droppedProtected))
+            }
+            [void]$rows.Add('Skipped at the last check (nothing was changed in them):')
+            foreach ($drop in @($dropped | Select-Object -First 10)) { [void]$rows.Add(('- {0}: {1}' -f [string]$drop.Game, [string]$drop.Reason)) }
+            if ($dropped.Count -gt 10) { [void]$rows.Add(('- and {0} more. Details lists them all.' -f ($dropped.Count - 10))) }
+        }
+    }
+    $declined = @((Get-TpmTransactionField -Object $Result -Name 'DeclinedItems' -Default @()) | Where-Object { $_ })
+    if ($declined.Count -gt 0) {
+        [void]$rows.Add(('You chose No for {0}, so {1} not counted above: {2}.' -f (Format-TpmGameCount -Count $declined.Count), $(if ($declined.Count -eq 1) { 'it is' } else { 'they are' }), (Format-TpmNameList -Names @($declined) -Limit 10)))
+    }
+    $failedNames = @((Get-TpmTransactionField -Object $Result -Name 'FailedItems' -Default @()) | Where-Object { $_ })
+    if ($failedNames.Count -gt 0) {
+        [void]$rows.Add(('Did not finish: {0}. The log says why for each one.' -f (Format-TpmNameList -Names @($failedNames) -Limit 10)))
+    }
+    return @($rows)
+}
+
 # The short summary, as rows of text (the caller colors and wraps them).
 function Format-TpmReShadeBulkSummaryRows {
     param([Parameter(Mandatory)]$Result)
@@ -18940,25 +18985,7 @@ function Format-TpmReShadeBulkSummaryRows {
         if ($fixKinds.Count -gt 0) { [void]$rows.Add(('To set up the games that are {0}, fix that first, then run ReShade setup again.' -f ($fixKinds -join ' or '))) }
         if ([int](Get-TpmTransactionField -Object $Result -Name 'UnknownArch' -Default 0) -gt 0) { [void]$rows.Add('For the games whose program type could not be read, nothing was changed. Check that the saved game file is the real game program, then run ReShade setup again.') }
     }
-    $readyAtCheck = [int](Get-TpmTransactionField -Object $Result -Name 'ReadyAtCheck' -Default 0)
-    if ($readyAtCheck -gt 0) {
-        $dropped = @((Get-TpmTransactionField -Object $Result -Name 'DroppedAfterCheck' -Default @()) | Where-Object { $_ })
-        $failedReady = [Math]::Max(0, $readyAtCheck - $facts.Installed - $dropped.Count)
-        [void]$rows.Add(('First check, before you confirmed: {0} ready, {1} left out.' -f $readyAtCheck, [Math]::Max(0, $facts.Selected - $readyAtCheck)))
-        $lastCheckText = ('Of the {0} ready, {1} were set up and {2} were skipped at the last check, right before installing' -f $readyAtCheck, $facts.Installed, $dropped.Count)
-        if ($failedReady -gt 0) { $lastCheckText += (', and {0} did not finish' -f $failedReady) }
-        [void]$rows.Add($lastCheckText + '.')
-        if ($dropped.Count -gt 0) {
-            $droppedProtected = @($dropped | Where-Object { [string]$_.Kind -eq 'Protected' }).Count
-            if ($droppedProtected -gt 0) {
-                $protectedAll = [int](Get-TpmTransactionField -Object $Result -Name 'Protected' -Default 0)
-                [void]$rows.Add(('Protected: {0} in all, {1} at the first check and {2} more found at the last check.' -f $protectedAll, ($protectedAll - $droppedProtected), $droppedProtected))
-            }
-            [void]$rows.Add('Skipped at the last check (nothing was changed in them):')
-            foreach ($drop in @($dropped | Select-Object -First 10)) { [void]$rows.Add(('- {0}: {1}' -f [string]$drop.Game, [string]$drop.Reason)) }
-            if ($dropped.Count -gt 10) { [void]$rows.Add(('- and {0} more. Details lists them all.' -f ($dropped.Count - 10))) }
-        }
-    }
+    foreach ($countRow in @(Get-TpmReShadeLastCheckRows -Result $Result)) { [void]$rows.Add($countRow) }
     if ($facts.NativeKept -gt 0) { [void]$rows.Add(('Native game settings were kept as they were in {0}.' -f (Format-TpmGameCount -Count $facts.NativeKept))) }
     return @($rows)
 }
@@ -18971,6 +18998,10 @@ function Get-TpmReShadeBulkDetailBlocks {
         $names = @((Get-TpmTransactionField -Object $Result -Name $set[1] -Default @()) | Where-Object { $_ } | ForEach-Object { [string]$_ })
         if ($names.Count -gt 0) { [void]$blocks.Add(@{ Heading = ('{0} ({1})' -f $set[0], $names.Count); Lines = @($names -join ', ') }) }
     }
+    $droppedAll = @((Get-TpmTransactionField -Object $Result -Name 'DroppedAfterCheck' -Default @()) | Where-Object { $_ })
+    if ($droppedAll.Count -gt 0) { [void]$blocks.Add(@{ Heading = ('Skipped at the last check ({0})' -f $droppedAll.Count); Lines = @($droppedAll | ForEach-Object { '{0}: {1}' -f [string]$_.Game, [string]$_.Reason }) }) }
+    $declinedAll = @((Get-TpmTransactionField -Object $Result -Name 'DeclinedItems' -Default @()) | Where-Object { $_ })
+    if ($declinedAll.Count -gt 0) { [void]$blocks.Add(@{ Heading = ('You chose No ({0})' -f $declinedAll.Count); Lines = @(($declinedAll | ForEach-Object { Get-TpmGameTitle -Code ([string]$_) }) -join ', ') }) }
     $notes = @((Get-TpmTransactionField -Object $Result -Name 'DetailNotes' -Default @()) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { [string]$_ })
     if ($notes.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'Notes for each game'; Lines = $notes }) }
     $rows = @(Format-TpmReShadeSummaryDetailRows -Result $Result)
@@ -19376,6 +19407,7 @@ function Invoke-ReShadeSetupLegacy {
     # Back from the one-by-one questions returns to this menu ($scopeReopen).
     do {
     $scopeReopen = $false; $bulkApply = $false; $keepSelections = @{}
+    $declinedGameIds = @()
     if ($selectedGames.Count -gt 1) {
         do {
             $leftAlone = $selectedGames.Count - $willChangeNow
@@ -19461,6 +19493,7 @@ function Invoke-ReShadeSetupLegacy {
             if ($backedOut) { Write-Host '  Back to the choices. No files were changed.' -ForegroundColor DarkGray; Write-Log 'ReShade setup: back to the apply-scope menu from the first one-by-one question.'; $scopeReopen = $true; continue }
             $chosenGames = @($askGames | Where-Object { $answers[$_.BaseName] })
             if ($chosenGames.Count -eq 0) { Write-Host '  ReShade setup canceled. No files were changed.' -ForegroundColor Yellow; Write-Log 'ReShade setup: canceled -- no game was chosen one by one.'; return [pscustomobject]@{ Succeeded = $false; Cancelled = $true; Deployed = 0; Errors = 0; Reason = 'USER_CANCELLED' } }
+            $declinedGameIds = @($askGames | Where-Object { -not $answers[$_.BaseName] } | ForEach-Object { [string]$_.BaseName })
             $selectedGames = @($chosenGames) + @($notAskedGames)
         }
         foreach ($pf in $selectedGames) {
@@ -19836,6 +19869,7 @@ function Invoke-ReShadeSetupLegacy {
     if (-not $accounting.Complete) { throw 'ReShade accounting invariant failed: terminal outcomes did not equal selected games.' }
     Write-Log ("ReShade accounting: Selected={0} ChangedTpmManaged={1} AdoptedReplaced={2} ProtectedUnchanged={3} KeptPrevious={4} MissingPath={5} UnsafeOwnershipPath={6} Failed={7} SkippedCancelled={8}" -f $accounting.Selected, $accounting.ChangedTpmManaged, $accounting.AdoptedReplaced, $accounting.ProtectedUnchanged, $accounting.KeptPrevious, $accounting.MissingPath, $accounting.UnsafeOwnershipPath, $accounting.Failed, $accounting.SkippedCancelled)
     [void]$summaryDetails.Add(('First check: {0} ready, {1} left out. Last check: {2} of the {0} ready games were skipped before installing.' -f $readyNow, ($selectedGames.Count - $readyNow), $droppedAfterCheck.Count))
+    if ($declinedGameIds.Count -gt 0) { [void]$summaryDetails.Add(('You chose No for: {0}' -f (Format-TpmNameList -Names @($declinedGameIds) -Limit 1000))) }
     foreach ($drop in $droppedAfterCheck) { [void]$summaryDetails.Add(('Skipped at the last check: {0}: {1}' -f $drop.Game, $drop.Reason)) }
 
 
@@ -19920,6 +19954,7 @@ function Invoke-ReShadeSetupLegacy {
         DetailNotes = $detailNotes.ToArray()
         AppliedGames = $appliedGames.ToArray()
         ReadyAtCheck = $readyNow
+        DeclinedItems = @($declinedGameIds)
         DroppedAfterCheck = $droppedAfterCheck.ToArray()
         UndoReceiptItems = $undoGames['Ready'].ToArray()
         UndoReceiptMissingItems = $undoGames['Missing'].ToArray()
@@ -41126,6 +41161,7 @@ function Write-TpmExcludedGamesSummary {
         $text = [string]$reasonText[$reason]
         if ($reason -eq 'drive') { $text = $text -f $(if ($drives.Count -gt 0) { ' (' + ($drives -join ', ') + ')' } else { '' }) }
         Write-TpmText -Text ('{0}: {1}' -f (Format-TpmGameCount -Count $group.Count), $text) -Color DarkGray -Indent 4
+        if ($group.Count -gt 7) { Write-Log ('Left out of the next steps ({0}): {1}' -f $reason, (@($group | ForEach-Object { $_.Label }) -join ', ')) }
         Write-TpmText -Text (Format-TpmNameList -Names @($group | ForEach-Object { $_.Label }) -Limit 8) -Color DarkGray -Indent 6
     }
 }
