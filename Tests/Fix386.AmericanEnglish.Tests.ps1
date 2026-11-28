@@ -7,16 +7,26 @@
 
 BeforeAll {
     $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-    $script:f386Files = @(
+    # Top-level files, every docs\*.md (START-HERE, TROUBLESHOOTING, the guides) and every file directly in scripts\.
+    $names = New-Object System.Collections.Generic.List[string]
+    $names.AddRange([string[]]@(
         'TeknoParrot-Manager.ps1', 'TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt',
-        'TeknoParrot-Manager-CHANGELOG.txt', 'README.md', 'QUICKSTART.md', 'docs\wiki-updates\Changelog.md', 'docs\USER-GUIDE.md', 'docs\TESTER-GUIDE.md', 'scripts\TpmProgress.psm1'
-    ) | ForEach-Object { [pscustomobject]@{ Name = $_; Text = [System.IO.File]::ReadAllText((Join-Path $root $_)) } }
+        'TeknoParrot-Manager-CHANGELOG.txt', 'README.md', 'QUICKSTART.md', 'ROADMAP.md', 'SECURITY.md', 'PATCH-DESCRIPTIONS.md', 'docs\wiki-updates\Changelog.md'
+    ))
+    foreach ($extra in @(Get-ChildItem -LiteralPath (Join-Path $root 'docs') -Filter '*.md' -File) + @(Get-ChildItem -LiteralPath (Join-Path $root 'scripts') -File)) {
+        $names.Add($extra.FullName.Substring($root.Length + 1))
+    }
+    $script:f386Files = @($names | ForEach-Object { [pscustomobject]@{ Name = $_; Text = [System.IO.File]::ReadAllText((Join-Path $root $_)) } })
 }
 
 Describe 'Shipped text uses American spelling (issue 386)' {
+    It 'scans the user guide, README and quick start' {
+        foreach ($required in 'docs\USER-GUIDE.md', 'README.md', 'QUICKSTART.md') { @($script:f386Files.Name) | Should -Contain $required }
+    }
+
     It 'has no British spellings in any shipped text file' {
         # Case-sensitive on purpose so identifiers such as Get-PostgresRestoreJudgement and the shader name Colourfulness do not count.
-        $pattern = '(recognis|Recognis|normalis|Normalis|behaviour|(?<!Mono)Behaviour|organis|Organis|labelled|Labelled|judgement|licence|Licence|colour(?!_space)|Colour(?!fulness))'
+        $pattern = '(recognis|Recognis|normalis|Normalis|behaviour|(?<!Mono)Behaviour|organis|Organis|labelled|Labelled|judgement|licence|Licence|centre|Centre|initialis|Initialis|cancelling|colour(?!_space)|Colour(?!fulness))'
         $found = New-Object System.Collections.Generic.List[string]
         foreach ($file in $script:f386Files) {
             foreach ($m in [regex]::Matches($file.Text, $pattern)) {
@@ -33,9 +43,10 @@ Describe 'Shipped text uses American spelling (issue 386)' {
     }
 
     It 'says canceled, not cancelled, in sentences and comments' {
+        # Lowercase whole word only. Not after $ or . or - (a property such as $r.cancelled, a FailureId) and not the state name Cancelled or USER_CANCELLED.
         $found = New-Object System.Collections.Generic.List[string]
         foreach ($file in $script:f386Files) {
-            foreach ($m in [regex]::Matches($file.Text, '\b(was|were|is|been|be) cancelled\b|failed/cancelled|\bcancelled (before|by|at|the)\b')) {
+            foreach ($m in [regex]::Matches($file.Text, '(?<![$.\w-])cancelled\b|failed/cancelled')) {
                 [void]$found.Add(('{0}: {1}' -f $file.Name, $m.Value))
             }
         }

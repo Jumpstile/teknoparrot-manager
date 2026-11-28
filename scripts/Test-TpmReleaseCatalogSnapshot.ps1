@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory = $true)][string]$ManifestPath,
     [string]$CatalogRoot,
     [string]$SourceProofRoot,
-    [string]$HistoricalCatalogRoot
+    [string]$HistoricalCatalogRoot,
+    [string]$PinPath
 )
 
 Set-StrictMode -Version Latest
@@ -106,14 +107,14 @@ function Get-TpmSnapshotRelativePath {
 }
 
 function Get-TpmSnapshotInventory {
-    param([string]$Root)
+    param([string]$Root, [string[]]$RootNames)
     $records = New-Object System.Collections.Generic.List[object]
-    foreach ($rootName in @('GameProfiles', 'GameSetup', 'Metadata')) {
+    foreach ($rootName in $RootNames) {
         $rootPath = Join-Path $Root $rootName
         if (-not (Test-Path -LiteralPath $rootPath -PathType Container)) { throw "Missing catalog root: $rootName" }
         $extension = if ($rootName -eq 'Metadata') { '.json' } else { '.xml' }
-        foreach ($file in @(Get-ChildItem -LiteralPath $rootPath -Recurse -File | Sort-Object FullName)) {
-            if ($file.Extension.ToLowerInvariant() -ne $extension) { throw "Unexpected extension: $($file.FullName)" }
+        # Catalog files sit directly inside their root folder; an installed folder may hold other files, which the manifest never lists.
+        foreach ($file in @(Get-ChildItem -LiteralPath $rootPath -File | Where-Object { $_.Extension.ToLowerInvariant() -eq $extension } | Sort-Object FullName)) {
             [void]$records.Add([pscustomobject][ordered]@{
                 RelativePath = Get-TpmSnapshotRelativePath -Root $Root -Path $file.FullName
                 Root = $rootName
@@ -153,13 +154,32 @@ $errors = New-Object System.Collections.Generic.List[string]
 if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) { throw "Manifest is missing: $ManifestPath" }
 $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
 if ($manifest.SnapshotSchemaVersion -cne '1.0.0') { [void]$errors.Add('SnapshotSchemaVersion mismatch.') }
-if ($manifest.SnapshotId -notmatch '^TPM-GAME-SUPPORT-RELEASE-1\.0\.0\.2128-ASSET-[0-9A-F]{8}$') { [void]$errors.Add('SnapshotId is not content-addressed.') }
-if ($manifest.Release.AssetSha256 -cne '9e6a8628d365a9d7c32f1dee07f1a62799656a9fdb1b58afe863526c5cf84901') { [void]$errors.Add('Asset SHA-256 mismatch.') }
-if ([int64]$manifest.Release.AssetSize -ne 153159505) { [void]$errors.Add('Asset size mismatch.') }
-if ([int]$manifest.CatalogCounts.GameProfiles -ne 925 -or [int]$manifest.CatalogCounts.GameSetup -ne 383 -or [int]$manifest.CatalogCounts.Metadata -ne 923 -or [int]$manifest.CatalogCounts.TotalFiles -ne 2231) { [void]$errors.Add('Catalog count mismatch.') }
-if ($manifest.SourceProof.Commit -cne 'dc998e374608abbda373bb3c236db5b26b5afca7') { [void]$errors.Add('Source-proof commit mismatch.') }
+# Identity, counts and digests are checked against the manifest's own contents; the accepted values are named once, in the pin file.
+$pinFile = if ($PinPath) { $PinPath } else { Join-Path $PSScriptRoot '..\contracts\snapshots\CURRENT-SNAPSHOT-PIN.json' }
+if (-not (Test-Path -LiteralPath $pinFile -PathType Leaf)) { throw "Snapshot pin file is missing: $pinFile" }
+$pin = Get-Content -LiteralPath $pinFile -Raw | ConvertFrom-Json -ErrorAction Stop
+$assetSha = [string]$manifest.Release.AssetSha256
+if ($assetSha -cnotmatch '^[0-9a-f]{64}$') { [void]$errors.Add('Asset SHA-256 is not a lower-case SHA-256.') }
+elseif ($manifest.SnapshotId -cne ('TPM-GAME-SUPPORT-RELEASE-{0}-ASSET-{1}' -f [string]$manifest.Release.Version, $assetSha.Substring(0, 8).ToUpperInvariant())) { [void]$errors.Add('SnapshotId is not content-addressed.') }
+if ($manifest.SnapshotId -cne [string]$pin.SnapshotId) { [void]$errors.Add('SnapshotId is not the pinned snapshot.') }
+if ([string]$manifest.Release.Version -cne [string]$pin.Version) { [void]$errors.Add('Release version mismatch.') }
+if ($assetSha -cne [string]$pin.AssetSha256) { [void]$errors.Add('Asset SHA-256 mismatch.') }
+if ([int64]$manifest.Release.AssetSize -ne [int64]$pin.AssetSize) { [void]$errors.Add('Asset size mismatch.') }
+if ($manifest.SourceProof.Commit -cne [string]$pin.SourceProofCommit) { [void]$errors.Add('Source-proof commit mismatch.') }
 $manifestFiles = @($manifest.Files)
-if ($manifestFiles.Count -ne 2231) { [void]$errors.Add("Manifest file count mismatch: $($manifestFiles.Count).") }
+$rootNames = [string[]]@($manifest.CatalogRoots | ForEach-Object { [string]$_ })
+foreach ($rootName in @('GameProfiles', 'GameSetup', 'Metadata')) {
+    $rootCount = @($manifestFiles | Where-Object Root -eq $rootName).Count
+    if ([int]$manifest.CatalogCounts.$rootName -ne $rootCount -or [int]$manifest.CatalogCounts.$rootName -ne [int]$pin.CatalogCounts.$rootName) { [void]$errors.Add("Catalog count mismatch: $rootName.") }
+}
+if ([int]$manifest.CatalogCounts.TotalFiles -ne $manifestFiles.Count -or [int]$pin.CatalogCounts.TotalFiles -ne $manifestFiles.Count) { [void]$errors.Add("Manifest file count mismatch: $($manifestFiles.Count).") }
+foreach ($rootName in $rootNames) {
+    $rootFiles = [object[]]@($manifestFiles | Where-Object Root -eq $rootName)
+    $rootPaths = [string[]]@($rootFiles | ForEach-Object { $_.RelativePath })
+    [System.Array]::Sort($rootPaths, $rootFiles, [System.StringComparer]::Ordinal)
+    $rootDigest = Get-TpmSnapshotSha256Bytes -Bytes ([System.Text.Encoding]::UTF8.GetBytes((@($rootFiles | ForEach-Object { $_.RelativePath + '|' + $_.SemanticSha256 }) -join "`n") + "`n"))
+    if ($rootDigest -cne [string]$manifest.SemanticRootDigests.$rootName) { [void]$errors.Add("Semantic root digest mismatch: $rootName") }
+}
 $badPaths = @($manifestFiles | Where-Object { [System.IO.Path]::IsPathRooted($_.RelativePath) -or $_.RelativePath.Contains('..') -or $_.RelativePath.Contains('\') -or $_.RelativePath -notmatch '^(GameProfiles|GameSetup|Metadata)/[^/]+\.(xml|json)$' })
 if ($badPaths.Count -gt 0) { [void]$errors.Add('Manifest contains unsafe paths.') }
 $duplicatePaths = @($manifestFiles | Group-Object RelativePath | Where-Object Count -gt 1)
@@ -171,7 +191,7 @@ $duplicateProfiles = @($profileFiles | Group-Object @{ Expression = { $_.Profile
 if ($duplicateProfiles.Count -gt 0) { [void]$errors.Add('Manifest contains case-insensitive duplicate profile codes.') }
 
 if ($CatalogRoot) {
-    $inventory = Get-TpmSnapshotInventory -Root $CatalogRoot
+    $inventory = Get-TpmSnapshotInventory -Root $CatalogRoot -RootNames $rootNames
     $byPath = @{}
     foreach ($record in $inventory) { $byPath[$record.RelativePath] = $record }
     foreach ($expected in $manifestFiles) {
@@ -183,7 +203,7 @@ if ($CatalogRoot) {
 }
 
 if ($SourceProofRoot) {
-    $proof = Get-TpmSnapshotInventory -Root $SourceProofRoot
+    $proof = Get-TpmSnapshotInventory -Root $SourceProofRoot -RootNames $rootNames
     $proofByPath = @{}
     foreach ($record in $proof) { $proofByPath[$record.RelativePath] = $record }
     foreach ($expected in $manifestFiles) {
@@ -215,7 +235,8 @@ if ($HistoricalCatalogRoot) {
         Changed = Get-TpmSortedNames -Values @($changed)
         Unchanged = Get-TpmSortedNames -Values @($unchanged)
     }
-    if ($delta.HistoricalProfileCount -ne 695 -or $delta.CurrentProfileCount -ne 925 -or $delta.Added.Count -ne 230 -or $delta.Removed.Count -ne 0 -or $delta.Changed.Count -ne 38 -or $delta.Unchanged.Count -ne 657) { [void]$errors.Add('Regenerated delta counts mismatch.') }
+    $pinDelta = $pin.Delta
+    if ($delta.HistoricalProfileCount -ne [int]$pinDelta.Historical -or $delta.CurrentProfileCount -ne [int]$pinDelta.Current -or $delta.Added.Count -ne [int]$pinDelta.Added -or $delta.Removed.Count -ne [int]$pinDelta.Removed -or $delta.Changed.Count -ne [int]$pinDelta.Changed -or $delta.Unchanged.Count -ne [int]$pinDelta.Unchanged) { [void]$errors.Add('Regenerated delta counts mismatch.') }
     $storedDeltaPath = Join-Path ([System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($ManifestPath))) 'delta.json'
     if (Test-Path -LiteralPath $storedDeltaPath -PathType Leaf) {
         $stored = Get-Content -LiteralPath $storedDeltaPath -Raw | ConvertFrom-Json -ErrorAction Stop

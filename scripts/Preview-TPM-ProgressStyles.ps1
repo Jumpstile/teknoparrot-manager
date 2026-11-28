@@ -183,7 +183,7 @@ function Show-WidthGallery {
         @{ Name = 'unknown total (spinner)';     Params = @{ Title = 'Scanning'; Stage = 'Game-file discovery'; Current = 1287; Total = 0; State = 'Running'; ElapsedSeconds = 12; Tick = 3 } },
         @{ Name = 'download in bytes';           Params = @{ Title = 'Checking'; Stage = 'ReShade via BITS'; Current = 12582912; Total = 20971520; State = 'Running'; ElapsedSeconds = 8; EtaSeconds = 5; Unit = 'Bytes'; Tick = 0 } },
         @{ Name = 'failed';                      Params = @{ Title = 'Repairing'; Stage = 'UserProfiles restore'; Current = 12; Total = 40; State = 'Error'; ElapsedSeconds = 14 } },
-        @{ Name = 'cancelled';                   Params = @{ Title = 'Repairing'; Stage = 'UserProfiles restore'; Current = 12; Total = 40; State = 'Cancelled'; ElapsedSeconds = 14 } },
+        @{ Name = 'canceled';                    Params = @{ Title = 'Repairing'; Stage = 'UserProfiles restore'; Current = 12; Total = 40; State = 'Cancelled'; ElapsedSeconds = 14 } },
         @{ Name = 'stalled (counted loop stopped)'; Params = @{ Title = 'Checking'; Stage = 'Waiting for PostgreSQL'; Current = 4; Total = 10; State = 'Stalled'; ElapsedSeconds = 75 } },
         @{ Name = 'still working (installer)';   Params = @{ Title = 'PostgreSQL install'; Stage = 'Running the PostgreSQL installer'; Current = 0; Total = 0; State = 'Waiting'; ElapsedSeconds = 107; NoCount = $true } },
         @{ Name = 'no-op';                       Params = @{ Title = 'Scanning'; Stage = 'Nothing to do'; Current = 0; Total = 0; State = 'No-op'; ElapsedSeconds = 1 } }

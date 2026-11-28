@@ -696,6 +696,30 @@
         @{
             File        = 'TeknoParrot-Manager.ps1'
             RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 19807
+            Extent      = '[string]$detailNotes[$detailNotes.Count - 1] -replace ''^(UNSAFE|SKIP) '', '''' -replace ''^[^:]*:\s*'', '''' -replace ''\s+--\s+(skipped|unchanged|left unchanged)$'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'All three chained -replace calls use fixed literal patterns and replacement strings (they cut the status words from a note TPM wrote itself before it is shown). Only the searched value is a variable, and no outside value can pick a pattern or a replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 47316
+            Extent      = '([string]$Control.Label) -replace ''^Player \d '', '''' -replace ''^the '', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'Both chained -replace calls use fixed literal patterns and replacement strings (they cut the Player number and a leading "the" from a control name before it is shown). Only the searched value is a variable, and no outside value can pick a pattern or a replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 47427
+            Extent      = '([string]$path) -replace ''^\\\\\?\\'', '''' -replace ''#\{[0-9A-Fa-f-]+\}$'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'Both chained -replace calls use fixed literal patterns and replacement strings (they cut the device path prefix and class ID from a mouse device path before it is compared). Only the searched value is a variable, and no outside value can pick a pattern or a replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
             Line        = 51104
             Extent      = '$data.general_issues -replace ''[\x00-\x08\x0B\x0C\x0E-\x1F]'', '''''
             Disposition = 'FalsePositive'

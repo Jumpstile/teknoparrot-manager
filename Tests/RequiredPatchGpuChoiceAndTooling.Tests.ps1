@@ -203,13 +203,14 @@ Describe 'A patch ZIP is found even when a folder name differs only in letter ca
 
     It 'every recipe that pulls a file pulls one with the same name as the file it installs' {
         $catalog = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TpmRequiredPatchRecipes.json') -Raw | ConvertFrom-Json
-        @($catalog.Entries).Count | Should -Be 124
+        @($catalog.Entries).Count | Should -Be 136
         # A one-line settings edit (SetIniValue) pulls no file, so it has no source member to compare.
-        $mismatch = @(foreach ($recipe in @($catalog.Entries | Where-Object { $_.Operations[0].Type -cne 'SetIniValue' })) {
+        $variantNamedIds = @('deathsmiles-ii-cvgame-patched-exe','fnf-drift-sdaemon-640x480','fnf-drift-sdaemon-1920x1080','fnf-drift-sdaemon-2560x1440','chase-hq-2-region-usa','chase-hq-2-region-japan')
+        $mismatch = @(foreach ($recipe in @($catalog.Entries | Where-Object { $_.Operations[0].Type -cnotin @('SetIniValue','CopyFolder') -and $_.Id -cnotin $variantNamedIds })) {
             # The two shader recipes of one game keep the card name on the ZIP member (shader.farc.AMD), so that suffix is ignored.
             $member = [string]$recipe.SourceEntry -replace '\.(AMD|NVIDIA|Intel)$', ''
             $target = [string]$recipe.Operations[0].Target
-            if (($member.Split('/')[-1]) -cne ($target.Split('/')[-1]) -and ($member.Split('/')[-1]) -ine ($target.Split('/')[-1])) { $recipe.Id }
+            if (($member.Split([char[]]@('/','>'))[-1]) -cne ($target.Split('/')[-1]) -and ($member.Split([char[]]@('/','>'))[-1]) -ine ($target.Split('/')[-1])) { $recipe.Id }
         })
         $mismatch | Should -BeNullOrEmpty
     }

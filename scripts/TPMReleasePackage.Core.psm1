@@ -191,7 +191,7 @@ function Test-TPMReleasePackageArchiveV1 {
     param(
         [Parameter(Mandatory = $true)][string]$ZipPath,
         [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot),
-        [string]$ExpectedDisplayVersion = 'v1.0 RC9.4'
+        [string]$ExpectedDisplayVersion = 'v1.0 RC9.5'
     )
     Set-StrictMode -Version Latest
     $sourceRootFull = [System.IO.Path]::GetFullPath($SourceRoot)

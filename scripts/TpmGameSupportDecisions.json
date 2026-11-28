@@ -44,6 +44,7 @@
       "TeknoVUnit",
       "TeknoVegas",
       "TeknoViper",
+      "TeknoZR107",
       "TeknoZeus"
     ],
     "ExcludedBecause": "ROM-set loaders: the guide text for these is \"which ROM or disc to select\", covered by the ROM family decisions.",
@@ -79,11 +80,11 @@
     },
     "ElfLdr2": {
       "Profiles": 101,
-      "guided": 40,
+      "guided": 38,
       "needs-own-archive": 10,
       "not-supported": 1,
       "register-only": 16,
-      "tpm-applies-patch": 7,
+      "tpm-applies-patch": 9,
       "tpm-warns": 27
     },
     "Lindbergh": {
@@ -133,11 +134,11 @@
     },
     "TeknoParrot": {
       "Profiles": 324,
-      "guided": 135,
+      "guided": 129,
       "needs-own-archive": 35,
       "not-supported": 3,
       "register-only": 79,
-      "tpm-applies-patch": 45,
+      "tpm-applies-patch": 51,
       "tpm-warns": 27
     },
     "Unspecified": {
@@ -986,12 +987,15 @@
       "Profile": "ChaseHQ2",
       "Game": "Chase H.Q. 2",
       "Loader": "TeknoParrot",
-      "Disposition": "guided",
-      "Also": [],
+      "Disposition": "tpm-applies-patch",
+      "Also": [
+        "guided"
+      ],
       "Signals": [
+        "recipe",
         "notes"
       ],
-      "Reason": "Needs files from your own copy of the game. Game Notes shows the steps. TPM never downloads them."
+      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "ChronoRegalia",
@@ -1391,13 +1395,16 @@
       "Profile": "Deathsmiles2",
       "Game": "Deathsmiles II: Makai no Merry Christmas",
       "Loader": "TeknoParrot",
-      "Disposition": "guided",
-      "Also": [],
+      "Disposition": "tpm-applies-patch",
+      "Also": [
+        "guided"
+      ],
       "Signals": [
+        "recipe",
         "notes",
         "general_issues"
       ],
-      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "DengekiBunkoFightingClimax",
@@ -1538,12 +1545,15 @@
       "Profile": "DragonDanceNesica",
       "Game": "Dragon Dance for NESiCAxLive",
       "Loader": "TeknoParrot",
-      "Disposition": "guided",
-      "Also": [],
+      "Disposition": "tpm-applies-patch",
+      "Also": [
+        "guided"
+      ],
       "Signals": [
+        "recipe",
         "notes"
       ],
-      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "Drakons",
@@ -1853,12 +1863,15 @@
       "Profile": "FNFDrift",
       "Game": "The Fast and the Furious Drift",
       "Loader": "TeknoParrot",
-      "Disposition": "guided",
-      "Also": [],
+      "Disposition": "tpm-applies-patch",
+      "Also": [
+        "guided"
+      ],
       "Signals": [
+        "recipe",
         "notes"
       ],
-      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
+      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "FNFSB",
@@ -2488,13 +2501,16 @@
       "Profile": "GSEVOELF2",
       "Game": "Ghost Squad Evolution (Elfloader2)",
       "Loader": "ElfLdr2",
-      "Disposition": "guided",
-      "Also": [],
+      "Disposition": "tpm-applies-patch",
+      "Also": [
+        "guided"
+      ],
       "Signals": [
+        "recipe",
         "notes",
         "linked_profile"
       ],
-      "Reason": "Needs files from your own copy of the game. Game Notes shows the steps. TPM never downloads them."
+      "Reason": "A reviewed shader patch is in the required patch catalog (2 recipes, one for AMD and one for Nvidia; you pick one); TPM applies it only on an exact match, with a backup and a receipt. It needs your own copy of the game ZIP and never downloads it."
     },
     {
       "Profile": "GtiClub3",
@@ -4265,7 +4281,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Needs files from your own copy of the game. Game Notes shows the steps. TPM never downloads them."
+      "Reason": "TPM checks what it can see and tells you what to get. It never downloads or installs anything."
     },
     {
       "Profile": "PinkPanther",
@@ -5745,7 +5761,7 @@
       "Signals": [
         "notes"
       ],
-      "Reason": "Needs files from your own copy of the game. Game Notes shows the steps. TPM never downloads them."
+      "Reason": "TPM tells you what to get: the modified .pak is not in the game sets, so there is no automatic setup. It never downloads or installs anything."
     },
     {
       "Profile": "StreetFighterVTypeArcade353",

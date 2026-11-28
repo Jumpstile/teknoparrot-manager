@@ -46,11 +46,11 @@ Describe 'MaiMai GreeN and Rabbids Hollywood Main-component restores' {
         $script:mainExtrasFragment.BaseCatalog.Sha256 | Should -BeExactly 'F86F09A8BD2749DC9C4531CD1D00A69BF07D85B14A8D281D33767732ED5B720A'
         $script:mainExtrasFragment.Entries.Count | Should -Be 3
         $script:mainExtrasCatalog.Schema | Should -Be 3
-        $script:mainExtrasCatalog.Entries.Count | Should -Be 124
-        @($script:mainExtrasCatalog.Entries.Id | Sort-Object -Unique).Count | Should -Be 124
-        @($script:mainExtrasCatalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 58
+        $script:mainExtrasCatalog.Entries.Count | Should -Be 136
+        @($script:mainExtrasCatalog.Entries.Id | Sort-Object -Unique).Count | Should -Be 136
+        @($script:mainExtrasCatalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 66
         @($script:mainExtrasCatalog.Entries | Where-Object { $_.Operations[0].Type -ceq 'CreateFile' }).Count | Should -Be 108
-        @($script:mainExtrasCatalog.Entries | Where-Object { $_.Operations[0].Type -ceq 'ReplaceFile' }).Count | Should -Be 12
+        @($script:mainExtrasCatalog.Entries | Where-Object { $_.Operations[0].Type -ceq 'ReplaceFile' }).Count | Should -Be 21
         (Get-FileHash -LiteralPath $script:mainExtrasCatalogPath -Algorithm SHA256).Hash | Should -BeExactly $script:TpmRequiredPatchCatalogSha256
         $expected=@{
             'maimai-green-freeglut-main-restore'=@{Profile='MaiMaiGreen';Build='maimai GreeN (2013)[Sega RingEdge 2][TP]';Executable='maimai/maimai_dump_.exe';ExeSha256='B2027449C536FEE6853F3B72E28188AB47D36AAF8800FFDA30617B36D0031029';SourceSet='maimai GreeN (2013)[Sega RingEdge 2][TP].zip';Member='maimai/freeglut.dll';Size=218624;Sha1='C06C86B2D660C60DD9C57DEF62E7D9DB9960DE27';Sha256='C0968C2D0D9DB9263304A7E0B86F41125A9642E20EA96741B9F75F15E424298E'}

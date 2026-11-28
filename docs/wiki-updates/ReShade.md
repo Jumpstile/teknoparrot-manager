@@ -115,7 +115,7 @@ After setup, the result screen says what changed and what was left alone. A game
 
 - it is a 32-bit game and `ReShade32.dll` is not next to `ReShade64.dll`, or its type cannot be read
 - its 32-bit or 64-bit type cannot be read. It is left unchanged, and the screen says it is not damaged.
-- it already has a ReShade that TeknoParrot Manager did not install
+- it already has a ReShade that TeknoParrot Manager did not install, or it has a `ReShade.ini` but no ReShade that TeknoParrot Manager installed. TeknoParrot Manager treats that file as yours. It is protected and counted as protected in the first check
 - its game file cannot be found (check its drive is connected, then run [[Health Check]])
 
 When a game already uses TeknoParrot's CRT look, the notice says that look stays on, ReShade adds another effect, and names the game. ReShade picks its hook from the game's real imports. The result says only what happened.

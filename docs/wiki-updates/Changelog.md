@@ -2,12 +2,39 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-This guide set is for v1.0 RC9.4. RC9.4 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.4. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
+This guide set is for v1.0 RC9.5. RC9.4 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.4. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
 The previous published release was v1.0 RC9.3: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3. RC9.2, RC9.1, RC9, RC8.4 and older are earlier published releases. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
 ---
+
+## v1.0 RC9.5 (changes since RC9.4), not published yet
+
+- Required patches: TeknoParrot Manager can now copy a whole folder of
+  patch files into a game (or into your TeknoParrot folder), all files
+  together or none, with a saved copy of every file it replaces and one
+  Undo. It never downloads the files. The House of the Dead EX, Tatsunoko
+  vs. Capcom and Ghost Squad Evolution use it, but stay "not ready yet"
+  until the real files are measured.
+- New games: Jet Wave, Midnight Run Road Fighter 2 and Winding Heat
+  (TeknoParrot 1.0.0.2343).
+- When a game could not be registered, the result now counts it, names it
+  and says what to do next (close TeknoParrotUI, run Register Games
+  again).
+- If AutoSync unpacked nothing because ZIP files failed, it says so and
+  points to View Log.
+- Required patches: when a game has several patch versions and nothing on
+  your PC tells them apart, the menu asks you to pick one (Back cancels).
+  The Fast and the Furious: Drift (screen size) and Chase H.Q. 2 (region)
+  can now be installed.
+- Ghost Squad Evolution: the AMD or Nvidia shader fix can now be installed.
+- Health Check no longer stops on a game that uses Internal storage.
+- Before it registers games, TeknoParrot Manager waits up to 30 seconds
+  for TeknoParrot to make its first game profile.
+- If PostgreSQL recovery stops, the screen and the log say which part
+  stopped and what to do next.
+- The full list is in `TeknoParrot-Manager-CHANGELOG.txt`.
 
 ## v1.0 RC9.4 (changes since RC9.3)
 
@@ -364,10 +391,8 @@ The previous published release was v1.0 RC9.3: https://github.com/Jumpstile/tekn
   the menu. A game on a drive that is not connected is "skipped", the
   drive letter is named, and Library health check (menu 13 at that time; now menu 14) repairs the
   paths.
-- The README and User Guide say the online list of TeknoParrot game
-  profiles is used only when it can be reached (it currently cannot,
-  because the repository is not public). Otherwise TPM uses the
-  profiles in your own TeknoParrot folder.
+- TeknoParrot Manager reads game profiles only from your own TeknoParrot
+  GameProfiles folder.
 - All screens and guides use American spelling.
 
 ## v1.0 RC8.4 (changes since RC8.3)

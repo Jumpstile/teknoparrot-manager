@@ -1,0 +1,30 @@
+{
+  "RecordSchemaVersion": "1.0.0",
+  "SnapshotId": "TPM-GAME-SUPPORT-RELEASE-1.0.0.2343-ASSET-5E79A108",
+  "AssetSha256": "5e79a1087f71a8352cad3b0aa8f3eac5fa5a314595d8dc4d7b121f9304ddec1c",
+  "ProofCommit": "installed-semantic-sha256:9aab5c1254efa9bed1c557ffcd9f41cd0d8c6c68cf3a1a8862282b71654adf6f",
+  "ComparisonMethod": "None: an installed folder has no second source.",
+  "Roots": {
+    "GameProfiles": {
+      "AssetCount": 2594,
+      "ProofCount": 0,
+      "Compared": 0,
+      "Mismatches": 0
+    },
+    "GameSetup": {
+      "AssetCount": 389,
+      "ProofCount": 0,
+      "Compared": 0,
+      "Mismatches": 0
+    },
+    "Metadata": {
+      "AssetCount": 2592,
+      "ProofCount": 0,
+      "Compared": 0,
+      "Mismatches": 0
+    }
+  },
+  "TotalCompared": 0,
+  "TotalMismatches": 0,
+  "Result": "NOT_APPLICABLE"
+}

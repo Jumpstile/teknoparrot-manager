@@ -682,6 +682,57 @@ Expected result: the line says `OK`, or only the games that cannot be played yet
 - A LaunchBox game with a `Needs setup` note, or in a `Needs setup` playlist, cannot start yet because its game file, firmware or BepInEx is missing. The note and the playlist entry go away by themselves when that is fixed.
 - A game set to Internal storage (Golden Tee Live and PGA Tour games from any year, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball) needs no PostgreSQL. The health check shows it as `Game database: OK`. Start the game once so it makes its own database.
 
+## A game is not found or points to the wrong place
+
+Symptom: a game will not start, or TeknoParrot Manager says it cannot find a game. This often happens after you move your games to a new folder or drive. In Library Health Check you may see `Left unchanged, not pointed anywhere (N games):` or `N games could not be matched to a game folder:`.
+
+Cause: the game's saved path is empty, or it points to a file that is no longer there. TeknoParrot Manager looks for the same game and the same version in the new place. It saves a path only when exactly one file clearly fits. It never points a game at a different game or a different version, even if the program file has the same name. It also never points two games at one folder, unless they are a known twin pair (a TeknoChi game and its older matching game). A typical reason is `this version of the game is not on this drive (a different version of the game is; TeknoParrot Manager will not point this game at it)`.
+
+Fix:
+
+1. From the main menu, choose **14) Library Health Check**.
+
+   You will see: the health check screen with its repair choices.
+
+   Next: type **R** and press **Enter**.
+
+2. Type **R** to try automatic path repair. This search only reads. It changes nothing.
+
+   You will see: `Candidate paths found (no profile changes made):` with a "before" and an "after" path for each game. Games that cannot be pointed anywhere safely are listed under `Left unchanged, not pointed anywhere (N games):`, each with a reason.
+
+   Next: read the reasons, and check that the new paths look right.
+
+3. Type **Y** to apply only the reviewed paths, or **N** to leave everything unchanged.
+
+   You will see: `Repair result:` with how many games were repaired and how many still need you, and a `Safety backup:` line with the backup folder.
+
+   Next: if some games are still listed, go to step 4.
+
+4. For games that still could not be matched, read the list. Each game shows its reason and a status line such as `Registered: yes. Game file found: no. Right version: unknown. Ready: no.` Press **D** for Details to see the old saved path and the files that were checked.
+
+   You will see: `Fix`, `Remove`, `Skip`, `Ignore` and `Details`.
+
+   Next: type **F**, **R**, **S**, **I** or **D** and press **Enter**. Then answer "Which games?" with **A** for all, or numbers like `1,3` or `2-4`.
+
+5. Choose what fits each game:
+
+   - **F (Fix)**: pick the game file yourself. Only the saved path of that game changes.
+   - **S (Skip)**: leave the game out of this run. Nothing is changed. It comes back next time.
+   - **I (Ignore)**: leave the game out of later steps until you turn it back on. The game stays registered.
+   - **R (Remove)**: take the game out of TeknoParrot. Your game files are never deleted. TeknoParrot Manager makes a safety backup of your TeknoParrot profiles first, then deletes only that game's registration file after you answer **Y**. Plain **Enter** means no. If the backup cannot be checked, nothing is removed.
+
+   You will see: the result for each choice. A `Safety backup:` or `Safety backup (to undo):` line shows the backup folder.
+
+   Next: run Library Health Check again.
+
+Expected result: each game is fixed by you or by a safe repair, skipped, ignored, or removed. Nothing is ever pointed at a different game or version.
+
+### More detail
+
+- There is no Undo key on the Remove screen. The safety backup folder is the way back. Keep the folder path it shows.
+- TeknoParrot Manager does not remember removed games. If the game's files are still in your games folder later, the next scan registers it again.
+- If your version of the game is not on the drive, copy or extract that version first. Then run Library Health Check again.
+
 ## A game works in TeknoParrot but not from RetroBat
 
 Starting a game from TeknoParrot and starting it from RetroBat are two different ways to start it. RetroBat keeps its own game list and starts the game its own way. TeknoParrot keeps the controls and the input type (RawInput is the mouse and keyboard type). A game that works one way can still fail the other way.

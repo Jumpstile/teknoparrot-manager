@@ -1,6 +1,6 @@
 # Quick Start
 
-Get TeknoParrot Manager (TPM) running in a few minutes. This page is for v1.0 RC9.4, the latest published release. See the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases).
+Get TeknoParrot Manager (TPM) running in a few minutes. This page is for v1.0 RC9.5. The latest published release is v1.0 RC9.4. See the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Test one game after each run.
 
@@ -67,7 +67,7 @@ You can also double-click `TeknoParrot-Manager.bat`.
 **3.** First run:
 
 1. You see `Welcome to TeknoParrot Manager`. Press Enter.
-2. TPM asks for the "TeknoParrot folder". It looks for `TeknoParrotUi.exe`. You see `Auto-detected TeknoParrot at: ...` and `Use this path? (Y/N)`. Press `Y` to accept. If it finds several, pick a number. If it finds none, it asks for the folder: type the path, type `B` to browse, or type `Q` to quit. TPM never offers a folder that has no `TeknoParrotUi.exe`. If you close the browse window or type a wrong folder, it asks again.
+2. TPM asks for the "TeknoParrot folder". You see `Looking for TeknoParrot on your drives...`. It searches every drive in your PC (not network drives) for `TeknoParrotUi.exe` and says which drives it searched. Each install it finds is a numbered row with the drive letter, the full path and the version. Type the number of the one you want, `R` to search again, `B` to type or browse for the folder, or `Q` to quit. Nothing is changed until you choose. If it finds none, you see `No TeknoParrot folder was found (a folder needs TeknoParrotUi.exe in it).`; type `B`, then type the path, type `B` to browse, or type `Q` to quit. TPM never offers a folder that has no `TeknoParrotUi.exe`. If you close the browse window or type a wrong folder, it asks again.
 3. Next it asks for the "Staging folder for game files" (where unpacked games go). It has the same choices: type a path, or type `B` to browse. Then it asks about folder naming and the DAT list. The default answers are fine if you are not sure.
 
 **Later runs.** You see `TeknoParrot Manager found your saved settings.` and `Use these settings? (Y/N, D = show them)`. Press `Y` to keep them, `D` to look first, or `N` to answer the first-time questions again. `N` deletes nothing.

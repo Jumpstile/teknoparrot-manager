@@ -2,13 +2,125 @@
   TeknoParrot Manager  --  CHANGELOG
   Author: Jumpstile
 ===============================================================================
-  Newest version first. RC9.4 is the latest published version. RC9.3 is the
+  Newest version first. RC9.5 is in progress. RC9.4 is the latest published version. RC9.3 is the
   previous published version. RC9.2 came before it. RC8 was a tester build and
   was never published. Final Version 1.0 comes later.
 
   TeknoParrot Manager is for beginners and is also useful if you already know
   TeknoParrot. It hides complexity, not detail: repeatable bulk steps, previews,
   backups before changes, a log of what was done. See docs\ADVANCED-USERS.md.
+
+  v1.0 RC9.5 (changes since RC9.4)
+  ----------------------------------------------------------------
+  - Controller layout, choice 5 (My learned arcade controls): before you
+    are asked to keep or change it, TPM now shows the keys it saved, grouped
+    as Player 1, Player 2 (and 3 or 4 if used), menu and admin controls, and
+    the trackball. A game's own DirectInput button now shows its button or
+    axis number and device when the game file names them.
+  - Learn my arcade buttons can now learn a trackball (left and right, up and
+    down) by watching the pointer move, then asks which device is your
+    trackball (TPM reads it from the Windows Raw Input device list). For
+    games whose own file has a single trackball control, it shows which games
+    will get your trackball and, only after you say Y, writes the trackball
+    device into that one control. A saved copy of your game settings is made
+    first, the file is read back, and Undo puts it back. A trackball that is
+    already set is kept unless you say to replace it, and a game whose file
+    looks different is left alone and listed to set up by hand. If TPM cannot
+    read the device, it writes nothing. It does not switch anything to
+    XInput. Not verified with a real trackball.
+
+
+  - First-run setup now searches every local drive for TeknoParrot (the
+    drive root, the folders in it, and the usual game and emulator folders),
+    not only a few fixed folders. It shows each install it finds with its
+    drive letter, full path and version, says which drives it searched, and
+    lets you pick one, search again, browse, or quit. Nothing is changed
+    until you choose.
+
+  - ReShade setup: the result now shows the first check (ready and left
+    out) and the last check before installing separately. Every game that
+    was ready but skipped at the last check is named with a plain reason,
+    and the protected count says how many were found at each check. A game
+    whose program type could not be read is no longer described as 32-bit
+    in the advice.
+
+  - Game path repair no longer offers another edition or version of a
+    game just because its game file has the same name (for example Tekken 7:
+    Fated Retribution 1.06.00 and the Round 2 4.20 folder). A game whose
+    old folder name only lacks a version or [TP] tag is found again.
+  - Games that could not be matched to a folder are listed with their full
+    name, version and year, with the choices Fix, Remove, Skip, Ignore and
+    Details for one game, several or all. Remove makes a backup first and
+    never deletes game files. Ignore is saved until you turn it back on.
+  - After registration and repair, ReShade, GPU Compatibility Fix,
+    dgVoodoo2 and the controller steps use one list of ready games, so a
+    game that is unresolved, on a drive that is not connected or ignored is
+    named once instead of warned about in every step.
+
+  - Required patches: Dragon Dance now has a patch for its newer
+    iDmacDrv32.dll, read from the RAR inside "Dragon Dance.rar" (7-Zip must
+    be installed; a RAR inside a RAR now works). It saves a copy and can be
+    undone. Block King's patch is listed as "not ready yet".
+
+  - Required patches: TeknoParrot Manager can now copy a whole folder of
+    patch files into a game (or into your TeknoParrot folder), all files
+    together or none, with a saved copy of every file it replaces and one
+    Undo. It never downloads the files. The House of the Dead EX and Tatsunoko
+    vs. Capcom use it, but stay "not ready yet" until the real files are
+    measured.
+
+  - Library health repair (R) now points a game only at the same game and
+    version. It no longer picks a different version's folder just because
+    it holds a file with the same name and path. Games that are not on the
+    drive, or whose game file is missing from the right folder, are listed
+    with a plain reason and left unchanged. A game file one folder deeper
+    (for example game.bin) is now found.
+  - When a game could not be registered, the result now counts it, names it
+    and says what to do next (close TeknoParrotUI, run Register Games
+    again). The saved ACTION REQUIRED list names these games too, and the
+    log's "Completed" line ends with Failed=<number>.
+  - If AutoSync unpacked nothing because ZIP files failed, it says so and
+    points to View Log, instead of saying nothing new was extracted.
+  - The outside controller list check holds a game back when a label in the
+    list names a different control (for example Start on a Coin control) or
+    when the game file changed since you last checked the same list.
+    -MappingEvidenceCommit saves which version of the list you checked.
+  - Required patches: when a game has several patch versions and nothing on
+    your PC tells them apart, the menu asks you to pick one (Back cancels).
+    The Fast and the Furious: Drift (screen size) and Chase H.Q. 2 (region)
+    can now be installed. Only the version you pick is installed, with the
+    usual exact-file check, backup, receipt and undo.
+  - Ghost Squad Evolution: the AMD or Nvidia shader fix can now be installed.
+  - The note about TeknoParrot's own first-time setup says "TeknoParrot
+    Manager" in full.
+  - Any error you could see on the screen during a run is also written to
+    the TeknoParrot Manager log, so it is in the support package too.
+  - Health Check no longer stops on a game that uses Internal storage.
+  - Learn my arcade buttons: a control you skip loses its old saved key when
+    you save.
+  - dgVoodoo2 names the drives that are not connected and points you to
+    Library health check. A game that already had every file is named, and
+    the screen says its files were kept, not checked. The ReShade result
+    screen says "Press Enter to continue to dgVoodoo2".
+  - TeknoChi games (the new SEGA Chihiro profiles) are no longer reported as
+    an unknown game type in Library health check. TeknoParrot has not
+    released them yet, so they show as "not available yet".
+  - The status line at the bottom of a screen repaints in place instead of
+    erasing and redrawing, and when a console cannot pin it, all of its
+    lines (including what happened to your files) are shown, not only the
+    first.
+  - Before it registers games, TeknoParrot Manager waits up to 30 seconds
+    for TeknoParrot to make its first game profile. If none appears, it
+    says to open TeknoParrot once and run again.
+  - If PostgreSQL recovery stops, the screen and the log now say which part
+    stopped: RecoveryPolicyApply (putting the PostgreSQL login settings file
+    back) or RecoveryServiceStart (starting PostgreSQL again), and what to
+    do next.
+  - Library health check: TeknoChi games now need the same Chihiro startup
+    files as the older Chihiro games, and it names the missing ones.
+  - If TeknoParrot has game profiles for a newer emulator (TeknoZR107) but
+    that emulator is not on your PC, Library health check says TeknoParrot
+    needs an update. Update TeknoParrot, then run the health check again.
 
 
   v1.0 RC9.4 (changes since RC9.3)
@@ -396,9 +508,8 @@
   - The GPU fix at the end of first-time setup shows the same result as
     the menu. A game on a drive that is not connected is "skipped" and the
     drive letter is named; Library health check (menu 13) repairs paths.
-  - The README and User Guide say the online list of TeknoParrot profiles
-    is used only when it can be reached (it cannot yet: the repository is
-    not public). Otherwise your own TeknoParrot profiles are used.
+  - TeknoParrot Manager reads game profiles only from your own TeknoParrot
+    GameProfiles folder.
   - All screens and guides use American spelling.
   - The graphics card check is much faster and never goes silent.
   - The support package file name uses your PC's own clock.
@@ -537,254 +648,42 @@
   ----------------------------------------------------------------
 
   Updates
-  - Check for Updates installs the whole release (scripts, data and tools),
-    not only the main script. It downloads the update and checks it with
-    SHA-256, looks inside the ZIP first, backs up every file it replaces,
-    installs it and checks it. If anything goes wrong, every file is put
-    back. It says so when there is not enough free space. Your own files
-    and older files the release no longer has are never deleted. Then you
-    start TeknoParrot Manager again yourself.
-  - If an update was cut off (power loss or a closed window), the next
-    start says so and tells you how to get the old files back from the
-    UpdateBackups folder. It never deletes anything for you.
-  - Older builds cannot do this. Install RC8.1 or newer by hand once: download
-    the ZIP from the Releases page and extract it over your old folder.
-  - A ZIP without the script, or a CPS3 ZIP that cannot be read, is
-    refused. If the Eggman page has no DAT file, it says so.
-  - The updater says the old version was put back only when it checked that
-    it was. Sync-And-Run says so when it could not check for updates. The
-    update check works from another folder with a relative script path.
+  - Check for Updates installs the whole release (scripts, data and tools).
+    It downloads the update and checks it with SHA-256, looks inside the ZIP
+    first, backs up every file it replaces, installs it and checks it. If
+    anything goes wrong, every file is put back. Your own files are never
+    deleted. Then you start TeknoParrot Manager again yourself.
+  - If an update was cut off, the next start says so and tells you how to
+    get the old files back from the UpdateBackups folder.
+  - Older builds cannot do this. Install RC8.1 or newer by hand once:
+    download the ZIP from the Releases page and extract it over your old
+    folder.
 
   Screens and messages
-  - The first question asks for your TeknoParrot folder. Type it, press B
-    to browse or press Q to quit. Closing the browse window without
-    choosing asks the question again. A folder without TeknoParrotUi.exe is
+  - The first question asks for your TeknoParrot folder. Type it, press B to
+    browse or press Q to quit. A folder without TeknoParrotUi.exe is
     explained in plain words and asked again.
   - When TeknoParrot's own first-time setup is not finished, the Action
     Required list says so once, with the path to TeknoParrotUi.exe and the
-    steps left: choose the DAT file, scan for games, set up controls.
+    steps left.
   - Result screens are short and use plain words. File names, folders and
     codes are under Details (press D) and in the log.
-  - Progress bars look like bars, change color as they fill, show finished
-    counts and no longer wrap in a narrow window. A long quiet wait says
-    "still working". A step that failed ends red.
-  - The console is not resized inside Windows Terminal. Start-up does not
-    wait for a key press about your custom rules. Q closes the program. The
-    main menu works in a very short window.
-  - Saying N to "Tidy up now?" leaves your settings as they were and does
-    not block the next start. An older report beside the script is left
-    where it is when a newer one exists.
+  - Progress bars look like bars, change color as they fill and no longer
+    wrap in a narrow window.
   - The guides were rewritten for a first-time user and match the real
-    screens. The two launcher files (.bat) say where the log file is. All
-    screens, guides and notes use American English spelling.
-  - Folder prompts accept a path pasted with quotes and a whole drive such as
-    D:\. Canceling the staging-folder picker asks again. Back in Reset and
-    Restore returns to its menu.
+    screens. All screens, guides and notes use American English spelling.
 
-  Testing
-  - A new read-only validation report (-ValidationReport) checks a copy
-    and one TeknoParrot folder without any questions. It shows the version,
-    your games, which games still need PostgreSQL settings, how many
-    profiles support RawInput or RawInputTrackball, and any warnings. It
-    changes nothing and can save the result as one JSON file you name. See
-    the README for the exit codes.
+  Testing and games
+  - A read-only validation report (-ValidationReport) checks a copy and one
+    TeknoParrot folder without any questions and changes nothing.
   - After you register a game that needs PostgreSQL, TeknoParrot Manager
     asks once if you want to set it up now. Saying no changes nothing.
+  - Registering now finds PCSX2x6 games by their .acgame files.
+  - Library Health Check has a Game support row. It says when a game needs
+    you.
+  - The graphics card warning list has five more games that do not work on
+    an Intel graphics card.
 
-  Games and folders
-  - Registering now finds PCSX2x6 games: their .acgame files were never
-    looked at before, so those games did not register by name.
-  - Library Health Check has a Game support row. It says when a game
-    needs you (game file missing, second game file not chosen, PostgreSQL
-    settings missing). Details show the counts for each emulator.
-  - AutoSync no longer stops when all your game ZIPs together are bigger
-    than your free space. It tells you that is OK, and you pick only some
-    games. Run it again later for the rest. Space is still checked before
-    each game, and a game that does not fit is skipped with nothing changed.
-  - AutoSync says when it skips a .7z or .rar archive (it only unpacks
-    .zip files) and tells you to unpack it yourself, then use Register only.
-  - AutoSync leaves a game folder alone when its ZIP did not change, so
-    saves and settings you made are not replaced. When a changed ZIP does
-    replace a folder, every file in it that is extra or different from the
-    ZIP is first copied to Backups\AutoSyncReplaced. If those files cannot
-    be saved, or no Backups folder is set up, that game is not updated and
-    nothing is changed for it.
-  - AutoSync only extracts the ZIPs named in onlySync. The ZIP picker lists
-    and extracts a game once when both source folders hold it.
-  - A familyOverride in the overrides file also applies to the games
-    controls are copied from, so a game set to "spinner" finds a reference
-    game instead of "no usable reference game".
-  - Games in very long folder paths (over 259 characters) are found, read
-    and configured everywhere. Installing add-ons into one says the path is
-    too long and changes nothing.
-  - A game whose 32-bit or 64-bit type cannot be read is not counted as
-    ready, and force feedback does not give it a 64-bit plugin.
-  - ReShade works with both 32-bit and 64-bit games. Games that run through
-    BudgieLoader (a Linux-style game format) are skipped for now. ReShade does
-    not show its welcome window, counters or messages when a game starts.
-  - Registering games and repairing paths keep a second executable path that
-    points at a file that exists. A manual path repair checks its safety
-    copy first and leaves a profile TeknoParrot changed meanwhile alone.
-    If saving a profile fails after Windows removed the old file, the new
-    file is kept and the message says where it is.
-  - Region setup (main menu item 10) sets the region of your games. After
-    new games are registered you are also asked once which region to use.
-    Only regions the games really offer are listed. A game never gets a
-    region it does not have, and a region you chose before is kept unless
-    you change it in Region setup. You can pick all games or some, and go
-    back to the automatic region. A restore point is saved first.
-  - Missing startup files (firmware for PCSX2x6 games, four files for
-    Chihiro games, PlayStation 3 firmware for RPCS3 games) are found before
-    you start, and the screen says which games will not start. Files from
-    your own collection are copied after a check against the Eggman DAT
-    list; the PlayStation 3 firmware is installed from the firmware file in
-    your collection. Nothing is downloaded or supplied. Optional CPS3
-    first-boot files are copied only when the whole set matches. Play!
-    games are checked for their own settings file.
-  - Required game patches can be up to 512 MB, can be 7z or RAR files when
-    7-Zip is installed, and work on long paths. Free space is checked first.
-    You are asked only for the ZIP of the game version you have. AMD and
-    NVIDIA patches work with an extra Windows display adapter. With two real
-    graphics cards you are asked once which one the game uses. Undo works
-    with a trailing backslash and ignores the version you never installed.
-  - Game notes (what each game needs: firmware, BepInEx, administrator,
-    setup program) and the LaunchBox import file are saved in the Reports
-    folder. If notes cannot be saved, you are told.
-  - A saved DAT list is kept when an old DAT path is left in the overrides
-    file. A DAT file set only there is used and the start-up question is
-    skipped. Canceling the DAT save window downloads nothing. Two ZIP
-    folders, one inside the other, do not block the DAT download.
-  - With two TeknoParrot folders on one PC, your settings are found and the
-    "copy from another TeknoParrot folder" step finds both.
-
-  ReShade, dgVoodoo2, force feedback and crosshairs
-  - ReShade has 25 approved effects and 17 profiles for arcade play: Original,
-    11 CRT looks and 5 other looks. Each has a short description and a rough
-    light, medium or heavy cost. The preview shows approximations. Its
-    drop-down follows the numbered list, and a choice is only used when you
-    confirm it.
-  - You can change the ReShade look at any time and undo it for one game or
-    all games. If a game also uses TeknoParrot's own CRT look, you are asked
-    whether to keep it (the default) or turn it off for that game.
-  - The ReShade result names each game that is left alone, and why, under
-    Details. A game with only a leftover ReShade.ini can be replaced; the
-    old file is copied first so you can undo it. Removal says so when the
-    undo copy could not be finished.
-  - dgVoodoo2 copies the dgVoodoo.conf from your dgVoodoo2 folder to each
-    game that has none. A game's own file stays, and a per-game preset wins.
-  - Force feedback setup keeps a plugin it just installed and updates one
-    you installed earlier through TeknoParrot Manager. A file that is not
-    ours is never overwritten.
-  - Crosshairs for ElfLdr2 go only into the real loader folder. Every
-    skipped game is named with the reason, and a skipped game does not make
-    a finished setup say "was not completed". The PCSX2 first-run question is
-    asked once. The force feedback count never goes over the number of games.
-  - When GitHub answers but a download is missing, the screens say that and
-    do not blame your internet.
-
-  PostgreSQL setup and restore
-  - When setup stops, it says what happened to your data: put back and
-    checked, or could not be checked. After a repair that stopped part way
-    it says some things may have changed and points to View Log. A failed
-    install says whether the Windows installer had already run. A rollback
-    removes only a database made in that run.
-  - Password prompts can be left by pressing Enter.
-  - Setup keeps a note about databases it is building. If the PC stops in
-    the middle, the next setup removes only the half-built database and
-    builds it again.
-  - Every game database is made ready during setup and tested with the
-    game's own settings: it must connect and hold its tables. Nothing is
-    left for TeknoParrot to create when you first start a game. A game
-    with no starting database file (pg_backup) cannot be made ready: it
-    is left out and named, and every other game is still set up.
-  - A game with several identical backup files gets its database from the
-    newest one, in setup and in the [I] rebuild. The confirm screen, Details
-    and the log say which file was used. If it does not restore, setup stops
-    and puts everything back. A backup with no ".backup" ending works, and
-    notes such as readme.txt are never used as a backup.
-  - A backup that is cut short is never offered for restore. Five known
-    warnings at the end of a game backup do not undo setup; Details name
-    the links between tables that could not be made.
-  - Setup names each game profile that needs a fix and never writes over a
-    profile saved while it ran. It asks before touching a game that points
-    at another server, port or user. Choosing K leaves that profile alone.
-  - Before the Windows permission box, you are told to approve it with an
-    administrator account of this PC. If it fails twice, "Try again" stops
-    and says why.
-  - PostgreSQL tools have time limits, so a stuck tool counts as failed. A
-    short password such as "1" works. A failed check does not reset the
-    password. Capital letters in database names work.
-  - Two TeknoParrot Manager windows cannot change PostgreSQL at once, and a
-    database made by another window is not removed. A database just created
-    is not counted as "Already set up".
-  - A restore keeps the database's text encoding when it is known. A backup
-    that is only locked says "could not be read, try again".
-
-  Backups and undo
-  - Restore points are made at start-up. A Reset and Restore menu keeps
-    working after TeknoParrot is moved, and Restore all brings back
-    TeknoParrot Manager's own settings, even after the tidy-up moved them.
-  - Restore backup has a new choice, Rebuild one game from its ZIP. It puts
-    a broken game folder back to exactly what its ZIP holds. The ZIP is
-    unpacked and checked first (and checked against the DAT list when the
-    game is in it). Your old folder is not deleted: it is kept aside, and
-    you can put it back or delete it from the same menu.
-  - LaunchBox: games can be added directly. It asks first, waits for
-    LaunchBox to close (it never closes it) and saves a checked copy of each
-    file before writing. Restore lists UserProfiles, Postgres and LaunchBox
-    backups, and a backup from another folder needs its own confirmation.
-    Restore backup does not list the copies made when ReShade is removed.
-  - PostgreSQL recovery files are private to your Windows account. Older
-    recovery folders move into TeknoParrotManager\Backups.
-  - BepInEx installs and updates keep a verified backup and roll back only
-    what TeknoParrot Manager made. An update that could not remove its
-    temporary files is shown as finished, with a note. A finished game mod
-    update leaves no spare copy in the game folder.
-  - If the registration record cannot be read, the file is left as it is and
-    you are told. AutoSync only calls its profile backup complete when it
-    matches your live profiles. A short registration list is saved in its own
-    file, and ACTION REQUIRED does not say a list was saved when none was.
-
-  Library Health check
-  - It says "Could not check" and asks for attention, instead of OK, when
-    it could not read the PostgreSQL service, the game profiles, the startup
-    files or a game, or did not look at an area. Games on a drive that is not
-    connected tell you to reconnect it. A game in a very long path counts as
-    not fully checked.
-  - A damaged game profile is named as "could not be read" and gets no path
-    repair. It does not stop the LaunchBox preview or add for other games.
-    A path with characters Windows does not allow is named "not a valid
-    path". Paths with spaces around them are read correctly.
-  - Choosing ReShade in the check starts ReShade setup.
-
-  Support package
-  - Create Support Package makes one cleaned ZIP with logs, Windows errors,
-    PC facts and full game names. No game programs, crash dumps or passwords.
-  - A package with missing information says "partial" and names what is
-    missing. An empty log file is not called a failure. It keeps the newest
-    part of a main log over 5 MB, lists each game's real controls and counts a
-    profile snapshot only if it is inside. A complete ZIP that left a temporary
-    folder behind says it is ready to send and names the folder under Details.
-  - The package now says how the last finished job ended, such as a
-    setup that stopped, even after you restarted. It keeps the last few
-    step results with personal folder names removed.
-
-  Other
-  - Missing startup files are not listed under ACTION REQUIRED after they
-    were copied. The run recap counts a DAT list you picked at start-up.
-  - If the only thing left is a game type that has no example game for
-    copying controls, the next step is still shown and saved.
-  - Game folders that match no TeknoParrot profile are now described
-    more carefully: the main file may just have a different name.
-  - Release packages hold only the files users need. On a slow PC, a late
-    drive check does not show a wrong "could not tell" warning.
-  - The game notes file now also lists the guide's setup steps, graphics card
-    notes and extra files for your registered games, not only the free-text
-    notes. It also names the extra archives a game needs (you bring your own
-    copy; none is downloaded), a linked profile, and a game the guide lists as
-    broken or only partly working. Nothing in it is applied for you.
-  - The graphics card warning list has five more games that do not work
-    on an Intel graphics card.
 
   v1.0 RC7  (2026-08-22)
   ----------------------------------------------------------------

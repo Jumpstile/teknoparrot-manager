@@ -1,0 +1,20 @@
+{
+  "RecordSchemaVersion": "1.0.0",
+  "Repository": "installed-folder",
+  "Commit": "installed-semantic-sha256:9aab5c1254efa9bed1c557ffcd9f41cd0d8c6c68cf3a1a8862282b71654adf6f",
+  "Tree": "",
+  "Role": "Content read from an installed TeknoParrot folder; no independent source proof exists",
+  "CatalogPaths": {
+    "GameProfiles": "GameProfiles",
+    "GameSetup": "GameSetup",
+    "Metadata": "Metadata"
+  },
+  "SemanticEquality": {
+    "GameProfilesCompared": 0,
+    "GameSetupCompared": 0,
+    "MetadataCompared": 0,
+    "MismatchCount": 0
+  },
+  "SkippedFiles": [],
+  "RuntimeScope": "None. Read-only catalog capture."
+}

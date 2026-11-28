@@ -59,10 +59,19 @@ function Get-TpmCoverageCheckTables {
         $h = & $table $name
         if ($null -eq $h) { return @() }
         $needs = @('Files', 'RequiredFiles', 'FilesFromProfile', 'InstallVia')
-        return @($h.KeyValuePairs | Where-Object {
+        $direct = @($h.KeyValuePairs | Where-Object {
                 $row = $_.Item2.Find({ param($n) $n -is [System.Management.Automation.Language.HashtableAst] }, $true)
                 $null -ne $row -and @($row.KeyValuePairs | Where-Object { $needs -contains [string]$_.Item1.Value }).Count -gt 0
             } | ForEach-Object { [string]$_.Item1.Value })
+        # A row that says SameAs <another row> (TeknoChi -> cxbxr) is checked exactly when that row is.
+        $aliases = @($h.KeyValuePairs | Where-Object {
+                $row = $_.Item2.Find({ param($n) $n -is [System.Management.Automation.Language.HashtableAst] }, $true)
+                $null -ne $row -and @($row.KeyValuePairs | Where-Object {
+                        [string]$_.Item1.Value -eq 'SameAs' -and
+                        @($_.Item2.FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true) | Where-Object { $direct -contains [string]$_.Value }).Count -gt 0
+                    }).Count -gt 0
+            } | ForEach-Object { [string]$_.Item1.Value })
+        return @($direct + $aliases)
     }
     $gpu = @{}
     $gpuTable = & $table 'GpuIncompatibleGames'

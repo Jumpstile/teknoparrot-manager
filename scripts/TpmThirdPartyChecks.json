@@ -19,9 +19,9 @@
       "Need": "A game.exe made for the JConfig loader (optional)",
       "CanCheck": false,
       "Checks": [],
-      "Message": "Only if you want the JConfig setup: use the JConfig game.exe from your own copy of the game. TeknoParrot Manager cannot tell which game.exe you have and never replaces it.",
+      "Message": "Only if you want the JConfig setup: use the JConfig game.exe from your own copy of the game. The modified game.exe is inside a ZIP that TeknoParrot Manager cannot open, so there is no automatic setup for it. TeknoParrot Manager cannot tell which game.exe you have and never replaces it.",
       "GuideLink": "",
-      "Details": "Guide gives only checksums: clean game.exe CRC32 D81EDC9D, JConfig game.exe CRC32 1E882C69. TPM does not check CRC32 values. The guide also says the game may not start on some PCs."
+      "Details": "Guide gives only checksums: clean game.exe CRC32 D81EDC9D, JConfig game.exe CRC32 1E882C69. The modified game.exe has a SHA-256 that starts 5F232417 and sits inside a ZIP that .NET cannot open, so TPM cannot read it and writes no recipe. TPM does not check CRC32 values. The guide also says the game may not start on some PCs."
     },
     {
       "Profile": "Castlevania",
@@ -44,16 +44,6 @@
       "Details": "Guide: needs RivaTuner at 60 FPS. Guide note of 2026-11-24: the game window opens briefly, then closes."
     },
     {
-      "Profile": "Deathsmiles2",
-      "Game": "Deathsmiles II: Makai no Merry Christmas",
-      "Need": "A patched cvgame.exe and, if you like, dgVoodoo",
-      "CanCheck": false,
-      "Checks": [],
-      "Message": "If your copy has problems, it is probably a patched copy. Use a cvgame.exe that works from your own copy of the game. Optional: dgVoodoo can reduce graphics glitches. TeknoParrot Manager cannot check either one, never replaces the exe and never installs anything.",
-      "GuideLink": "",
-      "Details": "Guide gives only checksums: original (MAME) cvgame.exe CRC32 6d6755f8, working hacked cvgame.exe CRC32 f9f619ae. Neither file is in the DAT files, so no SHA-256 is known."
-    },
-    {
       "Profile": "DragonDanceNesica",
       "Game": "Dragon Dance for NESiCAxLive",
       "Need": "The replacement Game_liong.exe and the DDrawCompat ddraw.dll in the game folder",
@@ -72,9 +62,9 @@
           "Description": "ddraw.dll (DDrawCompat) is missing from the game folder. Get it yourself and put it in the game folder."
         }
       ],
-      "Message": "TeknoParrot Manager checks that Game_liong.exe and ddraw.dll are in the game folder. If one is missing, get it yourself from your own copy or from the DDrawCompat project, and put it in the game folder. TeknoParrot Manager never downloads it.",
+      "Message": "TeknoParrot Manager checks that Game_liong.exe and ddraw.dll are in the game folder. If one is missing, get it yourself from your own copy or from the DDrawCompat project, and put it in the game folder. TeknoParrot Manager can replace iDmacDrv32.dll for you from your own Dragon Dance.rar (7-Zip is needed), but there is no automatic setup for Game_liong.exe, because no source for the changed Game_liong.exe was found. TeknoParrot Manager never downloads anything.",
       "GuideLink": "",
-      "Details": "Guide: new exe CRC32 B2836DB7; the game now uses DDrawCompat as a fix. TPM checks only that the files exist, not their contents. Neither file is in the DAT files."
+      "Details": "Guide: new exe CRC32 B2836DB7; the game now uses DDrawCompat as a fix. The source of the modified Game_liong.exe was not found (a CRC of B2836DB7 was not found in any patch file), so TPM writes no exe recipe. The iDmacDrv32.dll in Dragon Dance.rar is a recipe. TPM checks only that the files exist, not their contents. Neither file is in the DAT files."
     },
     {
       "Profile": "FarCryParadiseLost",
@@ -85,16 +75,6 @@
       "Message": "If the videos do not play, install the video codec named on the TeknoParrot wiki. TeknoParrot Manager cannot check for it and never installs it.",
       "GuideLink": "https://teknoparrot.com/wiki/compatibility/FarCryParadiseLost.htm",
       "Details": "Link is from the guide. Get it yourself; TPM does not open or download it."
-    },
-    {
-      "Profile": "FNFDrift",
-      "Game": "The Fast and the Furious Drift",
-      "Need": "A resolution-patched sdaemon.exe (optional)",
-      "CanCheck": false,
-      "Checks": [],
-      "Message": "Only if you want a higher resolution: use a patched sdaemon.exe from your own source. The menus stay small at higher resolutions. TeknoParrot Manager cannot check which sdaemon.exe you have and never replaces it.",
-      "GuideLink": "",
-      "Details": "Guide: replace sdaemon.exe with the patched version you want. No checksum is given and the file is not in the DAT files."
     },
     {
       "Profile": "FZeroAX",
@@ -137,6 +117,42 @@
       "Details": "Guide: REGSVR32 /s XAUDIO2_5.DLL and REGSVR32 /s XACTENGINE3_5.DLL before the first start. This changes the Windows registry, which TPM does not do."
     },
     {
+      "Profile": "PigsMightFly",
+      "Game": "Pigs Might Fly",
+      "Need": "Two Sega folders, each with game.ini and Install.ini",
+      "CanCheck": true,
+      "CheckRoot": "DriveRoot",
+      "Checks": [
+        {
+          "Id": "pigsmightfly-shell-game",
+          "Type": "File",
+          "Path": "Sega/Shell/game.ini",
+          "Description": "game.ini is missing from the Sega\\Shell folder."
+        },
+        {
+          "Id": "pigsmightfly-shell-install",
+          "Type": "File",
+          "Path": "Sega/Shell/Install.ini",
+          "Description": "Install.ini is missing from the Sega\\Shell folder."
+        },
+        {
+          "Id": "pigsmightfly-game-game",
+          "Type": "File",
+          "Path": "Sega/PigsMightFly/game.ini",
+          "Description": "game.ini is missing from the Sega\\PigsMightFly folder."
+        },
+        {
+          "Id": "pigsmightfly-game-install",
+          "Type": "File",
+          "Path": "Sega/PigsMightFly/Install.ini",
+          "Description": "Install.ini is missing from the Sega\\PigsMightFly folder."
+        }
+      ],
+      "Message": "The game needs two folders, Sega\\Shell and Sega\\PigsMightFly, and each one must have a game.ini and an Install.ini. TeknoParrot Manager looks for them at the top of the drive the game is on and tells you which file is missing. Get the missing files from your own copy of the game. TeknoParrot Manager never downloads them and never changes them.",
+      "GuideLink": "",
+      "Details": "Both Sega\\Shell and Sega\\PigsMightFly must contain game.ini and Install.ini. The guide text does not say which drive holds the Sega folder; TPM looks at the root of the game's own drive (CheckRoot DriveRoot). TPM checks only that the files exist, not their contents."
+    },
+    {
       "Profile": "Showdown",
       "Game": "Showdown",
       "Need": "The Rapture3D audio software installed",
@@ -145,6 +161,16 @@
       "Message": "The game needs Rapture3D audio software. The installer is in the Rapture3D audio installer folder inside your game folder. Run it yourself. TeknoParrot Manager cannot see if it is installed and never runs installers.",
       "GuideLink": "",
       "Details": "Guide text. The installer sits in the game folder, but whether it was run is stored in Windows, which TPM cannot see."
+    },
+    {
+      "Profile": "StreetFighterVTypeArcade",
+      "Game": "Street Fighter V: Type Arcade",
+      "Need": "A modified .pak file from the guide",
+      "CanCheck": false,
+      "Checks": [],
+      "Message": "The guide asks for a modified .pak file. It is not in the game sets (they hold only the pakchunk files), so there is no automatic setup. Get it yourself and follow the guide for where it goes. TeknoParrot Manager cannot check it and never downloads or replaces it.",
+      "GuideLink": "",
+      "Details": "The modified .pak is in neither DAT file nor in the set ZIPs; the sets hold pakchunk0..N only. TPM writes no recipe without the file."
     },
     {
       "Profile": "SR3",

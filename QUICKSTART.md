@@ -1,6 +1,6 @@
 # TeknoParrot Manager - Quick Start
 
-> This guide is for v1.0 RC9.4. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Release page: [v1.0 RC9.4](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.4). [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
+> This guide is for v1.0 RC9.5. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Release page of the latest published release: [v1.0 RC9.4](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.4). [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Full documentation: [User guide](docs/USER-GUIDE.md) (project home page: [README.md](README.md))
 
@@ -169,8 +169,7 @@ It compares the list with your installed game profiles and prints plain counts. 
 
    **First time:** you will see `Welcome to TeknoParrot Manager`. Press Enter to continue. It then looks for TeknoParrot by itself.
 
-   - If it finds one copy, you will see `Auto-detected TeknoParrot at:` and the path. Type Y to use it, or N to choose another.
-   - If it finds several copies, it lists them with numbers. Type the number of the one you want.
+   - It looks on every drive in your PC (not network drives) and shows each TeknoParrot it finds as a numbered row with the drive letter, the full path and the version. Type the number of the one you want, R to search again, B to type or browse for the folder, or Q to quit. Nothing is changed until you choose.
    - If it finds none, it asks `Type the path of your TeknoParrot folder, the one with TeknoParrotUi.exe in it, or Q to quit (or type B to browse)`. Type the folder, type B to browse, or type Q to quit. Nothing is changed if you quit.
    - If you close the browse window without choosing, the question comes back. If the folder is wrong, you see `That folder does not exist. Check the spelling, or type B to browse.` or `TeknoParrotUi.exe is not in that folder. Pick the folder that has TeknoParrotUi.exe in it.` and it asks again.
 
@@ -829,11 +828,11 @@ A successful patch does not prove the game is ready. Register the game, set up i
 
 **What this release contains**
 
-- RC9.4 has 120 exact recipes across 71 exact ProfileId/build/executable identities (54 game profiles).
+- This build has 132 exact recipes across 79 exact ProfileId/build/executable identities (62 game profiles).
 
 - The list started as the historical 13-entry baseline and the 58-entry PR #355 checkpoint, and has grown since.
 
-- Later additions include MaiMai GreeN `freeglut.dll` and `libcurl.dll`, Rabbids Hollywood `RabbidsHollywood_Operator.exe`, and Cross Raid 1.05 Ver A `rom/shader.farc`.
+- Later additions include MaiMai GreeN `freeglut.dll` and `libcurl.dll`, Rabbids Hollywood `RabbidsHollywood_Operator.exe`, Cross Raid 1.05 Ver A `rom/shader.farc`, and the Ghost Squad Evolution AMD and NVIDIA shader fixes.
 
 - The existing 58-entry checkpoint includes three Taisen Hot Gimmick 5 (2.04) restores.
 
@@ -845,7 +844,7 @@ A successful patch does not prove the game is ready. Register the game, set up i
 
 - The Rabbids utility is separate from the existing Assembly-CSharp and BepInEx operator-plugin recipes. TeknoParrot Manager does not execute it or edit registry or `.conf` state.
 
-- One hundred eight `CreateFile` operations create only absent targets. Twelve `ReplaceFile` operations require the exact known before-state.
+- 108 `CreateFile` operations create only absent targets. 152 `ReplaceFile` operations require the exact known before-state.
 
 - Exact-after files are skipped. Other states are refused.
 

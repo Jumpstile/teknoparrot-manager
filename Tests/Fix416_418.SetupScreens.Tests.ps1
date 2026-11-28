@@ -44,3 +44,40 @@ Describe 'Setup screens account for every game and offer a way back' {
         $script:SourceText | Should -Match '\} while \(\$optionalGoBack\)'
     }
 }
+
+Describe 'ReShade one-by-one questions: Back returns to the previous game (issue 416)' {
+    BeforeAll {
+        $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'TeknoParrot-Manager.ps1'
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($src, [ref]$null, [ref]$null)
+        foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Read-TpmReShadeOneByOneAnswers' }, $true)) { . ([scriptblock]::Create($f.Extent.Text)) }
+        function Get-TpmGameTitle { param($Name) return "Title $Name" }
+        $script:Replies = New-Object System.Collections.Queue
+        $script:Prompts = New-Object System.Collections.Generic.List[string]
+        function Read-TpmChoice { param($Prompt, $Choices, $Default) [void]$script:Prompts.Add($Prompt); return [string]$script:Replies.Dequeue() }
+        $script:Games = @([pscustomobject]@{ BaseName = 'one' }, [pscustomobject]@{ BaseName = 'two' }, [pscustomobject]@{ BaseName = 'three' })
+        function Start-Replies { param([string[]]$Answers) $script:Replies.Clear(); $script:Prompts.Clear(); foreach ($a in $Answers) { $script:Replies.Enqueue($a) } }
+    }
+
+    It 'Back on the second game asks the first game again and keeps the new answer' {
+        Start-Replies 'Y', 'B', 'N', 'Y', 'Y'
+        $r = Read-TpmReShadeOneByOneAnswers -Games $script:Games
+        $r.BackedOut | Should -BeFalse
+        $r.Answers['one'] | Should -BeFalse
+        $r.Answers['two'] | Should -BeTrue
+        $r.Answers['three'] | Should -BeTrue
+        $script:Prompts.Count | Should -Be 5
+        $script:Prompts[2] | Should -Be '  Install for Title one? [Y] Yes  [N] No  [B] Back  (game 1 of 3, default Y)'
+    }
+    It 'Back on the first game leaves the questions without any answers' {
+        Start-Replies 'B'
+        $r = Read-TpmReShadeOneByOneAnswers -Games $script:Games
+        $r.BackedOut | Should -BeTrue
+        $r.Answers.Count | Should -Be 0
+    }
+    It 'asks every game with the same wording and counts them' {
+        Start-Replies 'Y', 'N', 'Y'
+        [void](Read-TpmReShadeOneByOneAnswers -Games $script:Games)
+        $script:Prompts[1] | Should -Be '  Install for Title two? [Y] Yes  [N] No  [B] Back  (game 2 of 3, default Y)'
+        $script:Prompts[2] | Should -Be '  Install for Title three? [Y] Yes  [N] No  [B] Back  (game 3 of 3, default Y)'
+    }
+}

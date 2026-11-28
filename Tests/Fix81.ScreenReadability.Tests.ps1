@@ -155,7 +155,7 @@ Describe 'FIX81 required patches: the game list (item 4)' {
     It 'gives every shipped recipe a unique name with no bracket, no date and no tag' {
         # Mutation: show the exact build name for colliding builds -> 25 names carry brackets, a date and [TP].
         $entries = @((Get-Content -LiteralPath $script:F81RecipesPath -Raw -Encoding UTF8 | ConvertFrom-Json).Entries)
-        $entries.Count | Should -Be 124
+        $entries.Count | Should -Be 136
         $groups = @(Get-TpmRequiredPatchGameGroups -Entries $entries)
         $nameOfBuild = @{}
         foreach ($group in $groups) { $nameOfBuild[$group.BuildName] = [string]$group.Name }

@@ -96,6 +96,60 @@ Describe 'Game types in the Library health check (issues 387 and 389)' {
         @($rows | Where-Object { $_.Area -eq 'Game types' })[0].Text | Should -Be 'OK'
     }
 
+    It 'knows the TeknoZR107 game type: no complaint with its folder, a plain "update TeknoParrot" first line without it, the technical text under Details' {
+        $fixture = New-F387GRoot
+        Add-F387GProfile -Fixture $fixture -Code 'zr107_jetwave' -Type 'TeknoZR107' -Exe 'jetwave.zip'
+        Add-F387GProfile -Fixture $fixture -Code 'zr107_midnrun' -Type 'TeknoZR107' -Exe 'midnrun.zip'
+        Add-F387GProfile -Fixture $fixture -Code 'zr107_windheat' -Type 'TeknoZR107' -Exe 'windheat.zip'
+        $report = Get-F387GReport -Fixture $fixture
+        @($report.Unknown).Count | Should -Be 0
+        @($report.EmulatorMissing).Count | Should -Be 1
+        $report.EmulatorMissing[0].Type | Should -Be 'TeknoZR107'
+        @($report.EmulatorMissing[0].Games).Count | Should -Be 3
+        $text = (@(Get-TpmGameTypeRows -Report $report | Where-Object { $_.Area -eq 'Game types' })[0].Text)
+        $text | Should -Match 'TeknoParrot needs an update for 3 games: update TeknoParrot, then run the health check again'
+        $text | Should -Not -Match 'not in your TeknoParrot folder'
+        $details = (@(Get-TpmGameTypeDetailBlocks -Report $report)[0].Lines -join ' ')
+        $details | Should -Match 'not fully up to date. Update TeknoParrot yourself, then run the health check again'
+        $details | Should -Match 'Emulator for type TeknoZR107 is not in your TeknoParrot folder'
+        New-Item -ItemType Directory -Path (Join-Path $fixture.Root 'TeknoZR107') -Force | Out-Null
+        $report = Get-F387GReport -Fixture $fixture
+        @($report.EmulatorMissing).Count | Should -Be 0
+        @($report.NeedsManualExe).Count | Should -Be 0
+        @(Get-TpmGameTypeRows -Report $report | Where-Object { $_.Area -eq 'Game types' })[0].Text | Should -Be 'OK'
+    }
+
+    It 'gives TeknoChi the same Chihiro prerequisite as the older Chihiro games: a real install has a cxbxr folder, no TeknoChi folder and no Chihiro BIOS files' {
+        $fixture = New-F387GRoot
+        New-Item -ItemType Directory -Path (Join-Path $fixture.Root 'cxbxr') -Force | Out-Null
+        $names = @{ TeknoChiOutRun2 = 'Chihiro Test Game One'; TeknoChiVirtuaCop3 = 'Chihiro Test Game Two'; TeknoChiGundam = 'Chihiro Test Game Three' }
+        $gameFile = Join-Path $fixture.Root 'game.zip'
+        [System.IO.File]::WriteAllText($gameFile, 'x')
+        foreach ($code in $names.Keys) {
+            # TeknoParrot marks these profiles development only; they ship in this release, so the health check must not call them "not available yet".
+            $xml = '<?xml version="1.0" encoding="utf-8"?><GameProfile><GameName>{0}</GameName><GamePath>{1}</GamePath><EmulatorType>TeknoChi</EmulatorType><EmulationProfile>TeknoChi</EmulationProfile><ExecutableName>game.zip</ExecutableName><DevOnly>true</DevOnly></GameProfile>' -f $names[$code], $gameFile
+            [System.IO.File]::WriteAllText((Join-Path $fixture.Profiles ($code + '.xml')), $xml)
+        }
+        $report = Get-F387GReport -Fixture $fixture
+        @($report.Unknown).Count | Should -Be 0
+        @($report.EmulatorMissing).Count | Should -Be 0
+        @($report.NotAvailable).Count | Should -Be 0
+        @($report.NeedsManualExe).Count | Should -Be 0
+        @(Get-TpmGameTypeRows -Report $report | Where-Object { $_.Area -eq 'Game types' })[0].Text | Should -Be 'OK'
+        $profiles = @(Get-ChildItem -LiteralPath $fixture.Profiles -Filter '*.xml')
+        $found = @(Get-TpmMissingPrerequisites -Profiles $profiles -TeknoParrotRoot $fixture.Root)
+        $found.Count | Should -Be 1
+        $found[0].EmulatorType | Should -Be 'TeknoChi'
+        $found[0].AffectedGames.Count | Should -Be 3
+        # The older Chihiro games (type cxbxr) get exactly the same finding.
+        Add-F387GProfile -Fixture $fixture -Code 'OldChihiro' -Type 'cxbxr'
+        $older = @(Get-TpmMissingPrerequisites -Profiles @(Get-ChildItem -LiteralPath $fixture.Profiles -Filter 'OldChihiro.xml') -TeknoParrotRoot $fixture.Root)
+        $older.Count | Should -Be 1
+        $found[0].Label | Should -Be $older[0].Label
+        ($found[0].MissingFiles -join ',') | Should -Be ($older[0].MissingFiles -join ',')
+        $found[0].MissingFiles.Count | Should -Be 4
+    }
+
     It 'calls a development-only game "not available yet" and says nothing once it is released' {
         $fixture = New-F387GRoot
         Add-F387GProfile -Fixture $fixture -Code 'JcDev' -Type 'TeknoTJC' -DevOnly $true
