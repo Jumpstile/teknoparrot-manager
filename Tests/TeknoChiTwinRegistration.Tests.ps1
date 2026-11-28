@@ -9,7 +9,7 @@ BeforeAll {
     if ($parseErrors.Count -gt 0) { throw "Failed to parse TeknoParrot-Manager.ps1: $($parseErrors -join '; ')" }
 
     $wanted = @(
-        'Register-TpmTeknoChiTwins', 'Confirm-TpmRegistrationSafetyBackup', 'Set-SecondaryExecutablePath', 'Get-TpmMissingGameSetFiles',
+        'Get-TpmTeknoChiTwinTable', 'Register-TpmTeknoChiTwins', 'Confirm-TpmRegistrationSafetyBackup', 'Set-SecondaryExecutablePath', 'Get-TpmMissingGameSetFiles',
         'Get-TpmGameFileSet', 'Get-ExeAlternatives', 'Test-TpmGameMutationPath', 'Get-TpmTransactionField', 'Read-Xml',
         'Get-PrimaryExecutableName', 'Save-XmlMaybe', 'Get-TpmProfileWriteFingerprint', 'Resolve-TpmRegistrationSaveFailure',
         'Assert-TpmRegisteredGamePath', 'Set-TpmRegistrationGamePath', 'Test-PathInside'

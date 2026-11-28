@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC9.4
+  TeknoParrot Manager  |  v1.0 RC9.5
   Author: Jumpstile
 ===============================================================================
 
@@ -12,8 +12,8 @@
   up your game settings before it changes them, and Details and the log
   show what was done. See docs\ADVANCED-USERS.md.
 
-  This guide is for v1.0 RC9.4.
-  Release page: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.4
+  This guide is for v1.0 RC9.5.
+  Release page of the latest published release (RC9.4): https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.4
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after each run. AutoSync backs up UserProfiles before
@@ -316,12 +316,12 @@
     does not create a duplicate.
 
   - Auto-detect TeknoParrot path. On first run, instead of asking for the
-    root folder immediately, the script scans common install locations
-    (LaunchBox emulators folder, drive roots, Program Files) for
-    TeknoParrotUi.exe and suggests the match.
-
-    If multiple installs are found, it lists them numbered so you can pick
-    without typing.
+    root folder immediately, the script searches every drive in your PC
+    (not network drives) for TeknoParrotUi.exe (the top of each drive,
+    the folders inside it, and the usual game and emulator folders). It
+    lists each install it finds with its drive letter, full path and
+    version, and lets you pick one, search again, browse, or quit.
+    Nothing is changed until you choose.
 
 
   MORE DETAIL: Telling TeknoParrot about your games
@@ -701,6 +701,12 @@
 
   - Games that already have ReShade. Protected existing files stay
     unchanged unless you explicitly choose to replace them and confirm.
+    A game that already has a ReShade.ini file but no ReShade that
+    TeknoParrot Manager installed is protected and left alone too. TPM
+    treats that ReShade.ini as yours. These games are counted as
+    protected in the first check. The result also shows a last check,
+    right before installing. A game found protected only then is
+    counted as protected too, and the result names it with the reason.
 
     When some games were left alone, the result screen offers these keys:
     A (replace them with TeknoParrot Manager's ReShade; you choose the look
@@ -792,8 +798,8 @@
     TPFIX.ini, or choose the first-launch TeknoParrot.dll path.
     Compatibility and gameplay remain separate checks.
 
-  - Required game patches. Option 13 contains 124 exact-build recipes
-    across 75 exact ProfileId/build/executable identities (58 game
+  - Required game patches. Option 13 contains 132 exact-build recipes
+    across 79 exact ProfileId/build/executable identities (62 game
     profiles).
 
     The list started with 58 earlier recipes and has grown since. Later
@@ -811,7 +817,7 @@
     and 34 Main-component restorations: 14 Hummer, 14 Hummer Extreme, two
     Primeval Hunt, two SB3 FMOD, and two Infinity Blade FX 1.02.
 
-    108 `CreateFile` operations create only absent targets; twelve
+    108 `CreateFile` operations create only absent targets; 152
     `ReplaceFile` operations require an exact before-state. Exact-after
     files are skipped; unknown bytes are refused.
 
@@ -1291,27 +1297,29 @@
   does the same on any run where the TeknoParrot folder is not saved. This
   saves you from typing the path.
 
-  It looks for TeknoParrotUi.exe in these common places:
+  You will see "Looking for TeknoParrot on your drives...". TeknoParrot
+  Manager searches every drive in your PC (not network drives) for
+  TeknoParrotUi.exe. It checks the top of each drive, the folders inside
+  it, and the usual game and emulator folders. It then says which drives
+  it searched. If it had to stop early on a big drive, it says so and
+  tells you to type B to pick the folder yourself.
 
-    - Your LaunchBox Emulators folder under USERPROFILE
-    - Drive roots: C:\TeknoParrot, D:\TeknoParrot, etc.
-    - Drive roots with sub-paths: \Games\TeknoParrot, \Emulators\TeknoParrot
-    - Program Files and Program Files (x86) on every mounted drive
+  Each TeknoParrot it finds is shown as a numbered line with its drive
+  letter, its full folder path and its version, for example:
 
-  If it finds exactly one install, you will see:
+      1) Drive D:\  D:\TeknoParrot  (version 1.0.0.2276)
 
-      Auto-detected TeknoParrot at: C:\Users\...\LaunchBox\Emulators\TeknoParrot
-      Use this path? (Y/N)
+  If it cannot read the version, the line says "not readable". Nothing is
+  changed until you choose.
 
-  Next: type Y if the path is right, or N if it is not.
+  Next: type a number to use that install, R to search again, B to type
+  or browse for the folder, or Q to quit. Nothing is changed if you quit.
 
-  If it finds several installs, they are listed with numbers. You will see
-  "Found TeknoParrot in multiple locations:". Next: pick one by number.
-
-  If it finds nothing, you are asked to type the path. You will see "Type
-  the path of your TeknoParrot folder, the one with TeknoParrotUi.exe in
-  it, or Q to quit (or type B to browse)". Next: type the folder path, type
-  B to browse for it, or type Q to quit. Nothing is changed if you quit.
+  If it finds nothing, you see "No TeknoParrot folder was found (a folder
+  needs TeknoParrotUi.exe in it)." and the same choices. Type B and you
+  are asked: "Type the path of your TeknoParrot folder, the one with
+  TeknoParrotUi.exe in it, or Q to quit (or type B to browse)". Next:
+  type the folder path, type B to browse for it, or type Q to quit.
 
   If you close the browse window without choosing a folder, you see "No
   folder was chosen. Type the path again, or type B to browse again." and
@@ -1621,10 +1629,21 @@
   then asks again before applying the reviewed set. The configured games
   folder is the default search root.
 
-  If no candidate is found, TeknoParrot Manager shows each saved
-  executable path and offers [C] to re-copy/re-extract only the affected
-  profile codes from a configured source, or [S] to search another game
-  folder.
+  If some games were found but cannot be pointed anywhere safely, the
+  screen says "Left unchanged, not pointed anywhere (N games):" with one
+  line per reason, and those games are not changed. Reasons include
+  "this version of the game is not on this drive (a different version of
+  the game is; TeknoParrot Manager will not point this game at it)" and
+  "another game would also be pointed at this same game folder, and the
+  two are not a known twin pair, so TeknoParrot Manager changed neither.
+  Pick the right file yourself."
+
+  If no candidate is found, TeknoParrot Manager says "No safe automatic
+  candidates were found in this folder. Nothing was changed.", shows the
+  searched folder and the reason for each game, and offers [C] to
+  re-copy/re-extract only the affected profile codes from a configured
+  source, [S] to search another game folder, [D] for details (every game,
+  its old saved path and what was checked) and [B] to go back.
 
   [S] Search another game folder accepts only an existing, canonical,
   non-reparse folder outside TeknoParrot, TeknoParrot Manager, and both
@@ -1730,8 +1749,8 @@
     The technical details behind D are: patch names, exact reason, result
     codes, and the folder with your undo copy. They are also in the log.
 
-  Option 13 has 124 exact-build recipes across 75 exact
-  ProfileId/build/executable identities (58 game profiles).
+  Option 13 has 132 exact-build recipes across 79 exact
+  ProfileId/build/executable identities (62 game profiles).
 
   The list started with 58 earlier recipes and has grown since. Later
   additions include absent-only Main restores: MaiMai GreeN
@@ -1763,7 +1782,7 @@
   the guide-required hash from the named Central Fiction Main ZIP; absent or
   unknown BBCP bytes are refused.
 
-  The 108 `CreateFile` operations restore only absent targets; twelve
+  The 108 `CreateFile` operations restore only absent targets; 152
   `ReplaceFile` operations require exact before-hashes. Exact desired bytes
   are skipped, and all other states are refused.
 
@@ -1829,18 +1848,24 @@
              Searches for the right game folders. It shows you the exact
              paths it proposes. It asks you again before it changes
              anything. The folder with your games is searched first.
+             Games it cannot point anywhere safely are listed as "Left
+             unchanged, not pointed anywhere" with a reason, and are
+             not changed.
 
          [M] Let me pick the correct executable manually
              You choose the exact game program yourself. Nothing is
              guessed.
 
-       If no match is found, TeknoParrot Manager shows each saved game
-       path and offers two more choices:
+       If no match is found, TeknoParrot Manager shows the searched
+       folder and the reason for each game, and offers more choices:
 
          [C] Re-copy/re-extract only these affected games from the
              configured source. It goes back to AutoSync.
 
          [S] Search another game folder.
+
+         [D] Details (every game, its old saved path and what was
+             checked).
 
        When no broken paths are left, it may offer [P] Set up PostgreSQL
        for these games. It may also offer shortcuts to [6] ReShade, [7]
@@ -2457,6 +2482,21 @@
 
   Press Enter to take choice 3, the check. It changes nothing.
 
+  ARCADE STICK LAYOUTS (Controls, choice 2)
+
+    The layout screen has two arcade stick choices for a stick that shows up
+    to Windows as an Xbox controller.
+      Choice 4, 6 buttons: Button 1 = X, Button 2 = Y, Button 3 = RB,
+        Button 4 = A, Button 5 = B, Button 6 = LB, Coin = Back.
+      Choice 6, 8 buttons: the same, plus Button 7 = L3 (left stick click)
+        and Button 8 = R3 (right stick click).
+    A game that has no Button 7 or 8 is left alone for them. A layout you
+    saved earlier still works. With choice 6, a game that has Button 7 or 8
+    gets L3 and R3 there, so TPM leaves that game's Volume Up and Volume
+    Down for you to set. TPM does not write trigger (LT and RT) settings.
+    A stick in keyboard or DirectInput mode should use choice 5, "My
+    learned arcade controls".
+
   CHANGE A CONTROL BY HAND (Controls, choice 5)
 
     Pick a game, then one control from the list (each line shows what it is
@@ -2502,7 +2542,8 @@
 
   MY CONTROLS (Controls, choice 4)
 
-    Nothing here changes a TeknoParrot game file. The sub-menu choices are
+    Nothing here changes a TeknoParrot game file, except Learn my
+    trackball, and only after you say Y. The sub-menu choices are
     1 = Tell TPM which controls I have, 2 = Learn my arcade buttons,
     3 = Show or print the controls of one game, 4 = Tell TPM how a game
     played, 5 = Show or print my cabinet controls, 6 = Undo my last save
@@ -2525,20 +2566,41 @@
     - Learn my arcade buttons. You say how many players and buttons your
       cabinet has. First TPM waits 2 seconds with your hands off
       the cabinet. If a key shows up on its own, a button may be stuck,
-      and it tells you. If LEDBlinky is installed, it then offers the
-      keys its own key list names (one Y/N). It can also offer the
-      standard arcade keys that MAME and Ultimarc I-PAC boards both use
-      (for example Left Ctrl for button 1). It uses them only after you
-      say yes and press two buttons that really send those keys. Then it
-      asks you to press each control ("Press Player 1 Start") and
-      remembers the key it sends. Esc skips a control your cabinet does
-      not have. A key already given to another control is refused. If a
-      press also sends another key, or a button is still down after 3
-      seconds, it tells you and keeps the first key. At the end, one
-      question ("Save this?") keeps the answers, and TPM also
-      notes which arcade encoders it can see right now. Other encoder
-      brands' own setup files are not read: no maker writes down which
-      pin is which button. Pressing the buttons works for any encoder.
+      and it tells you. If you saved keys before, it asks once whether to
+      keep them (Y). If you keep them, it asks only for the controls
+      that have no saved key. Answer N to press every control again, for
+      example after you changed your encoder. If LEDBlinky is installed,
+      it then offers the keys its own key list names (one Y/N). It can
+      also offer the standard arcade keys that MAME and Ultimarc I-PAC
+      boards both use (for example Left Ctrl for button 1). It uses them
+      only after you say yes and press two buttons that really send those
+      keys. Then it asks you to press each control ("Press Player 1
+      Start") and remembers the key it sends. Esc skips a control your
+      cabinet does not have. A key already given to another control is
+      refused. If a press also sends another key, or a button is still
+      down after 3 seconds, it tells you and keeps the first key. At the
+      end, one question ("Save this?") keeps the answers. Keys you saved
+      before for these controls are replaced, and a copy of the old file
+      is kept. A control you skip loses its old saved key when you save.
+      TPM also notes which arcade encoders it can see right now. Other
+      encoder brands' own setup files are not read: no maker writes down
+      which pin is which button. Pressing the buttons works for any
+      encoder.
+    - Learn my trackball. After you learn your arcade buttons, TPM can
+      learn a trackball too. You roll it left and right, then up and
+      down, and TPM watches the pointer move. Then it lists the mice and
+      trackballs Windows reports and asks which one is yours. If it
+      cannot read that list, or you pick none, it writes nothing. For
+      games whose own file has a single trackball control, TPM shows
+      "these games will get your trackball" and waits for Y. Only after
+      Y does it save a copy of your game settings, put your trackball in
+      that one control, and read the file back to check it. Then it
+      offers Undo. A trackball a game already has is kept unless you say
+      to replace it. Games with a different trackball layout are left
+      alone and listed so you can set them up by hand in TeknoParrotUI.
+      TPM never changes a game's own files, only your TeknoParrot
+      settings for the game. This has not been verified with a real
+      trackball.
     - Is it the same controller? My controls says, in one line,
       whether TPM sees the same arcade encoders as
       when you taught it your keys, whether one was added or removed, or
@@ -5947,6 +6009,19 @@
   of the old path with the new folders. It saves a game only when one file
   clearly fits. Then it updates the path.
 
+  Repair only points a game at the same game and the same version. It
+  does not point a game at a different game or a different version, even
+  when the game file has the same name (for example, Tekken 7: Fated
+  Retribution 1.06.00 and the Tekken 7 Round 2 4.20 folder). It also
+  does not point two games at one folder, unless they are a known twin
+  pair (a TeknoChi game and its older matching game). In those cases it
+  changes neither game and tells you to pick the file yourself. If your
+  version is not on the drive but a different version is, the reason
+  says "this version of the game is not on this drive (a different
+  version of the game is; TeknoParrot Manager will not point this game
+  at it)". A game whose old folder name only lacks a version or a [TP]
+  tag is still found.
+
   Repair shows one of these results for each game:
 
     Fixed                The path was re-pointed to the correct executable.
@@ -5966,6 +6041,72 @@
   question to see each game and why.
 
   Games whose path already works are left untouched.
+
+  GAMES THAT COULD NOT BE MATCHED
+
+  After the repair question, some games may still have no game file. When
+  you are at the keyboard (not in preview, not unattended), TeknoParrot
+  Manager lists them: "N games could not be matched to a game folder:".
+  Each game shows its full name (with version and year when known), the
+  reason, and a status line such as "Registered: yes. Game file found: no.
+  Right version: unknown. Ready: no." ("unknown" means the repair could
+  not tell.)
+
+  You then see: "Fix: pick the game folder yourself.  Remove: take the
+  game out of TeknoParrot (your game files are never deleted).  Skip:
+  leave it out of this run.  Ignore: leave it out until you turn it back
+  on.  Details: why it could not be matched."
+
+  Type F, R, S, I or D and press Enter. Plain Enter skips them all. Then
+  answer "Which games?": A for all, or numbers like 1,3 or 2-4. Skip
+  treats a plain Enter as all games. For the others, a plain Enter chooses
+  none and says "No game was chosen. Nothing was changed."
+
+    F (Fix)      You pick the game file yourself. It shows "Saved by
+                 hand: N games." and "Could not save:" for any that
+                 failed. A "Safety backup:" line shows the backup folder
+                 when one was made. Only the saved path of the games you
+                 fixed changes.
+
+    R (Remove)   Says "This takes (the game names) out of TeknoParrot.
+                 Your game files are not deleted. A safety backup of
+                 your TeknoParrot profiles is made first." and asks
+                 "Remove them from TeknoParrot? (Y/N)"; plain Enter is
+                 N. On Y it deletes only the game's registration file
+                 (its .xml in UserProfiles) and shows "Safety backup (to
+                 undo):" with the backup folder. No game file is
+                 touched. If the backup cannot be checked, nothing is
+                 removed. A game whose game file is found now is not
+                 removed (the reason says so). There is no Undo key on
+                 this screen; the backup folder is the way back.
+                 TeknoParrot Manager does not remember removed games,
+                 so if the game's files show up in your games folder
+                 later, the next scan registers it again.
+
+    S (Skip)     Leaves the games out of this run. "Nothing was
+                 changed." Nothing is saved. They come back the next
+                 time you run.
+
+    I (Ignore)   Adds the games to your Ignore list. "Later steps leave
+                 them out until you turn them back on. Nothing else was
+                 changed." If the list cannot be saved, it says no game
+                 was ignored. The games stay registered. Ignored games
+                 are not asked about again.
+
+    D (Details)  Shows every game with its old saved path and the files
+                 that were considered, then returns to the list. It
+                 changes nothing.
+
+  After the repair step, if your Ignore list is not empty, you see "N on
+  your Ignore list are left out of every step. Turn them back on now?
+  (Y/N)". Plain Enter is N. Y empties the list ("The Ignore list is
+  empty again.").
+
+  After this, ReShade, GPU Compatibility Fix, dgVoodoo2, BepInEx, the
+  force feedback plugin and the controller steps use one list of ready
+  games. A game with no game file, on a drive that is not connected,
+  skipped or ignored is named once ("N games left out of the next
+  steps") and is not warned about in every step.
 
 
 -------------------------------------------------------------------------------
@@ -6468,7 +6609,7 @@
 
 
 ===============================================================================
-  This guide is for v1.0 RC9.4.
+  This guide is for v1.0 RC9.5.
   Test one game after every run. AutoSync backs up UserProfiles before
   extraction; preview mode skips the backup.
 ===============================================================================

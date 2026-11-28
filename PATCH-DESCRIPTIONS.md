@@ -1,6 +1,6 @@
 # What every patch recipe does, in plain words
 
-Last updated: 2026-11-07 (round 2). This file covers all 124 recipes in `scripts/TpmRequiredPatchRecipes.json` (58 game profiles).
+Last updated: 2026-11-27. This file covers all 132 recipes in `scripts/TpmRequiredPatchRecipes.json` (62 game profiles).
 
 Three kinds of recipe:
 
@@ -58,6 +58,9 @@ Words used below: a "shader" is a small file that tells your graphics card how t
 | Go Go Strike (2007) | DLLFix | Puts back `alleg40.dll`, the Allegro library the game was built with. Missing means no start. |
 | NERF Arcade (1.55) | PK-UnityPlugin | Puts back the large Unity helper DLL under `Nerf_Data/Plugins`. The game will not start without it. |
 | Super Bikes 2 (1.5.5) | Game api Dll | Puts back `ewfapi.dll`, a small engine file the game needs. (The separate 142 MB exe fix has no recipe yet.) |
+| Deathsmiles II - Makai no Merry Christmas (4.00) | patched cvgame.exe | Swaps in the patched `cvgame.exe` that comes inside the game's own ZIP. It only acts if your `cvgame.exe` is the exact original, and you can undo it. |
+| The Fast and the Furious: Drift (3.03) | 640x480 / 1920x1080 / 2560x1440 sdaemon.exe | Three alternative `sdaemon.exe` files for different screen sizes, all from the game's own ZIP. Only one can be installed, so the menu asks you to pick a screen size (Back cancels). It only acts if your `sdaemon.exe` is the exact original, and it keeps a backup and an undo copy. |
+| Chase H.Q. 2 (2.05-2.08) | USA / Japan region file | Two alternative `chq2.ini` region files (your set starts as the UK file), both from the game's own ZIP. Only one can be installed, so the menu asks you to pick a region (Back cancels). It only acts if your `chq2.ini` is the exact UK file, and it keeps a backup and an undo copy. |
 | Walking Dead, The (01.05) | WD105_DLLfix | Puts back three helper DLLs (`libeay32`, `ssleay32`, `zlib1`) in the game's `pm` folder. They are the same files the game came with. |
 | Virtua Fighter 5 (1.001 Ver B) | NVIDIA Shader Fix | Swaps in the shader pack that runs on NVIDIA cards. Only applies to the exact shipped file; use it if the game shows broken or missing graphics. |
 | Virtua Fighter 5 (6.001 Ver C) | AMD Shader Fix | Swaps in the shader pack that runs on AMD cards (the shipped pack is the NVIDIA one). Pick the set that matches your card. |
@@ -74,8 +77,15 @@ Words used below: a "shader" is a small file that tells your graphics card how t
 | Virtua Fighter eSports (2021) "APM3 Files" | The patch uses a `runtime/media/...` layout that does not exist in the game ZIP here, and all three payloads are byte-identical to files the game already has. |
 | Walking Dead "105_ELFfix" (`gamed`) | The payload is byte-identical to the game's own `pm/game`; nobody can show which path the loader wants. Writing a duplicate file would not fix anything. |
 | Super Bikes 2 "Fix exe" (142 MB), Spider-Man "Spiderman Fix" (175 MB) | No recipe has been written for them yet. |
+| Street Fighter V Type Arcade modified `.pak` | The file is in neither DAT file nor in the set ZIPs (they hold only `pakchunk0` to `pakchunkN`), so there is no recipe. Game Notes tells you what to get. |
+| Block King modified `game.exe` | The patch ZIP "GekiToDensetsu (Block King Ball Shooter)(JConfig).zip" holds a `game.exe` (CRC32 1E882C69), but its SHA-256 and size have not been measured yet. The catalog has a recipe marked "not ready yet", so TPM changes nothing for this game. Game Notes explains this. |
+| Dragon Dance modified `Game_liong.exe` | No source for the file was found (the older note about CRC B2836DB7 was not found in any patch file). Game Notes checks that `Game_liong.exe` and `ddraw.dll` are there and tells you what is missing. The `iDmacDrv32.dll` part is a recipe (see below). |
+| The House of the Dead EX libraries, Tatsunoko vs. Capcom Wii folder, Ghost Squad Evolution folder | These need a whole folder of files copied in, which the patch engine now does (all files or none, with backup and undo). The House of the Dead EX and Tatsunoko vs. Capcom have recipes in the catalog marked "not ready yet", and Ghost Squad Evolution has none yet: the real file lists, sizes and hashes still have to be measured, so TPM changes nothing for these games yet. |
+| Ghost Squad Evolution AMD Shader Fix / NVIDIA Shader Fix | These are recipes (see the table below). Only one step is not automatic: for AMD cards you turn on EnableAmdFix for the game in TeknoParrot yourself. TPM reminds you after it installs the fix. |
 | Resolution-variant packs, bezels, configs, installers, translation installers, `.reg` files | Not game-file repairs or swaps; they are choices or tools, so they are not "required" recipes. |
 | Lady Luck (2.00.01) | I/O board COM port off | Sets one line in the game script file `game_conf.lua` so the game does not look for an I/O board COM port. TPM saves a copy first and can undo it. |
+| Dragon Dance (2011) | Newer `iDmacDrv32.dll` | Replaces the game's `iDmacDrv32.dll` (75,776 bytes) with the newer one (77,824 bytes) from `Fix iDmacDrv32.rar`, which sits inside the patch file `Dragon Dance.rar`. It needs 7-Zip on your PC and never downloads anything. TPM saves a copy first and can undo it. The `Fix Crash.bat` file in the patch is never run or copied. |
 | Lost Land Adventure (1.00) | Shader reload off (optional) | Sets one line in `BaseEngine.ini` (automatic shader reload off). Only use it if the game crashes. |
 | SiN (2001) | Fullscreen on | Sets the fullscreen line in `config.cfg` to 1 so the game starts full screen. |
 | America's Army Arcade (1.01.082) | Display and gore settings | Sets seven lines in `ArmyOps.ini`: the window, full screen and menu sizes to 640 by 480, and the gore level to 1. All seven change together or none do. |
+| Ghost Squad Evolution (1.0 Rev A, Elfloader2) | AMD Shader Fix / NVIDIA Shader Fix | Swaps in the shader files that match your graphics card, from the Patches folder inside the game's own ZIP. Pick the one for your card; only one of the two can be installed, and a file that is already identical is left alone. For AMD cards, also turn on EnableAmdFix for the game in TeknoParrot (TeknoParrot Manager reminds you after it installs). Only applies to the exact shipped `vsg` program. |

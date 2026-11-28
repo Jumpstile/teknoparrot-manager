@@ -26,12 +26,13 @@ BeforeAll {
 
     # The game's own file: what TeknoParrot ships. Nothing is bound in it.
     function script:New-CtlTemplate {
-        param([string]$Dir, [string]$Name, [int]$Revision = 5, [string]$Options = '<string>DirectInput</string><string>XInput</string>', [string[]]$Omit = @(), [string]$Up = '')
+        param([string]$Dir, [string]$Name, [int]$Revision = 5, [string]$Options = '<string>DirectInput</string><string>XInput</string>', [string[]]$Omit = @(), [string]$Up = '', [switch]$Eight)
         $slots = @(
             @('Test', 'Test', ''), @('Coin', 'Coin1', ''), @('Start', 'P1ButtonStart', ''), @('Gun Trigger', 'P1Button1', ''), @('Missile', 'P1Button2', ''),
             @('P2 Start', 'P2ButtonStart', ''), @('Stick X', 'Analog0', '<AnalogType>AnalogJoystick</AnalogType>')
         ) | Where-Object { $Omit -notcontains $_[1] } | ForEach-Object { '<JoystickButtons><ButtonName>{0}</ButtonName><InputMapping>{1}</InputMapping>{2}</JoystickButtons>' -f $_[0], $_[1], $_[2] }
         if ($Up) { $slots += '<JoystickButtons><ButtonName>' + $Up + '</ButtonName><InputMapping>P1ButtonUp</InputMapping></JoystickButtons>' }
+        if ($Eight) { $slots += '<JoystickButtons><ButtonName>Button 7</ButtonName><InputMapping>P1Button7</InputMapping></JoystickButtons><JoystickButtons><ButtonName>Button 8</ButtonName><InputMapping>P1Button8</InputMapping></JoystickButtons>' }
         $xml = '<?xml version="1.0" encoding="utf-8"?><GameProfile><EmulationProfile>Emu</EmulationProfile><GameProfileRevision>{0}</GameProfileRevision><ExecutableName>game</ExecutableName><ConfigValues><FieldInformation><CategoryName>General</CategoryName><FieldName>Input API</FieldName><FieldValue>DirectInput</FieldValue><FieldOptions>{1}</FieldOptions></FieldInformation></ConfigValues><JoystickButtons>{2}</JoystickButtons></GameProfile>' -f $Revision, $Options, ($slots -join '')
         $path = Join-Path $Dir ($Name + '.xml')
         [System.IO.File]::WriteAllText($path, $xml, (New-Object System.Text.UTF8Encoding $false))
@@ -41,7 +42,7 @@ BeforeAll {
     # The player's saved settings for the same game: Coin has an Xbox binding and a keyboard key, Start a keyboard key,
     # Gun Trigger a DirectInput button, Missile nothing.
     function script:New-CtlProfile {
-        param([string]$Dir, [string]$Name, [string]$Options = '<string>DirectInput</string><string>XInput</string>', [string]$Api = 'DirectInput', [int]$Revision = 5, [string]$CoinCode = '99', [string[]]$Omit = @(), [string]$Up = '')
+        param([string]$Dir, [string]$Name, [string]$Options = '<string>DirectInput</string><string>XInput</string>', [string]$Api = 'DirectInput', [int]$Revision = 5, [string]$CoinCode = '99', [string[]]$Omit = @(), [string]$Up = '', [switch]$Eight)
         $slots = @(
             ('<JoystickButtons><ButtonName>Test</ButtonName><InputMapping>Test</InputMapping></JoystickButtons>'),
             ('<JoystickButtons><ButtonName>Coin</ButtonName>{0}<RawInputButton><DevicePath>kbd</DevicePath><DeviceType>Keyboard</DeviceType><KeyboardKey>D5</KeyboardKey></RawInputButton><InputMapping>Coin1</InputMapping></JoystickButtons>' -f ($script:XiXml -f $CoinCode)),
@@ -52,6 +53,7 @@ BeforeAll {
             ('<JoystickButtons><ButtonName>Stick X</ButtonName><InputMapping>Analog0</InputMapping><AnalogType>AnalogJoystick</AnalogType></JoystickButtons>')
             $(if ($Up) { '<JoystickButtons><ButtonName>' + $Up + '</ButtonName><InputMapping>P1ButtonUp</InputMapping><AnalogType>None</AnalogType></JoystickButtons>' })
         )
+        if ($Eight) { $slots += '<JoystickButtons><ButtonName>Button 7</ButtonName><InputMapping>P1Button7</InputMapping><AnalogType>None</AnalogType></JoystickButtons>'; $slots += '<JoystickButtons><ButtonName>Button 8</ButtonName><InputMapping>P1Button8</InputMapping><AnalogType>None</AnalogType></JoystickButtons>' }
         $kept = for ($i = 0; $i -lt $slots.Count; $i++) { $mapping = [regex]::Match($slots[$i], '<InputMapping>(.*?)</InputMapping>').Groups[1].Value; if ($Omit -notcontains $mapping) { $slots[$i] } }
         $xml = '<?xml version="1.0" encoding="utf-8"?><GameProfile><EmulationProfile>Emu</EmulationProfile><GameProfileRevision>{0}</GameProfileRevision><ExecutableName>game</ExecutableName><ConfigValues><FieldInformation><CategoryName>General</CategoryName><FieldName>Input API</FieldName><FieldValue>{1}</FieldValue><FieldOptions>{2}</FieldOptions></FieldInformation></ConfigValues><JoystickButtons>{3}</JoystickButtons></GameProfile>' -f $Revision, $Api, $Options, ($kept -join '')
         $path = Join-Path $Dir ($Name + '.xml')
@@ -89,7 +91,7 @@ Describe 'Controller layout choice' {
     }
 
     It 'the layouts are Xbox, PlayStation, Nintendo, arcade stick and learned arcade controls, and Test and Service start empty' {
-        @((Get-TpmBaselinePresets).Keys) | Should -Be @('Xbox', 'PlayStation', 'Nintendo', 'ArcadeStick', 'LearnedArcade')
+        @((Get-TpmBaselinePresets).Keys) | Should -Be @('Xbox', 'PlayStation', 'Nintendo', 'ArcadeStick', 'LearnedArcade', 'ArcadeStick8')
         $slots = (New-TpmBaseline -Preset 'Xbox').Slots
         $slots['Test'] | Should -Be ''
         $slots['Service1'] | Should -Be ''
@@ -128,6 +130,30 @@ Describe 'Controller layout choice' {
         $labels = @(Get-CtlLayout 'ArcadeStick' | Where-Object Mapping -like 'P1Button?' | ForEach-Object { $_.Label })
         $labels | Should -Be @('Button 1', 'Button 2', 'Button 3', 'Button 4', 'Button 5', 'Button 6')
         (New-TpmBaseline -Preset 'ArcadeStick').Slots['P1Button1'] | Should -Be 'X'
+    }
+
+    It 'the 8-button arcade stick keeps Buttons 1 to 6 as the 6-button one and adds Button 7 and Button 8 on L3 and R3' {
+        $six = (New-TpmBaseline -Preset 'ArcadeStick').Slots
+        $eight = (New-TpmBaseline -Preset 'ArcadeStick8').Slots
+        foreach ($n in 1..6) { $eight["P1Button$n"] | Should -Be $six["P1Button$n"] }
+        $eight['P1Button7'] | Should -Be 'L3'
+        $eight['P1Button8'] | Should -Be 'R3'
+        @(Test-TpmBaseline -Baseline (New-TpmBaseline -Preset 'ArcadeStick8')).Count | Should -Be 0
+        $labels = @(Get-CtlLayout 'ArcadeStick8' | Where-Object Mapping -like 'P1Button?' | ForEach-Object { $_.Label })
+        $labels | Should -Be @('Button 1', 'Button 2', 'Button 3', 'Button 4', 'Button 5', 'Button 6', 'Button 7', 'Button 8')
+        @(Get-CtlLayout 'ArcadeStick' | Where-Object Mapping -like 'P1Button?').Count | Should -Be 6
+        ((Get-TpmBaselineSummaryLines -Baseline (New-TpmBaseline -Preset 'ArcadeStick')) -join ' ') | Should -Not -Match 'Button 7'
+        ((Get-TpmBaselineSummaryLines -Baseline (New-TpmBaseline -Preset 'ArcadeStick8')) -join ' ') | Should -Match 'Button 8  ->  Button 8'
+    }
+
+    It 'a layout saved before the 8-button choice existed (six buttons, no Button 7 or 8) still loads' {
+        [void][System.IO.Directory]::CreateDirectory($script:State)
+        $old = '{"Schema":"TpmControllerBaseline/v1","Preset":"ArcadeStick","SelectionSource":"UserSelected","Slots":{"Coin1":"Back","P1ButtonStart":"Start","P1ButtonUp":"D-pad Up","P1ButtonDown":"D-pad Down","P1ButtonLeft":"D-pad Left","P1ButtonRight":"D-pad Right","P1Button1":"X","P1Button2":"Y","P1Button3":"RB","P1Button4":"A","P1Button5":"B","P1Button6":"LB","Test":"","Service1":""}}'
+        [System.IO.File]::WriteAllText((Get-TpmBaselinePath -StateDir $script:State), $old)
+        $back = Read-TpmBaseline -StateDir $script:State
+        $back.Preset | Should -Be 'ArcadeStick'
+        @(Get-TpmBaselineLayout -Baseline $back | Where-Object Mapping -like 'P1Button?').Count | Should -Be 6
+        ((Get-TpmBaselineSummaryLines -Baseline $back) -join ' ') | Should -Not -Match 'Button 7'
     }
 
     It 'the learned arcade choice is offered and does not tell the user to switch to Xbox mode' {
@@ -331,6 +357,43 @@ Describe 'Controller layout apply' {
         $doc = Read-Xml $path
         (Get-CtlNode $doc 'P1Button1').XInputButton.ButtonCode | Should -Be '16384'
         (Get-CtlNode $doc 'Test').XInputButton.ButtonCode | Should -Be '64'
+    }
+
+    It 'the 8-button arcade stick fills Button 7 and Button 8 (L3 and R3) in a game that has them' {
+        [void](New-CtlTemplate -Dir $script:Game -Name 'Game8' -Eight)
+        $path = New-CtlProfile -Dir $script:Dir -Name 'Game8' -Eight
+        $r = Invoke-CtlApply -Path $path -Layout (Get-CtlLayout 'ArcadeStick8')
+        $r.Status | Should -Be 'Changed'
+        $r.Verified | Should -BeTrue
+        $doc = Read-Xml $path
+        (Get-CtlNode $doc 'P1Button1').XInputButton.ButtonCode | Should -Be '16384'
+        (Get-CtlNode $doc 'P1Button7').XInputButton.ButtonCode | Should -Be '64'
+        (Get-CtlNode $doc 'P1Button8').XInputButton.ButtonCode | Should -Be '128'
+    }
+
+    It 'the 8-button arcade stick leaves a game without Button 7 and Button 8 alone for them' {
+        [void](New-CtlTemplate -Dir $script:Game -Name 'Game6')
+        $path = New-CtlProfile -Dir $script:Dir -Name 'Game6'
+        $plan = Get-TpmBaselineGamePlan -ProfilePath $path -GameProfilesDir $script:Game -Layout (Get-CtlLayout 'ArcadeStick8')
+        ($plan.Rows | Where-Object Mapping -eq 'P1Button7').Action | Should -Be 'NotInGame'
+        ($plan.Rows | Where-Object Mapping -eq 'P1Button8').Action | Should -Be 'NotInGame'
+        $r = Invoke-CtlApply -Path $path -Layout (Get-CtlLayout 'ArcadeStick8')
+        $r.Status | Should -Be 'Changed'
+        $doc = Read-Xml $path
+        $doc.SelectSingleNode('//JoystickButtons[InputMapping="P1Button7"]') | Should -BeNullOrEmpty
+        $doc.SelectSingleNode('//JoystickButtons[InputMapping="P1Button8"]') | Should -BeNullOrEmpty
+        (Get-CtlNode $doc 'P1Button1').XInputButton.ButtonCode | Should -Be '16384'
+    }
+
+    It 'the 6-button arcade stick does not touch Button 7 and Button 8 of a game that has them' {
+        [void](New-CtlTemplate -Dir $script:Game -Name 'Game8' -Eight)
+        $path = New-CtlProfile -Dir $script:Dir -Name 'Game8' -Eight
+        $r = Invoke-CtlApply -Path $path -Layout (Get-CtlLayout 'ArcadeStick')
+        $r.Status | Should -Be 'Changed'
+        $doc = Read-Xml $path
+        (Get-CtlNode $doc 'P1Button1').XInputButton.ButtonCode | Should -Be '16384'
+        (Get-CtlNode $doc 'P1Button7').SelectSingleNode('XInputButton') | Should -BeNullOrEmpty
+        (Get-CtlNode $doc 'P1Button8').SelectSingleNode('XInputButton') | Should -BeNullOrEmpty
     }
 
     It 'keeps MergedInput when the game already uses it and still fills free Xbox slots' {

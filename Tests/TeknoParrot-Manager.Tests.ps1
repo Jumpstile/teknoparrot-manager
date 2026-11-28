@@ -2904,10 +2904,10 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
             ($lines -join "`n") | Should -Match 'Set up your controls'
         }
 
-        It "still shows the steps when TeknoParrot has not written ParrotData.xml yet, and says TPM cannot tell" {
+        It "still shows the steps when TeknoParrot has not written ParrotData.xml yet, and says TeknoParrot Manager cannot tell" {
             $lines = @(Get-TeknoParrotWizardAdviceLines -WizardState (Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot) -TeknoParrotRoot $tpRoot)
 
-            $lines[0] | Should -Be 'TeknoParrot has its own first-time setup, and TPM cannot tell if it is finished.'
+            $lines[0] | Should -Be 'TeknoParrot has its own first-time setup, and TeknoParrot Manager cannot tell if it is finished.'
             $lines | Should -Contain ('  1. Open this file: ' + (Join-Path $tpRoot 'TeknoParrotUi.exe'))
         }
 
@@ -7756,6 +7756,11 @@ function Exit-PostgresRecoveryResume {
         Should -Invoke Read-HostSafe -Times 1 -Exactly
     }
 
+    It "starts with a plain 'Administrator permission is needed' heading (#385)" {
+        Write-PostgresAdministratorGuidance -Operation Recovery
+        $script:postgresGuidanceMessages[0] | Should -Match 'Administrator permission is needed'
+    }
+
     It "explains temporary administrator access and the complete UAC recovery handoff" {
         Write-PostgresAdministratorGuidance -Operation Recovery
 
@@ -10878,7 +10883,7 @@ Describe "Manager script version identity" {
     }
 
     It "extracts the current script's literal identity from its full source" {
-        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC9.4'
+        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC9.5'
     }
 
     It "ignores assignment-looking lines inside a here-string" {
@@ -19153,7 +19158,7 @@ Describe "ReShade protected adoption and accounting" {
         $invokeBody = $source.Substring($invokeStart, $invokeEnd - $invokeStart)
         $invokeBody | Should -Not -Match 'Format-Table|Format-List|Write-Output'
         $source | Should -Match 'ReShade result -- review before continuing to dgVoodoo2'
-        $source | Should -Match 'Press Enter to review the ReShade result before dgVoodoo2'
+        $source | Should -Match 'Press Enter to continue to dgVoodoo2'
         $source | Should -Match 'SelectedProfileTechniques'
         $source | Should -Match 'NativeShaderWarnings'
     }
@@ -24550,7 +24555,7 @@ Describe 'Required patch engine and local recipes' {
         $script:requiredPatchInputQueue = $null
     }
     AfterEach {
-        $script:TpmRequiredPatchCatalogSha256 = '9AF6BF561E62EF08AA822859D1381F0F6A3D71DFAB01790BB81206A6AD668EE3'
+        $script:TpmRequiredPatchCatalogSha256 = '671953A7CB0A41E287D4D94BA782826E804E8DFDB1A168B1B97AE07161DFE2EE'
         $script:TpmOwnedLayout = $null
         $script:gamesInstallFolder = $null
         $script:requiredPatchInputQueue = $null
@@ -24836,11 +24841,11 @@ Describe 'Required patch engine and local recipes' {
 
     It 'binds all current catalog expansion rows to exact build and source identities' {
         $catalog = Read-TpmRequiredPatchCatalog -ProgramRoot ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')))
-        $catalog.Entries.Count | Should -Be 124
-        @($catalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 58
-        @($catalog.Entries | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProfileId,$_.BuildName,$_.Executable,$_.ExecutableSha256 } | Sort-Object -Unique).Count | Should -Be 75
+        $catalog.Entries.Count | Should -Be 136
+        @($catalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 66
+        @($catalog.Entries | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProfileId,$_.BuildName,$_.Executable,$_.ExecutableSha256 } | Sort-Object -Unique).Count | Should -Be 83
         @($catalog.Entries | ForEach-Object { $_.Operations } | Where-Object Type -CEQ 'CreateFile').Count | Should -Be 108
-        @($catalog.Entries | ForEach-Object { $_.Operations } | Where-Object Type -CEQ 'ReplaceFile').Count | Should -Be 12
+        @($catalog.Entries | ForEach-Object { $_.Operations } | Where-Object Type -CEQ 'ReplaceFile').Count | Should -Be 153
         $infinityExpectedRows = @(
             [pscustomobject]@{ Id='infinity-blade-fx-matrix32-main-restore'; Target='Binaries/Win32/matrix32.dll'; Size=109056; Sha1='355E6F9557BAFC726694DC2E40820FF8429D61FB'; Sha256='CB25982F65A32E3D29B3F449BD8CCF2E4A4B47CA3096B454B6910341B213D547' }
             [pscustomobject]@{ Id='infinity-blade-fx-dinput8-main-restore'; Target='Binaries/Win32/dinput8.dll'; Size=2058752; Sha1='72E6862972409A4685545B21C0C687766F83DADC'; Sha256='E7E149EE9E8B64E23B739E236E5A61CAB7F2F56E632082993A95F05DE7D6CCB1' }
@@ -25879,7 +25884,7 @@ Describe 'Required patch engine and local recipes' {
         [IO.File]::ReadAllText($requiredPatchFixture.PluginTarget) | Should -Be 'synthetic required plugin'
         Test-Path -LiteralPath $userProfile | Should -BeFalse
         Should -Invoke Read-PathWithBrowse -Times 1 -Exactly
-        $script:TpmRequiredPatchCatalogSha256 = '9AF6BF561E62EF08AA822859D1381F0F6A3D71DFAB01790BB81206A6AD668EE3'
+        $script:TpmRequiredPatchCatalogSha256 = '671953A7CB0A41E287D4D94BA782826E804E8DFDB1A168B1B97AE07161DFE2EE'
         $script:TpmOwnedLayout = $null
     }
 
@@ -25932,7 +25937,7 @@ Describe 'Required patch engine and local recipes' {
         Invoke-TpmRequiredPatchMenu -TpRoot $tp -UserProfilesDir (Join-Path $tp 'UserProfiles') -ManagerRoot $manager -ProgramRoot $manager -MainSource $source -SupplementarySource ''
         Test-Path -LiteralPath $requiredPatchFixture.PluginTarget | Should -BeFalse
         @(Get-ChildItem -LiteralPath (Join-Path $owned 'Backups\GamePatches') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
-        $script:TpmRequiredPatchCatalogSha256 = '9AF6BF561E62EF08AA822859D1381F0F6A3D71DFAB01790BB81206A6AD668EE3'
+        $script:TpmRequiredPatchCatalogSha256 = '671953A7CB0A41E287D4D94BA782826E804E8DFDB1A168B1B97AE07161DFE2EE'
         $script:TpmOwnedLayout = $null
     }
     It 'selects exact Cross Elysion GPU recipes and refuses a different executable revision' {
@@ -26607,6 +26612,17 @@ Describe 'LaunchBox verified backup write restore and discovery (#335-#338)' {
         $r.Outcome | Should -Be 'FAILED'
         $r.AttemptedPaths.Count | Should -Be 0
         (Get-LbLibraryBytes $script:Lb.Root) | Should -Be $before
+    }
+
+    It 'adds a TeknoChi game whose profile says development only, under its full name' {
+        # Mutation: skip a profile whose DevOnly is true, so the game never reaches LaunchBox.
+        $chi = '<GameProfile><GameName>Chihiro Test Game</GameName><Description>Chihiro Test Game</Description><EmulatorType>TeknoChi</EmulatorType><DevOnly>true</DevOnly><GamePath>' + (Join-Path $script:Lb.Home 'game.exe') + '</GamePath></GameProfile>'
+        [IO.File]::WriteAllText((Join-Path $script:Lb.Profiles 'TeknoChiTest.xml'), $chi)
+        $r = Invoke-LbFixtureWrite
+        $r.Outcome | Should -Be 'SAVED' -Because ($r.Errors -join '; ')
+        $r.Results['TeknoParrot'] | Should -Be 2
+        $titles = @((Read-Xml (Join-Path $script:Lb.Root 'Data\Platforms\TeknoParrot.xml')).LaunchBox.Game | ForEach-Object { [string]$_.Title })
+        $titles | Should -Contain 'Chihiro Test Game'
     }
 
     It 'skips one unreadable profile, names it, and still adds the other games' {

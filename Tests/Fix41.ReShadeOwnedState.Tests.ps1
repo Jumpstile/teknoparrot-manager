@@ -301,7 +301,7 @@ Describe 'FIX41 P05 ReShade state in the owned layout and its startup migration'
         Assert-Fix41ReShadeRemoved -Summary $summary -Game $game -OwnershipPath $ownershipPath
     }
 
-    It 'C2: still backs up and moves ReShade state when the install folder is deep (backup path would pass 260 characters with the old long folder name)' {
+    It 'C2: still backs up and moves ReShade state when the install folder is deep (longest backup file path <Target> characters; the old long folder name would pass 260)' -ForEach @(@{ Target = 245 }, @{ Target = 252 }) {
         # Mutation: restore 'LegacyMigration_<32 hex>' as the backup folder name in Invoke-TpmOwnedMigration -> the backup copy fails
         # on this deep install folder and the migration stops (BACKUP_FAILED / FAILED_BEFORE_MUTATION), nothing is moved.
         $fx = New-Fix41ReShadeFixture
@@ -310,10 +310,10 @@ Describe 'FIX41 P05 ReShade state in the owned layout and its startup migration'
         Save-TpmReShadeOwnershipManifest -Manifest $game.Manifest -Path $legacyOwnershipPath
         $deploymentRelative = 'Deployments\' + [IO.Path]::GetFileName($legacyOwnershipPath)
         $deploymentBase64 = Get-Fix41Base64 -Path $legacyOwnershipPath
-        # Make the TeknoParrot root deep enough that the longest backup file path is 245 characters with the new folder name
-        # (the old 48-character folder name would make it 275).
+        # Make the TeknoParrot root deep enough that the longest backup file path is <Target> characters with the new folder name
+        # (the old 48-character folder name would add 30 more).
         $backupFileTail = '\LegacyMig_00000000\ReShade\TPM-State\' + $deploymentRelative
-        $padLength = 245 - ([string]$fx.Layout.Backups).Length - $backupFileTail.Length - 1
+        $padLength = $Target - ([string]$fx.Layout.Backups).Length - $backupFileTail.Length - 1
         $padLength | Should -BeGreaterThan 0
         $deepTpRoot = Join-Path (Join-Path $fx.Root ('p' * $padLength)) 'TeknoParrot'
         New-Item -ItemType Directory -Path $deepTpRoot -Force | Out-Null

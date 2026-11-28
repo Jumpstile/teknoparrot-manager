@@ -1,6 +1,7 @@
 BeforeAll {
     $repoRoot = [System.IO.Directory]::GetParent($PSScriptRoot).FullName
-    $snapshotRoot = Join-Path $repoRoot 'contracts\snapshots\TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628'
+    $pin = Get-Content -LiteralPath (Join-Path $repoRoot 'contracts\snapshots\CURRENT-SNAPSHOT-PIN.json') -Raw | ConvertFrom-Json
+    $snapshotRoot = Join-Path $repoRoot ('contracts\snapshots\' + $pin.SnapshotId)
     $manifestPath = Join-Path $snapshotRoot 'snapshot-manifest.json'
     $deltaPath = Join-Path $snapshotRoot 'delta.json'
     $validator = Join-Path $repoRoot 'scripts\Test-TpmReleaseCatalogSnapshot.ps1'
@@ -15,21 +16,21 @@ Describe 'TPM immutable current-release snapshot' {
     It 'validates the committed manifest identity without network or machine state' {
         $result = & $validator -ManifestPath $manifestPath | ConvertFrom-Json
         $result.Valid | Should -BeTrue
-        $result.SnapshotId | Should -Be 'TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628'
-        $result.AssetSha256 | Should -Be '9e6a8628d365a9d7c32f1dee07f1a62799656a9fdb1b58afe863526c5cf84901'
-        $result.ManifestFileCount | Should -Be 2231
+        $result.SnapshotId | Should -Be $pin.SnapshotId
+        $result.AssetSha256 | Should -Be $pin.AssetSha256
+        $result.ManifestFileCount | Should -Be $pin.CatalogCounts.TotalFiles
     }
 
     It 'records the exact catalog counts and content-addressed identity' {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-        $manifest.SnapshotId | Should -Match '-ASSET-9E6A8628$'
-        $manifest.Release.Version | Should -Be '1.0.0.2128'
-        $manifest.Release.AssetSize | Should -Be 153159505
-        $manifest.CatalogCounts.GameProfiles | Should -Be 925
-        $manifest.CatalogCounts.GameSetup | Should -Be 383
-        $manifest.CatalogCounts.Metadata | Should -Be 923
-        $manifest.CatalogCounts.TotalFiles | Should -Be 2231
-        @($manifest.Files).Count | Should -Be 2231
+        $manifest.SnapshotId | Should -Match ('-ASSET-' + $pin.AssetSha256.Substring(0, 8).ToUpperInvariant() + '$')
+        $manifest.Release.Version | Should -Be $pin.Version
+        $manifest.Release.AssetSize | Should -Be $pin.AssetSize
+        $manifest.CatalogCounts.GameProfiles | Should -Be $pin.CatalogCounts.GameProfiles
+        $manifest.CatalogCounts.GameSetup | Should -Be $pin.CatalogCounts.GameSetup
+        $manifest.CatalogCounts.Metadata | Should -Be $pin.CatalogCounts.Metadata
+        $manifest.CatalogCounts.TotalFiles | Should -Be $pin.CatalogCounts.TotalFiles
+        @($manifest.Files).Count | Should -Be $pin.CatalogCounts.TotalFiles
     }
 
     It 'rejects a changed proof commit' {
@@ -57,18 +58,19 @@ Describe 'TPM immutable current-release snapshot' {
 
     It 'persists machine-generated delta counts and the canonical jdredd identity' {
         $delta = Get-Content -LiteralPath $deltaPath -Raw | ConvertFrom-Json
-        $delta.HistoricalProfileCount | Should -Be 695
-        $delta.CurrentProfileCount | Should -Be 925
-        $delta.AddedProfileCount | Should -Be 230
-        $delta.RemovedProfileCount | Should -Be 0
-        $delta.SemanticChangedProfileCount | Should -Be 38
-        $delta.SemanticUnchangedProfileCount | Should -Be 657
-        @($delta.Added).Count | Should -Be 230
-        @($delta.Removed).Count | Should -Be 0
-        @($delta.Changed).Count | Should -Be 38
-        @($delta.Unchanged).Count | Should -Be 657
-        @($delta.Added) | Should -Contain 'jdredd'
-        @($delta.Added) | Should -Not -Contain 'jdreedd'
+        $delta.HistoricalProfileCount | Should -Be $pin.Delta.Historical
+        $delta.CurrentProfileCount | Should -Be $pin.Delta.Current
+        $delta.AddedProfileCount | Should -Be $pin.Delta.Added
+        $delta.RemovedProfileCount | Should -Be $pin.Delta.Removed
+        $delta.SemanticChangedProfileCount | Should -Be $pin.Delta.Changed
+        $delta.SemanticUnchangedProfileCount | Should -Be $pin.Delta.Unchanged
+        @($delta.Added).Count | Should -Be $pin.Delta.Added
+        @($delta.Removed).Count | Should -Be $pin.Delta.Removed
+        @($delta.Changed).Count | Should -Be $pin.Delta.Changed
+        @($delta.Unchanged).Count | Should -Be $pin.Delta.Unchanged
+        $codes = @((Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json).Files | ForEach-Object ProfileCode)
+        $codes | Should -Contain 'jdredd'
+        $codes | Should -Not -Contain 'jdreedd'
     }
 
     It 'contains no unsafe or duplicate manifest paths' {
@@ -82,7 +84,7 @@ Describe 'TPM immutable current-release snapshot' {
     It 'keeps the historical contract snapshot separate' {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         $manifest.DeltaManifest | Should -Be 'delta.json'
-        $manifest.SourceProof.Commit | Should -Be 'dc998e374608abbda373bb3c236db5b26b5afca7'
+        $manifest.SourceProof.Commit | Should -Be $pin.SourceProofCommit
         @(Get-ChildItem -LiteralPath $snapshotRoot -Filter '*.zip' -File -ErrorAction SilentlyContinue).Count | Should -Be 0
         @(Get-ChildItem -LiteralPath $snapshotRoot -Filter '*.xml' -File -ErrorAction SilentlyContinue).Count | Should -Be 0
     }
@@ -101,13 +103,13 @@ Describe 'TPM immutable current-release snapshot' {
         $result = & $driftWatcher -RecordedEvidencePath (Join-Path $snapshotRoot 'release-evidence.json') -ObservedReleasePath $observedPath | ConvertFrom-Json
         $result.Status | Should -Be 'NEW_RELEASE_SNAPSHOT_AVAILABLE'
         $result.Action | Should -Match 'new reviewed immutable snapshot'
-        (Get-Content -LiteralPath (Join-Path $snapshotRoot 'release-evidence.json') -Raw) | Should -Match '9e6a8628d365a9d7c32f1dee07f1a62799656a9fdb1b58afe863526c5cf84901'
+        (Get-Content -LiteralPath (Join-Path $snapshotRoot 'release-evidence.json') -Raw) | Should -Match $pin.AssetSha256
     }
 
     It 'names the recorded snapshot from the recorded evidence, not from a fixed text' {
         $recorded = Get-Content -LiteralPath (Join-Path $snapshotRoot 'release-evidence.json') -Raw | ConvertFrom-Json
         $same = & $driftWatcher -RecordedEvidencePath (Join-Path $snapshotRoot 'release-evidence.json') -ObservedReleasePath (Join-Path $snapshotRoot 'release-evidence.json') | ConvertFrom-Json
-        $same.RecordedSnapshotId | Should -Be 'TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628'
+        $same.RecordedSnapshotId | Should -Be $pin.SnapshotId
         $recorded.Current.Version = '9.9.9.9'
         $recorded.Current.AssetSha256 = ('ab12cd34' + ('0' * 56))
         $otherPath = Join-Path $TestDrive 'other-recorded.json'
@@ -158,7 +160,7 @@ Describe 'TPM immutable current-release snapshot' {
 
     It 'refuses to write into a folder that already holds a different snapshot, and allows the same one' {
         # Mutation: drop the check in Assert-TpmSnapshotOutputRoot -> a changed upstream asset silently overwrites the pinned evidence folder.
-        $generatorAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $repoRoot 'scripts\New-TpmReleaseCatalogSnapshot.ps1'), [ref]$null, [ref]$null)
+        $generatorAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $repoRoot 'scripts\TpmReleaseCatalogSnapshot.Common.ps1'), [ref]$null, [ref]$null)
         $guardAst = $generatorAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-TpmSnapshotOutputRoot' }, $true)
         Invoke-Expression $guardAst.Extent.Text
         $out = Join-Path $TestDrive 'pinned'

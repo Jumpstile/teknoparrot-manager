@@ -34,12 +34,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $toolFolder = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# The snapshot tool's own hash functions, taken from it as text so there is one definition (it cannot be dot-sourced: its parameters are mandatory).
-$snapshotToolText = [System.IO.File]::ReadAllText((Join-Path $toolFolder 'New-TpmReleaseCatalogSnapshot.ps1'))
+# The snapshot tools' shared hash functions, taken from their common file as text so there is one definition.
+$snapshotToolText = [System.IO.File]::ReadAllText((Join-Path $toolFolder 'TpmReleaseCatalogSnapshot.Common.ps1'))
 $snapshotAst = [System.Management.Automation.Language.Parser]::ParseInput($snapshotToolText, [ref]$null, [ref]$null)
 $wantedFunctions = @('Get-TpmSnapshotSha256Bytes', 'ConvertTo-TpmXmlEscaped', 'ConvertTo-TpmCanonicalXmlNode', 'Get-TpmSemanticHash')
 $functionAsts = @($snapshotAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wantedFunctions -contains $n.Name }, $true))
-if ($functionAsts.Count -ne $wantedFunctions.Count) { throw 'The snapshot tool no longer has the hash functions this tool reuses.' }
+if ($functionAsts.Count -ne $wantedFunctions.Count) { throw 'The snapshot common file no longer has the hash functions this tool reuses.' }
 . ([scriptblock]::Create((@($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n")))
 
 function Find-TpmDriftProfilesDir {
@@ -170,9 +170,11 @@ if ($MyInvocation.InvocationName -eq '.') { return }
 if (-not $ProfilesPath) { throw 'Give -ProfilesPath.' }
 if (-not $DecisionsPath) { $DecisionsPath = Join-Path $toolFolder 'TpmGameSupportDecisions.json' }
 if (-not $SnapshotManifestPath) {
-    $manifests = @(Get-ChildItem -LiteralPath (Join-Path $toolFolder '..\contracts\snapshots') -Filter 'snapshot-manifest.json' -File -Recurse | Sort-Object { $_.Directory.Name } -Descending)
-    if ($manifests.Count -eq 0) { throw 'No pinned snapshot-manifest.json was found.' }
-    $SnapshotManifestPath = $manifests[0].FullName
+    $pinPath = Join-Path $toolFolder '..\contracts\snapshots\CURRENT-SNAPSHOT-PIN.json'
+    if (-not (Test-Path -LiteralPath $pinPath -PathType Leaf)) { throw 'No pinned snapshot (contracts\snapshots\CURRENT-SNAPSHOT-PIN.json) was found.' }
+    $pinnedId = [string]([System.IO.File]::ReadAllText($pinPath) | ConvertFrom-Json).SnapshotId
+    $SnapshotManifestPath = Join-Path $toolFolder ('..\contracts\snapshots\' + $pinnedId + '\snapshot-manifest.json')
+    if (-not (Test-Path -LiteralPath $SnapshotManifestPath -PathType Leaf)) { throw "The pinned snapshot-manifest.json is missing: $SnapshotManifestPath" }
 }
 $profilesDir = Find-TpmDriftProfilesDir -Path $ProfilesPath
 $decisions = [System.IO.File]::ReadAllText($DecisionsPath) | ConvertFrom-Json

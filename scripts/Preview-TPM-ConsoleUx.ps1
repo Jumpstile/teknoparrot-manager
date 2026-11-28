@@ -12,7 +12,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$script:DisplayVersion = 'v1.0 RC9.4'
+$script:DisplayVersion = 'v1.0 RC9.5'
 
 function Get-ViewportInfo {
     $rawWindowWidth = $null

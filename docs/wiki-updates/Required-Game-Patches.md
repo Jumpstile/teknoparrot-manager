@@ -31,6 +31,10 @@ TeknoParrot Manager never downloads these fixes. They come from your own game ZI
 - TeknoParrot Manager never downloads a patch file. A few patches also accept the game's own ZIP (for example the APM3 `apm.dll` for Dead or Alive 6, Otoshu DX and Rolling Gunner). The screen names every file that would work. Other separate patch ZIPs, such as the Guilty Gear APM3 files, are a separate download that TeknoParrot Manager does not provide.
 - A copy of the original files is saved first, so Undo can put them back. Undo only works for patches TeknoParrot Manager installed.
 - If your PC has two real graphics cards, you are asked once which one the game uses. Press Enter if you are not sure. Fixes made for one make of card are then skipped.
+- Ghost Squad Evolution (1.0 Rev A) can get the AMD or the NVIDIA shader fix. Pick the one for your graphics card. For AMD cards, also turn on EnableAmdFix for the game in TeknoParrot.
+- Some games need a whole folder of patch files copied in: The House of the Dead EX, Tatsunoko vs. Capcom and Ghost Squad Evolution. TeknoParrot Manager can now do this (all files go in together, or none do, and Undo puts everything back). It reads the files from a ZIP you already own and never downloads them. These three are not switched on yet: until the real files have been measured, the menu says "not ready yet" and changes nothing.
+- When a game has several patch versions and nothing on your PC tells them apart, the menu asks you to pick one (Back cancels). The Fast and the Furious: Drift (screen size) and Chase H.Q. 2 (region) work this way. Only the version you pick is installed.
+- Dragon Dance has one recipe: the newer `iDmacDrv32.dll`. It is read from the RAR file inside your `Dragon Dance.rar` (7-Zip must be installed) and Undo puts the old one back. The modified `Game_liong.exe` has no recipe; Game Notes tells you what to get. Block King's recipe is "not ready yet" until its `game.exe` is measured. For Street Fighter V Type Arcade there is no recipe.
 
 <details>
 <summary>Details</summary>

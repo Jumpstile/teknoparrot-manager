@@ -41,6 +41,14 @@ Describe 'full game title helper' {
         Get-TpmGameTitle -Code 'profileonly' | Should -Be 'Profile Only Game'
     }
 
+    It 'shows the full profile name of a TeknoChi game even though its profile says development only' {
+        # Mutation: skip a profile whose DevOnly is true, so the game shows by its short code.
+        [System.IO.File]::WriteAllText((Join-Path $script:F113Root 'GameProfiles\TeknoChiTestGame.xml'), '<GameProfile><GameName>Chihiro Test Game</GameName><EmulatorType>TeknoChi</EmulatorType><DevOnly>true</DevOnly></GameProfile>')
+        $script:TpmGameTitleCache = $null
+        Get-TpmGameTitle -Code 'TeknoChiTestGame' | Should -Be 'Chihiro Test Game'
+        Format-TpmNameList -Names @('TeknoChiTestGame') | Should -Be 'Chihiro Test Game'
+    }
+
     It 'falls back to the short name, never blank, for an unknown code or non-code text' {
         # Mutation: return an empty string for an unknown code, or probe a path-like name.
         Get-TpmGameTitle -Code 'nosuchgame' | Should -Be 'nosuchgame'

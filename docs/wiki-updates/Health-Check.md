@@ -6,6 +6,12 @@ When it ends, it offers follow-up actions (repair a path, set up PostgreSQL, and
 
 After a game path repair, the result says how many games were repaired and how many still need you, and what to do next. If some are repaired and some are not, it says `Partly done`. When a check could not run, the result says so. It never says everything is fine then.
 
+Path repair only points a game at the same game and the same version. It does not point a game at a different game or a different version, even when the game file has the same name. It does not point two games at one folder unless they are a known twin pair (a TeknoChi game and its older matching game). If your version is not on the drive but a different version is, the reason says `this version of the game is not on this drive`, and the game is left unchanged.
+
+When you choose `[R] Try automatic path repair`, you first see `Candidate paths found (no profile changes made):` with a before and an after path for each game. Games that cannot be pointed anywhere safely are listed under `Left unchanged, not pointed anywhere` with one reason per line, and are not changed. Only after you answer Y to `[Y] Apply only these reviewed candidates` are paths saved, after a safety backup. If no candidate is found, it says `No safe automatic candidates were found in this folder. Nothing was changed.` and offers S, D, B (and C when a ZIP source folder is set up).
+
+After registration, games that could not be matched to a game folder are listed with the choices Fix (F), Remove (R), Skip (S), Ignore (I) and Details (D). Fix lets you pick the game file yourself. Remove takes the game out of TeknoParrot after a safety backup; it never deletes game files. Skip leaves the game out of this run. Ignore leaves it out until you turn it back on. Details shows why. Plain Enter skips them all and changes nothing.
+
 ---
 
 ## How to run it

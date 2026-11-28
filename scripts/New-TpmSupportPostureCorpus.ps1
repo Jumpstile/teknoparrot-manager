@@ -25,14 +25,18 @@ $script:TpmPinnedTeknoParrotRepository = 'TeknoParrot-install'
 $script:TpmPinnedTeknoParrotCommit = '5880e019016c5c3a0576e97a6c2a7f14bf54e3d1'
 $script:TpmPinnedTeknoParrotProfileCount = 695
 $script:TpmPinnedHistoricalManifestOrderSha256 = 'b7ec88b0de487fbcdcdf697334ccbec154a0f61e8c0a24712f2e99425425f4aa'
-$script:TpmCurrentReleaseSnapshotId = 'TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628'
-$script:TpmCurrentReleaseSourceProofCommit = 'dc998e374608abbda373bb3c236db5b26b5afca7'
-$script:TpmCurrentReleaseProfileCount = 925
-$script:TpmCurrentReleaseGameSetupCount = 383
-$script:TpmCurrentReleaseMetadataCount = 923
-$script:TpmCurrentReleaseAddedCount = 230
-$script:TpmCurrentReleaseChangedCount = 38
-$script:TpmCurrentReleaseUnchangedCount = 657
+# The accepted current-release snapshot is named once, in contracts\snapshots\CURRENT-SNAPSHOT-PIN.json (rewritten by scripts\Update-TpmCatalogSnapshotPins.ps1).
+$tpmSnapshotPinPath = Join-Path $PSScriptRoot '..\contracts\snapshots\CURRENT-SNAPSHOT-PIN.json'
+if (-not (Test-Path -LiteralPath $tpmSnapshotPinPath -PathType Leaf)) { throw "Snapshot pin file is missing: $tpmSnapshotPinPath" }
+$tpmSnapshotPin = Get-Content -Encoding UTF8 -LiteralPath $tpmSnapshotPinPath -Raw | ConvertFrom-Json
+$script:TpmCurrentReleaseSnapshotId = [string]$tpmSnapshotPin.SnapshotId
+$script:TpmCurrentReleaseSourceProofCommit = [string]$tpmSnapshotPin.SourceProofCommit
+$script:TpmCurrentReleaseProfileCount = [int]$tpmSnapshotPin.CatalogCounts.GameProfiles
+$script:TpmCurrentReleaseGameSetupCount = [int]$tpmSnapshotPin.CatalogCounts.GameSetup
+$script:TpmCurrentReleaseMetadataCount = [int]$tpmSnapshotPin.CatalogCounts.Metadata
+$script:TpmCurrentReleaseAddedCount = [int]$tpmSnapshotPin.Delta.Added
+$script:TpmCurrentReleaseChangedCount = [int]$tpmSnapshotPin.Delta.Changed
+$script:TpmCurrentReleaseUnchangedCount = [int]$tpmSnapshotPin.Delta.Unchanged
 
 
 $script:TpmSupportPostureClassifications = @(

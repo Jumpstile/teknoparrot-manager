@@ -99,6 +99,8 @@ To also save the details file, add `-ValidationJsonPath`:
 - It prints plain counts: games in the list, games found in your TeknoParrot, games ready for a person to review, games with some controls missing, and games held back.
 - Nothing in the list is trusted, applied or bundled. No profile is changed. The only file it writes is the details file you name.
 - A game is held back with a plain reason: the game is not in your TeknoParrot, the list names the game twice, the list sets one control twice, the list sets a control the game does not have, the list uses a button name TeknoParrot Manager does not know, or two game actions share one controller button.
+- Two more reasons: a label in the list names a different control than the one it is on (Coin, Start, Test or Service on a control of another kind), and the game file's revision or SHA-256 changed since the last details file written for the same list (same list SHA-256). The details file is that record, so keep a copy if you want to compare against an older snapshot.
+- `-MappingEvidenceCommit <code>` (7 to 64 hexadecimal characters) saves the commit of the outside list you checked in the details file, so the counts can be matched to one pinned snapshot.
 - Five known spelling mistakes in the list are corrected and counted.
 - The same inputs give the same details file.
 

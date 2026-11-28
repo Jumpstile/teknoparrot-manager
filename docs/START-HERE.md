@@ -6,7 +6,7 @@ It is not TeknoParrot. It does not install or set up TeknoParrot itself.
 
 Allow about 10 minutes for TeknoParrot Manager setup and your first small game, once the downloads are ready. Installing TeknoParrot, downloading updates, extracting large games, and setting up a wheel or lightgun can take longer.
 
-This guide describes v1.0 RC9.4. If your menu looks different, follow the menu names.
+This guide describes v1.0 RC9.5. If your menu looks different, follow the menu names.
 
 Each step below has one action. "You will see" tells you what should appear. "Next" tells you what to do after that.
 
@@ -306,19 +306,19 @@ Type each answer, then press **Enter**.
 
    Next: after **Y**, start-up carries on and the main menu appears. After **N**, go to step 5.
 
-5. If you see **Auto-detected TeknoParrot at:**, check the folder shown. At **Use this path? (Y/N)**, type **Y** only if that folder contains your `TeknoParrotUi.exe`.
+5. If you see **Looking for TeknoParrot on your drives...**, wait while TeknoParrot Manager looks. It searches every drive in your PC (not network drives): the top of each drive, the folders inside it, and the usual game and emulator folders. It only looks. Nothing is changed until you choose.
 
-   You will see after **Y**: your chosen TeknoParrot folder, then the games-folder question.
+   You will see: which drives it searched. Then each TeknoParrot it found, as a numbered row with the drive letter, the full path and the version. If it cannot read the version, the row says **not readable**. If it had to stop early on a big drive, it says so, and you can type **B** to pick the folder yourself.
 
-   Next: after **Y**, go to step 8. After **N**, go to step 7.
+   Next: if one row holds your `TeknoParrotUi.exe`, type its number and go to step 8. Type **R** to search again. Type **B** to type or browse for the folder (step 7). Type **Q** to quit; nothing is changed.
 
-6. If you see **Found TeknoParrot in multiple locations:**, type the number of the folder that holds your `TeknoParrotUi.exe`.
+6. If you see more than one row, check the drive letter, the path and the version of each one. Type the number of the row that holds your `TeknoParrotUi.exe`.
 
    You will see: your chosen TeknoParrot folder, then the games-folder question.
 
    Next: go to step 8.
 
-7. If none of the detected folders is correct, choose **N**. Then type the folder path, type **B** to browse for it, or type **Q** to quit. Nothing is changed if you quit.
+7. If none of the rows is correct, or you see **No TeknoParrot folder was found (a folder needs TeknoParrotUi.exe in it).**, type **B**. Then type the folder path, type **B** to browse for it, or type **Q** to quit. Nothing is changed if you quit.
 
    You will see: the prompt **Type the path of your TeknoParrot folder, the one with TeknoParrotUi.exe in it, or Q to quit (or type B to browse)**, then the games-folder question.
 
@@ -515,6 +515,8 @@ Keep the original game files and ZIPs. Never delete leftover marker files just t
 
    You will see: the next question, without a repair.
 
+   If you choose Y and some games still cannot be matched to a game folder, you see a list of them with the choices Fix (F), Remove (R), Skip (S), Ignore (I) and Details (D). Plain Enter skips them all and changes nothing. Remove takes a game out of TeknoParrot after a safety backup and never deletes your game files. See "Game Repair" in the README.
+
    Next: answer the thumbnails question.
 
 3. If asked about thumbnails, choose **N** to skip optional icons for now.
@@ -607,7 +609,7 @@ Do these steps in order. Test after each change, so you know which change helped
 
    Use RetroBat? A game that works from TeknoParrot can still fail when RetroBat starts it, because they are two different ways to start a game. See "A game works in TeknoParrot but not from RetroBat" in docs/TROUBLESHOOTING.md. TeknoParrot Manager does not change RetroBat.
 
-7. In TeknoParrot Manager, choose **4) Controls**, then choice **2** to choose your controller layout (Xbox, PlayStation, Nintendo or arcade stick), then choice **1** to set up your games with it.
+7. In TeknoParrot Manager, choose **4) Controls**, then choice **2** to choose your controller layout (Xbox, PlayStation, Nintendo or arcade stick; an arcade stick has a 6-button choice and an 8-button choice), then choice **1** to set up your games with it.
 
    You will see: a preview of what would change, then a question asking you to approve. A backup is made first.
 

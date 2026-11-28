@@ -340,6 +340,18 @@ Describe 'Controls coverage from the game''s own file' {
         $inv.Structural | Should -Be 'Partial'
     }
 
+    It 'audits a TeknoChi game whose profile says development only like any other game' {
+        # Mutation: leave out profiles that say DevOnly, so the TeknoChi game is missing from the count.
+        $user = Join-Path $TestDrive 'own-user-chi'; $game = Join-Path $TestDrive 'own-game-chi'
+        New-Item -ItemType Directory -Path $user, $game -Force | Out-Null
+        $tag = '<GameProfile><EmulatorType>TeknoChi</EmulatorType><DevOnly>true</DevOnly>'
+        Set-Content -LiteralPath (Join-Path $user 'TeknoChiTest.xml') -Value ((New-OwnGameXml -Slots (New-OwnSlots -Bound $script:allBound)) -replace '<GameProfile>', $tag) -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $game 'TeknoChiTest.xml') -Value ((New-OwnGameXml -Slots (New-OwnSlots) -Template) -replace '<GameProfile>', $tag) -Encoding utf8
+        $audit = Get-TpmControlCoverageAudit -Profiles @(Get-ChildItem -LiteralPath $user -Filter '*.xml') -GameProfilesDir $game
+        $audit.Total | Should -Be 1
+        $audit.Complete | Should -Be 1
+    }
+
     It 'audits every registered game, counts them, names the games behind Details, and changes no file' {
         $user = Join-Path $TestDrive 'own-user-audit'; $game = Join-Path $TestDrive 'own-game-audit'
         New-Item -ItemType Directory -Path $user, $game -Force | Out-Null

@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC9.4  --  QUICK START
+  TeknoParrot Manager  |  v1.0 RC9.5  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -9,8 +9,8 @@
   Unfamiliar term (GamePath, UserProfile, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  This guide is for v1.0 RC9.4.
-  Release page: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.4
+  This guide is for v1.0 RC9.5.
+  Release page of the latest published release (RC9.4): https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.4
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after every run. AutoSync backs up UserProfiles before
@@ -419,26 +419,35 @@
      Next: after Y, start-up carries on and the main menu appears. After N, go
      to step 5.
 
-  5. If you see "Auto-detected TeknoParrot at:", check the folder shown. At
-     "Use this path? (Y/N)", type Y only if that folder contains your
+  5. If you see "Looking for TeknoParrot on your drives...", wait while
+     TeknoParrot Manager looks. It searches every drive in your PC (not
+     network drives): the top of each drive, the folders inside it, and the
+     usual game and emulator folders. It only looks. Nothing is changed
+     until you choose.
+
+     You will see: which drives it searched. Then each TeknoParrot it
+     found, as a numbered row with the drive letter, the full path and the
+     version. If it cannot read the version, the row says "not readable".
+     If it had to stop early on a big drive, it says so, and you can type
+     B to pick the folder yourself.
+
+     Next: if one row holds your TeknoParrotUi.exe, type its number and go
+     to step 8. Type R to search again. Type B to type or browse for the
+     folder (step 7). Type Q to quit; nothing is changed.
+
+  6. If you see more than one row, check the drive letter, the path and the
+     version of each one. Type the number of the row that holds your
      TeknoParrotUi.exe.
-
-     You will see after Y: your chosen TeknoParrot folder, then the
-     games-folder question.
-
-     Next: after Y, go to step 8. After N, go to step 7.
-
-  6. If you see "Found TeknoParrot in multiple locations:", type the number of
-     the folder that holds your TeknoParrotUi.exe.
 
      You will see: your chosen TeknoParrot folder, then the games-folder
      question.
 
      Next: go to step 8.
 
-  7. If none of the detected folders is correct, choose N. Then type the folder
-     path, type B to browse for it, or type Q to quit. Nothing is changed if
-     you quit.
+  7. If none of the rows is correct, or you see "No TeknoParrot folder was
+     found (a folder needs TeknoParrotUi.exe in it).", type B. Then type
+     the folder path, type B to browse for it, or type Q to quit. Nothing
+     is changed if you quit.
 
      You will see: the prompt "Type the path of your TeknoParrot folder, the
      one with TeknoParrotUi.exe in it, or Q to quit (or type B to browse)",
@@ -703,6 +712,13 @@
      need to fix an existing registration.
 
      You will see: the next question, without a repair.
+
+     If you choose Y and some games still cannot be matched to a game
+     folder, you see a list of them with the choices Fix (F), Remove (R),
+     Skip (S), Ignore (I) and Details (D). Plain Enter skips them all and
+     changes nothing. Remove takes a game out of TeknoParrot after a
+     safety backup and never deletes your game files. See "Game Repair" in
+     the README.
 
      Next: answer the thumbnails question.
 
@@ -2196,6 +2212,8 @@
 
   Mode 14, Health check: broken saved paths can be repaired from reviewed
   candidates. The default search root is the configured games folder.
+  Games that cannot be pointed anywhere safely are listed as "Left
+  unchanged, not pointed anywhere" with a reason and are not changed.
 
   Another search folder must be existing, canonical, non-reparse, and
   outside TeknoParrot, TeknoParrot Manager, and both ZIP source folders.
@@ -4244,6 +4262,8 @@
     icons not in the repo are skipped without error.
 
   - After registering, the script offers to repair any broken game paths.
+    Games it cannot match are listed with the choices Fix, Remove, Skip,
+    Ignore and Details.
 
   - On later runs the script remembers your settings. At "Use these
     settings? (Y/N, D = show them)" press Y to reuse them, N to answer the

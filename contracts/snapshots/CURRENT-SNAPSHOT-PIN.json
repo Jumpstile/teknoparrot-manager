@@ -1,0 +1,22 @@
+{
+  "PinSchemaVersion": "1.0.0",
+  "SnapshotId": "TPM-GAME-SUPPORT-RELEASE-1.0.0.2343-ASSET-5E79A108",
+  "Version": "1.0.0.2343",
+  "AssetSha256": "5e79a1087f71a8352cad3b0aa8f3eac5fa5a314595d8dc4d7b121f9304ddec1c",
+  "AssetSize": 13328040,
+  "SourceProofCommit": "installed-semantic-sha256:9aab5c1254efa9bed1c557ffcd9f41cd0d8c6c68cf3a1a8862282b71654adf6f",
+  "CatalogCounts": {
+    "GameProfiles": 2594,
+    "GameSetup": 389,
+    "Metadata": 2592,
+    "TotalFiles": 5575
+  },
+  "Delta": {
+    "Historical": 925,
+    "Current": 2594,
+    "Added": 1669,
+    "Removed": 0,
+    "Changed": 645,
+    "Unchanged": 280
+  }
+}

@@ -72,7 +72,7 @@ Describe 'Game support decisions file' {
     }
 
     It 'lists exactly the profiles of the reviewed patch catalog as patch decisions' {
-        $recipeProfiles = @($script:f412Recipes.Entries | ForEach-Object { $_.ProfileId } | Sort-Object -Unique)
+        $recipeProfiles = @($script:f412Recipes.Entries | Where-Object { $_.Operations[0].Type -cne 'CopyFolder' } | ForEach-Object { $_.ProfileId } | Sort-Object -Unique)
         $decided = @($script:f412Decisions.Profiles | Where-Object { @($_.Signals) -contains 'recipe' } | ForEach-Object { $_.Profile } | Sort-Object)
         ($decided -join ',') | Should -BeExactly ($recipeProfiles -join ',')
         foreach ($row in @($script:f412Decisions.Profiles | Where-Object { @($_.Signals) -contains 'recipe' })) {
@@ -99,15 +99,16 @@ Describe 'Third-party items for the guided games' {
         foreach ($entry in @($script:f412Checks.Entries)) {
             $row = @($script:f412Decisions.Profiles | Where-Object { $_.Profile -eq $entry.Profile })
             $row.Count | Should -Be 1 -Because $entry.Profile
-            $row[0].Disposition | Should -BeExactly 'guided'
-            $row[0].Reason | Should -Match 'never downloads'
+            # A game whose file part has a recipe (Dragon Dance iDmacDrv32.dll) is a patch row that is still guided for the rest.
+            if ($entry.Profile -ceq 'DragonDanceNesica') { $row[0].Disposition | Should -BeExactly 'tpm-applies-patch'; @($row[0].Also) | Should -Contain 'guided'; $row[0].Reason | Should -Match 'catalog' } else { $row[0].Disposition | Should -BeExactly 'guided'; $row[0].Reason | Should -Match 'never downloads' }
             $entry.Message | Should -Match 'never (downloads|installs|replaces|runs)' -Because $entry.Profile
         }
     }
 
-    It 'checks only files inside the game folder and gives a link only when the guide does' {
+    It 'checks only relative files (in the game folder, or at the top of the drive when the entry says so) and gives a link only when the guide does' {
         foreach ($entry in @($script:f412Checks.Entries)) {
             $entry.CanCheck | Should -Be (@($entry.Checks).Count -gt 0)
+            if ($entry.PSObject.Properties['CheckRoot']) { $entry.CheckRoot | Should -BeExactly 'DriveRoot' }
             foreach ($check in @($entry.Checks)) {
                 $check.Type | Should -BeExactly 'File'
                 $check.Path | Should -Not -Match '^[A-Za-z]:|^[\\/]|\.\.'

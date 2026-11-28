@@ -163,4 +163,37 @@ partialgame:
         (Invoke-TpmMappingEvidenceReport -EvidencePath $script:ListPath -TeknoParrotRoot $script:Root -JsonPath $other 6>$null) | Should -Be 1
         (Get-Content -LiteralPath $other -Raw).Trim() | Should -Be 'my own notes'
     }
+
+    It 'holds back a control whose label names a different cabinet role, and keeps a matching label' {
+        New-GameProfile -Dir $script:Profiles -Name 'labelgame' -Mappings @('Coin1', 'P1ButtonStart', 'P1Button1')
+        $path = Join-Path $script:Root 'labels.yml'
+        [System.IO.File]::WriteAllText($path, "labelgame:`n  Coin1: start # Coin 1`n  P1ButtonStart: select # Coin`n  P1Button1: south # Shoot`n", (New-Object System.Text.UTF8Encoding $false))
+        $review = Get-TpmMappingEvidenceReview -Evidence (Read-TpmMappingEvidenceFile -Path $path) -GameProfilesDir $script:Profiles
+        $e = Get-Entry $review 'labelgame'
+        $e.Status | Should -Be 'Withheld'
+        $e.Reasons | Should -Be @('SemanticDisagreement')
+        @($e.Problems).Count | Should -Be 1
+        $e.Problems[0].Field | Should -Be 'P1ButtonStart'
+    }
+
+    It 'records the pinned source commit and holds back a game file that changed since the last check of the same list' {
+        $json = Join-Path $script:Root 'pinned.json'
+        (Invoke-TpmMappingEvidenceReport -EvidencePath $script:ListPath -TeknoParrotRoot $script:Root -JsonPath $json -SourceCommit '981052e87fa5b6a8f7fc4b29691194c34cfe96f4' 6>$null) | Should -Be 0
+        $first = Get-Content -LiteralPath $json -Raw | ConvertFrom-Json
+        $first.Source.Commit | Should -Be '981052e87fa5b6a8f7fc4b29691194c34cfe96f4'
+        (Get-Entry $first 'goodgame').Status | Should -Be 'ReadyForReview'
+        New-GameProfile -Dir $script:Profiles -Name 'goodgame' -Mappings @('Test', 'Service1', 'Coin1', 'Coin2', 'P1ButtonStart', 'P1Button1') -Revision '8'
+        (Invoke-TpmMappingEvidenceReport -EvidencePath $script:ListPath -TeknoParrotRoot $script:Root -JsonPath $json 6>$null) | Should -Be 0
+        $second = Get-Content -LiteralPath $json -Raw | ConvertFrom-Json
+        $stale = Get-Entry $second 'goodgame'
+        $stale.Status | Should -Be 'Withheld'
+        $stale.Reasons | Should -Contain 'StaleIdentity'
+        (Get-Entry $second 'partialgame').Reasons | Should -Not -Contain 'StaleIdentity'
+    }
+
+    It 'refuses a source commit that is not hexadecimal and writes nothing' {
+        $json = Join-Path $script:Root 'bad.json'
+        (Invoke-TpmMappingEvidenceReport -EvidencePath $script:ListPath -TeknoParrotRoot $script:Root -JsonPath $json -SourceCommit 'not a commit' 6>$null) | Should -Be 1
+        Test-Path -LiteralPath $json | Should -BeFalse
+    }
 }

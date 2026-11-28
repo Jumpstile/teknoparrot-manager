@@ -155,7 +155,7 @@ Describe 'FIX80 registration recap (audit item 2)' {
             'Registered: 3 games read back after saving.', 'Already set up: 10 existing game file(s) found.',
             "Reused an already-present Eggman's TeknoParrot DAT file", 'Downloaded missing game icons (small box-art images, not game data).',
             'It does not provide games, install TeknoParrot itself, or guarantee that a game will boot or run fullscreen.',
-            'usually a TeknoParrot, game, or runtime setting', 'This recap does not verify registration failures or later optional steps',
+            'usually a TeknoParrot, game, or runtime setting', 'This recap does not verify later optional steps',
             'Saved copy: C:\Backups\Run1', 'Log: C:\Logs\TeknoParrot-Manager.log', 'Controls file: C:\Reports\controls.txt'
         )) { $text | Should -Match ([regex]::Escape($fact)) }
     }

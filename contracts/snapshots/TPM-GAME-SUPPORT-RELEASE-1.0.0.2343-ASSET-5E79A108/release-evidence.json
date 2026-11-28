@@ -1,0 +1,31 @@
+{
+  "EvidenceSchemaVersion": "1.0.0",
+  "CapturedAtUtc": "2026-11-27T16:15:26Z",
+  "Repository": "installed-folder",
+  "SourceKind": "INSTALLED_FOLDER",
+  "Current": {
+    "Version": "1.0.0.2343",
+    "Tag": "INSTALLED-FOLDER",
+    "ReleaseId": 0,
+    "AssetName": "TeknoParrotUi.exe",
+    "AssetUrl": "",
+    "AssetSize": 13328040,
+    "AssetSha256": "5e79a1087f71a8352cad3b0aa8f3eac5fa5a314595d8dc4d7b121f9304ddec1c",
+    "AssetUpdatedAt": "2026-11-27T15:23:32Z",
+    "PublishedAt": "",
+    "TargetCommitish": ""
+  },
+  "PreviousStableObservation": {
+    "Version": "1.0.0.2128",
+    "Tag": "TeknoParrotUI",
+    "AssetName": "TeknoParrotUi.zip",
+    "AssetSize": 153159505,
+    "AssetSha256": "9e6a8628d365a9d7c32f1dee07f1a62799656a9fdb1b58afe863526c5cf84901",
+    "AssetUpdatedAt": "09/18/2026 20:58:49"
+  },
+  "SourceProof": {
+    "Commit": "installed-semantic-sha256:9aab5c1254efa9bed1c557ffcd9f41cd0d8c6c68cf3a1a8862282b71654adf6f",
+    "Tree": ""
+  },
+  "Note": "Captured from an installed TeknoParrot folder, not from an upstream release. AssetSha256 and AssetSize are those of TeknoParrotUi.exe in that folder."
+}

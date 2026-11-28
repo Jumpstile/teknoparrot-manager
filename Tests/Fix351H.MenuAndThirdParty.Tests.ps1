@@ -56,6 +56,28 @@ Describe 'Third-party items in the Game Notes' {
         Should -Invoke Start-Process -Times 0
         @(Get-TpmThirdPartyNoteLines -Code 'NoSuchGame' -UserProfilesDir $script:up -DefinitionPath $script:H351Checks).Count | Should -Be 0
     }
+
+    It 'for a drive-root check, says which drive it looked on and which file is missing' {
+        # Mutation: look in the game folder instead of the drive -> a player with the Sega folders in place is told they are missing, or the drive is never named.
+        $drive = [IO.Path]::GetPathRoot($script:game)
+        $folder = 'TpmNoSuchFolder-' + [guid]::NewGuid().ToString('N')
+        $definition = Join-Path $TestDrive 'drive-root-checks.json'
+        $json = @{ Schema = 1; Entries = @(@{ Profile = 'DriveGame'; CanCheck = $true; CheckRoot = 'DriveRoot'; Message = 'Test message.'; GuideLink = ''
+            Checks = @(@{ Id = 'a'; Type = 'File'; Path = ($folder + '/game.ini'); Description = 'game.ini is missing from the test folder.' }) }) } | ConvertTo-Json -Depth 6
+        [System.IO.File]::WriteAllText($definition, $json, (New-Object System.Text.UTF8Encoding $false))
+        New-H351Profile -Dir $script:up -Code 'DriveGame' -GameExe (Join-Path $script:game 'game.exe')
+        $lines = @(Get-TpmThirdPartyNoteLines -Code 'DriveGame' -UserProfilesDir $script:up -DefinitionPath $definition)
+        ($lines -join ' ') | Should -Match ('on drive ' + [regex]::Escape($drive.TrimEnd('\')))
+        ($lines -join ' ') | Should -Match 'game.ini is missing from the test folder'
+    }
+
+    It 'asks for game.ini and Install.ini in both Sega folders for Pigs Might Fly' {
+        $entry = @((Get-Content -LiteralPath $script:H351Checks -Raw | ConvertFrom-Json).Entries | Where-Object { $_.Profile -ceq 'PigsMightFly' })
+        $entry.Count | Should -Be 1
+        $entry[0].CheckRoot | Should -BeExactly 'DriveRoot'
+        @($entry[0].Checks.Path).Count | Should -Be 4
+        foreach ($path in @('Sega/Shell/game.ini', 'Sega/Shell/Install.ini', 'Sega/PigsMightFly/game.ini', 'Sega/PigsMightFly/Install.ini')) { @($entry[0].Checks.Path) | Should -Contain $path }
+    }
 }
 
 Describe 'Settings-line edits in the patch menu' {

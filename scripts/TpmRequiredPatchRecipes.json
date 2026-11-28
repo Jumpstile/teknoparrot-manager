@@ -3063,6 +3063,33 @@
       ]
     },
     {
+      "Id": "dragon-dance-idmacdrv32-dll-fix-idmacdrv32",
+      "ProfileId": "DragonDanceNesica",
+      "BuildName": "Dragon Dance (2011)[Taito NESiCAxLive][TP]",
+      "Executable": "game_liong.exe",
+      "ExecutableSha256": "67616B1A816013EE5FF96EEE92F9E3032B3C97FA2907E222C4E116027BC70FC",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "UserSelected",
+      "SourceSet": "Dragon Dance.rar",
+      "SourceEntry": "Fix iDmacDrv32.rar>iDmacDrv32.dll",
+      "SourceSize": 77824,
+      "SourceSha1": "F34DDF44B5138517D548383E0E672B8AA70F1BC7",
+      "SourceSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "iDmacDrv32.dll",
+          "BeforeSha256": "CFD3BF5497348A168D68ECAF297F0387DFD24D8E5259F6E85CAFF1941A2BCC11",
+          "AfterSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+          "Payload": "payload/iDmacDrv32.dll",
+          "PayloadSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04"
+        }
+      ]
+    },
+    {
       "Id": "injustice-1-74-tpvirtualcards-dll-tpvirtualcards-v1-2",
       "ProfileId": "Injustice",
       "BuildName": "Injustice Arcade (1.74)(2022-05-05)[Raw Thrills PC][TP]",
@@ -3604,6 +3631,1483 @@
             { "LinePattern": "^\\s*MenuViewportX\\s*=\\s*(?<v>\\S*)\\s*$", "Value": "640" },
             { "LinePattern": "^\\s*MenuViewportY\\s*=\\s*(?<v>\\S*)\\s*$", "Value": "480" },
             { "LinePattern": "^\\s*GoreLevel\\s*=\\s*(?<v>\\S*)\\s*$", "Value": "1" }
+          ]
+        }
+      ]
+    },
+    {
+      "Id": "deathsmiles-ii-cvgame-patched-exe",
+      "ProfileId": "Deathsmiles2",
+      "BuildName": "Deathsmiles II - Makai no Merry Christmas (4.00)(2009-10-14)[CAVE PC][TP]",
+      "Executable": "cvgame.exe",
+      "ExecutableSha256": "4FBFCA7A33A76F80CF234298BF0F01446B9E1EF4EE2DC117B27D20A39D5DDC26",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Deathsmiles II - Makai no Merry Christmas (4.00)(2009-10-14)[CAVE PC][TP].zip",
+      "SourceEntry": "cvgame.exe.f9f619ae",
+      "SourceSize": 3616768,
+      "SourceSha1": "6010EF0938121AD83D301A0B659B4273DC888CCD",
+      "SourceSha256": "C58FA3A38EAE82263899D96A049FA820ACD71D96C6DF8CA657212A8FDD258529",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "cvgame.exe",
+          "BeforeSha256": "4FBFCA7A33A76F80CF234298BF0F01446B9E1EF4EE2DC117B27D20A39D5DDC26",
+          "AfterSha256": "C58FA3A38EAE82263899D96A049FA820ACD71D96C6DF8CA657212A8FDD258529",
+          "Payload": "payload/cvgame.exe.f9f619ae",
+          "PayloadSha256": "C58FA3A38EAE82263899D96A049FA820ACD71D96C6DF8CA657212A8FDD258529"
+        }
+      ]
+    },
+    {
+      "Id": "fnf-drift-sdaemon-640x480",
+      "ProfileId": "FNFDrift",
+      "BuildName": "The Fast and the Furious - Drift (3.03)(2013-09-10)[Raw Thrills PC][TP]",
+      "Executable": "sdaemon.exe",
+      "ExecutableSha256": "A489FEBC0A7DD431E09D6EAE65BCC7897775ACE4176F0FB6E4BF48637827C457",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "The Fast and the Furious - Drift (3.03)(2013-09-10)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "sdaemon.exe.640x480",
+      "SourceSize": 69480448,
+      "SourceSha1": "D26958EE4CD3F6DAD0BDB0C77297978E04B19513",
+      "SourceSha256": "749733FCD3C8314AA1DEB08B8C7EB6106444F66BB937E7AE47D3FAB89EEC7171",
+      "ExclusiveGroup": "fnf-drift-resolution",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "sdaemon.exe",
+          "BeforeSha256": "A489FEBC0A7DD431E09D6EAE65BCC7897775ACE4176F0FB6E4BF48637827C457",
+          "AfterSha256": "749733FCD3C8314AA1DEB08B8C7EB6106444F66BB937E7AE47D3FAB89EEC7171",
+          "Payload": "payload/sdaemon.exe.640x480",
+          "PayloadSha256": "749733FCD3C8314AA1DEB08B8C7EB6106444F66BB937E7AE47D3FAB89EEC7171"
+        }
+      ]
+    },
+    {
+      "Id": "fnf-drift-sdaemon-1920x1080",
+      "ProfileId": "FNFDrift",
+      "BuildName": "The Fast and the Furious - Drift (3.03)(2013-09-10)[Raw Thrills PC][TP]",
+      "Executable": "sdaemon.exe",
+      "ExecutableSha256": "A489FEBC0A7DD431E09D6EAE65BCC7897775ACE4176F0FB6E4BF48637827C457",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "The Fast and the Furious - Drift (3.03)(2013-09-10)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "sdaemon.exe.1920x1080",
+      "SourceSize": 69480448,
+      "SourceSha1": "BCED7EDBDCC124CB22A750E3BFC27BDEC346C8FB",
+      "SourceSha256": "CF69A6666B5DA383E1E7E097D0104F114C54AF9D553E04D8F4A3B1BF03A0C36A",
+      "ExclusiveGroup": "fnf-drift-resolution",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "sdaemon.exe",
+          "BeforeSha256": "A489FEBC0A7DD431E09D6EAE65BCC7897775ACE4176F0FB6E4BF48637827C457",
+          "AfterSha256": "CF69A6666B5DA383E1E7E097D0104F114C54AF9D553E04D8F4A3B1BF03A0C36A",
+          "Payload": "payload/sdaemon.exe.1920x1080",
+          "PayloadSha256": "CF69A6666B5DA383E1E7E097D0104F114C54AF9D553E04D8F4A3B1BF03A0C36A"
+        }
+      ]
+    },
+    {
+      "Id": "fnf-drift-sdaemon-2560x1440",
+      "ProfileId": "FNFDrift",
+      "BuildName": "The Fast and the Furious - Drift (3.03)(2013-09-10)[Raw Thrills PC][TP]",
+      "Executable": "sdaemon.exe",
+      "ExecutableSha256": "A489FEBC0A7DD431E09D6EAE65BCC7897775ACE4176F0FB6E4BF48637827C457",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "The Fast and the Furious - Drift (3.03)(2013-09-10)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "sdaemon.exe.2560x1440",
+      "SourceSize": 69480448,
+      "SourceSha1": "D3E443CC9F21F3DF7D699CDBA0DEFCE871BEB49F",
+      "SourceSha256": "442B3B1B04A03DC2380090BC5C906ED8756BA8119C6A4CCA7416167B52647124",
+      "ExclusiveGroup": "fnf-drift-resolution",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "sdaemon.exe",
+          "BeforeSha256": "A489FEBC0A7DD431E09D6EAE65BCC7897775ACE4176F0FB6E4BF48637827C457",
+          "AfterSha256": "442B3B1B04A03DC2380090BC5C906ED8756BA8119C6A4CCA7416167B52647124",
+          "Payload": "payload/sdaemon.exe.2560x1440",
+          "PayloadSha256": "442B3B1B04A03DC2380090BC5C906ED8756BA8119C6A4CCA7416167B52647124"
+        }
+      ]
+    },
+    {
+      "Id": "chase-hq-2-region-usa",
+      "ProfileId": "ChaseHQ2",
+      "BuildName": "Chase H.Q. 2 (2.05-2.08)(2007)(JPN,USA,EXP)[Taito Type X2][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "DDE4D12DEE0C776D7B93ABC5D9D3DFC40DC01B2A9DA7DB2502824BD9A9642AB0",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Chase H.Q. 2 (2.05-2.08)(2007)(JPN,USA,EXP)[Taito Type X2][TP].zip",
+      "SourceEntry": "chq2_2.05_USA.ini",
+      "SourceSize": 70,
+      "SourceSha1": "7B0F9E6EC4207393B3B4F03E5C22BF3BD7F2B748",
+      "SourceSha256": "C7FF3ED228E1E8023F16CF3E34AE7509284A9CBD17B83F6F218E00A97E226AE8",
+      "ExclusiveGroup": "chase-hq-2-region",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "chq2.ini",
+          "BeforeSha256": "78CE0AA112253D7C0E8568D184F3060C1238553B87277CAB036450D169733717",
+          "AfterSha256": "C7FF3ED228E1E8023F16CF3E34AE7509284A9CBD17B83F6F218E00A97E226AE8",
+          "Payload": "payload/chq2_2.05_USA.ini",
+          "PayloadSha256": "C7FF3ED228E1E8023F16CF3E34AE7509284A9CBD17B83F6F218E00A97E226AE8"
+        }
+      ]
+    },
+    {
+      "Id": "chase-hq-2-region-japan",
+      "ProfileId": "ChaseHQ2",
+      "BuildName": "Chase H.Q. 2 (2.05-2.08)(2007)(JPN,USA,EXP)[Taito Type X2][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "DDE4D12DEE0C776D7B93ABC5D9D3DFC40DC01B2A9DA7DB2502824BD9A9642AB0",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Chase H.Q. 2 (2.05-2.08)(2007)(JPN,USA,EXP)[Taito Type X2][TP].zip",
+      "SourceEntry": "chq2_2.06_JAPAN.ini",
+      "SourceSize": 70,
+      "SourceSha1": "BDE0EF5147223C4978414C0CCB6D1F16F0935EDA",
+      "SourceSha256": "7DF32F6D4BD619CBFD55F6E67F645DB67FEA86FA19F476735B4C01157B3EC647",
+      "ExclusiveGroup": "chase-hq-2-region",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "chq2.ini",
+          "BeforeSha256": "78CE0AA112253D7C0E8568D184F3060C1238553B87277CAB036450D169733717",
+          "AfterSha256": "7DF32F6D4BD619CBFD55F6E67F645DB67FEA86FA19F476735B4C01157B3EC647",
+          "Payload": "payload/chq2_2.06_JAPAN.ini",
+          "PayloadSha256": "7DF32F6D4BD619CBFD55F6E67F645DB67FEA86FA19F476735B4C01157B3EC647"
+        }
+      ]
+    },
+    {
+      "Id": "ghost-squad-evolution-shaderfix-amd",
+      "ProfileId": "GSEVOELF2",
+      "BuildName": "Ghost Squad Evolution (1.0 Rev A)(2007-02-14)[Sega Lindbergh Red][TP]",
+      "Executable": "vsg",
+      "ExecutableSha256": "2966EED7254B485BD086215DF226240AE97464132714A1A1504C52BA2A9E4815",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Ghost Squad Evolution (1.0 Rev A)(2007-02-14)[Sega Lindbergh Red][TP].zip",
+      "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/inc/vs_afterimage.h",
+      "SourceSize": 548,
+      "SourceSha256": "50A2618B971EBE58D8BC33A712EF9455451ABA124EBF07D5EAF1DFF1C7DE74EF",
+      "MoreSourceEntries": [
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/inc/vs_bullet.h", "SourceSize": 893 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/inc/vs_bullet2.h", "SourceSize": 1379 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/inc/vs_bumpcubemap.h", "SourceSize": 3237 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/inc/vs_bumpdotmap.h", "SourceSize": 2201 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/inc/vs_constant.h", "SourceSize": 1501 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/inc/vs_pointsprite.h", "SourceSize": 933 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/inc/vs_smoke.h", "SourceSize": 978 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/inc/vs_water.h", "SourceSize": 1577 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/inc/vs_waterdrop.h", "SourceSize": 1080 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/inc/vs_zsprite.h", "SourceSize": 2112 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_col_tweening.vsh", "SourceSize": 322 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_col_vertex.vsh", "SourceSize": 112 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_footer.vsh", "SourceSize": 55 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_header.vsh", "SourceSize": 1630 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_header_nv2.vsh", "SourceSize": 1660 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_all_lambert_d.vsh", "SourceSize": 2733 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_all_lambert_t.vsh", "SourceSize": 3099 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_all_specular_d.vsh", "SourceSize": 3258 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_all_specular_t.vsh", "SourceSize": 3859 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_lambert_d.vsh", "SourceSize": 331 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_lambert_d_night0.vsh", "SourceSize": 1485 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_lambert_d_night1.vsh", "SourceSize": 2271 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_lambert_t.vsh", "SourceSize": 469 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_optical_camouflage.vsh", "SourceSize": 294 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_specular_d.vsh", "SourceSize": 695 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_specular_d_night0.vsh", "SourceSize": 1884 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_specular_d_night1.vsh", "SourceSize": 2678 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_specular_t.vsh", "SourceSize": 924 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_lit_thermograph.vsh", "SourceSize": 422 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_pos_basis.vsh", "SourceSize": 216 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_pos_blend2.vsh", "SourceSize": 663 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_pos_blend3.vsh", "SourceSize": 1088 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_pos_blend4.vsh", "SourceSize": 1509 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_pos_oneskin_basis.vsh", "SourceSize": 741 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_pos_oneskin_blend2.vsh", "SourceSize": 1284 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_pos_oneskin_blend3.vsh", "SourceSize": 1835 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_pos_oneskin_blend4.vsh", "SourceSize": 2382 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_pos_tweening.vsh", "SourceSize": 516 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx0_count2.vsh", "SourceSize": 123 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx0_count3.vsh", "SourceSize": 155 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx0_count4.vsh", "SourceSize": 206 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx0_footer.vsh", "SourceSize": 34 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx1_count2.vsh", "SourceSize": 123 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx1_count3.vsh", "SourceSize": 155 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx1_count4.vsh", "SourceSize": 206 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx1_footer.vsh", "SourceSize": 34 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx2_count2.vsh", "SourceSize": 123 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx2_count3.vsh", "SourceSize": 155 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx2_count4.vsh", "SourceSize": 206 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx2_footer.vsh", "SourceSize": 34 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx3_count2.vsh", "SourceSize": 123 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx3_count3.vsh", "SourceSize": 155 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx3_count4.vsh", "SourceSize": 206 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_tx3_footer.vsh", "SourceSize": 34 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_txc_bumpcubemap.vsh", "SourceSize": 772 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_txc_fresnel.vsh", "SourceSize": 332 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_txc_index0.vsh", "SourceSize": 34 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_txc_index1.vsh", "SourceSize": 34 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_txc_index2.vsh", "SourceSize": 34 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/inc/vsu_txc_index3.vsh", "SourceSize": 34 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_col_tweening.vsh", "SourceSize": 919 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_col_vertex.vsh", "SourceSize": 707 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_footer.vsh", "SourceSize": 615 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_header.vsh", "SourceSize": 3949 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_header_nv2.vsh", "SourceSize": 3975 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_all_lambert_d.vsh", "SourceSize": 4140 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_all_lambert_t.vsh", "SourceSize": 4918 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_all_specular_d.vsh", "SourceSize": 5062 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_all_specular_t.vsh", "SourceSize": 5917 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_lambert_d.vsh", "SourceSize": 1213 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_lambert_d_night0.vsh", "SourceSize": 3807 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_lambert_d_night1.vsh", "SourceSize": 5640 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_lambert_t.vsh", "SourceSize": 1559 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_optical_camouflage.vsh", "SourceSize": 1169 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_specular_d.vsh", "SourceSize": 1982 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_specular_d_night0.vsh", "SourceSize": 4817 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_specular_d_night1.vsh", "SourceSize": 6750 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_specular_t.vsh", "SourceSize": 2512 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_lit_thermograph.vsh", "SourceSize": 1237 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_pos_basis.vsh", "SourceSize": 1074 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_pos_blend2.vsh", "SourceSize": 1754 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_pos_blend3.vsh", "SourceSize": 2252 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_pos_blend4.vsh", "SourceSize": 2527 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_pos_oneskin_basis.vsh", "SourceSize": 1686 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_pos_oneskin_blend2.vsh", "SourceSize": 2523 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_pos_oneskin_blend3.vsh", "SourceSize": 3089 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_pos_oneskin_blend4.vsh", "SourceSize": 3694 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_pos_tweening.vsh", "SourceSize": 924 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx0_count2.vsh", "SourceSize": 761 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx0_count3.vsh", "SourceSize": 823 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx0_count4.vsh", "SourceSize": 906 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx0_footer.vsh", "SourceSize": 416 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx1_count2.vsh", "SourceSize": 763 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx1_count3.vsh", "SourceSize": 825 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx1_count4.vsh", "SourceSize": 906 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx1_footer.vsh", "SourceSize": 416 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx2_count2.vsh", "SourceSize": 763 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx2_count3.vsh", "SourceSize": 825 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx2_count4.vsh", "SourceSize": 906 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx2_footer.vsh", "SourceSize": 416 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx3_count2.vsh", "SourceSize": 763 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx3_count3.vsh", "SourceSize": 825 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx3_count4.vsh", "SourceSize": 906 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_tx3_footer.vsh", "SourceSize": 416 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_txc_bumpcubemap.vsh", "SourceSize": 1787 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_txc_fresnel.vsh", "SourceSize": 1058 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_txc_index0.vsh", "SourceSize": 596 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_txc_index1.vsh", "SourceSize": 596 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_txc_index2.vsh", "SourceSize": 596 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/unit/vsu_txc_index3.vsh", "SourceSize": 596 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vertexshader.vsh", "SourceSize": 3658 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vs_afterimage.vsh", "SourceSize": 2107 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vs_bullet.vsh", "SourceSize": 2481 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vs_bullet2.vsh", "SourceSize": 3268 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vs_bumpcubemap.vsh", "SourceSize": 7403 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vs_bumpdotmap.vsh", "SourceSize": 5384 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vs_constant.vsh", "SourceSize": 3623 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vs_pointsprite.vsh", "SourceSize": 2275 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vs_smoke.vsh", "SourceSize": 2649 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vs_water.vsh", "SourceSize": 4429 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vs_waterdrop.vsh", "SourceSize": 2806 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vs_zsprite.vsh", "SourceSize": 2876 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vsVertexBlend/vs_vertex_blend_2_matrices.vsh", "SourceSize": 3026 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vsVertexBlend/vs_vertex_blend_3_matrices.vsh", "SourceSize": 3351 },
+        { "SourceEntry": "Patches/GSEvo_AMD_shaderfix/shader/vsVertexBlend/vs_vertex_blend_4_matrices.vsh", "SourceSize": 3693 }
+      ],
+      "ExclusiveGroup": "ghost-squad-evolution-shaderfix",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/inc/vs_afterimage.h",
+          "BeforeSha256": "24076072F4AF979D25E905E07FF3F3D155168393EEB447012BCF3FD20DEEEFD5",
+          "AfterSha256": "50A2618B971EBE58D8BC33A712EF9455451ABA124EBF07D5EAF1DFF1C7DE74EF",
+          "Payload": "payload/shader/inc/vs_afterimage.h",
+          "PayloadSha256": "50A2618B971EBE58D8BC33A712EF9455451ABA124EBF07D5EAF1DFF1C7DE74EF"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/inc/vs_bullet.h",
+          "BeforeSha256": "9C51CD60B92FFF3C08CF80633C3FD80D7AE10178044BA3FFF6E2397F4645DD6B",
+          "AfterSha256": "05C67D4016C104FABA0EE4DB2A04456B44517FD559D88A5414C743CD2FB4F761",
+          "Payload": "payload/shader/inc/vs_bullet.h",
+          "PayloadSha256": "05C67D4016C104FABA0EE4DB2A04456B44517FD559D88A5414C743CD2FB4F761"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/inc/vs_bullet2.h",
+          "BeforeSha256": "87D1727E7D96323B31CC1AEBDB935196946B22A7F168D7A9C6E8919A6F114697",
+          "AfterSha256": "6D962B82E3D91076F42CF0F75677615A042120A4EC13BA9382BF40F0FA97A9F6",
+          "Payload": "payload/shader/inc/vs_bullet2.h",
+          "PayloadSha256": "6D962B82E3D91076F42CF0F75677615A042120A4EC13BA9382BF40F0FA97A9F6"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/inc/vs_bumpcubemap.h",
+          "BeforeSha256": "ADB1C67AB623B33891BB9E8DDC1D1ABD91A570B9CCD948E53D82EB135A5E2B94",
+          "AfterSha256": "611F185A182146E242EE99D2BAA97B6FF77FC8E7B898C60A89E93FBEB072D15A",
+          "Payload": "payload/shader/inc/vs_bumpcubemap.h",
+          "PayloadSha256": "611F185A182146E242EE99D2BAA97B6FF77FC8E7B898C60A89E93FBEB072D15A"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/inc/vs_bumpdotmap.h",
+          "BeforeSha256": "F1B5337DD0F0BB78EC9FA47B32FD536C5BC883BCCCBAB4977BD06212203E8A59",
+          "AfterSha256": "6B60E86C87E46A68E03B1F6A894AA8A8ABD3042AF9577CF6FB316B7DEF5D0304",
+          "Payload": "payload/shader/inc/vs_bumpdotmap.h",
+          "PayloadSha256": "6B60E86C87E46A68E03B1F6A894AA8A8ABD3042AF9577CF6FB316B7DEF5D0304"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/inc/vs_constant.h",
+          "BeforeSha256": "6D8045D4E9132B9777624AB32D92C6E2F026391F59E20AEA8665D8E006C29DA1",
+          "AfterSha256": "2EE39574158576E4F6F8C9AA91F48139BD4EE0BB19D1913B0B09ABD3207B81E4",
+          "Payload": "payload/shader/inc/vs_constant.h",
+          "PayloadSha256": "2EE39574158576E4F6F8C9AA91F48139BD4EE0BB19D1913B0B09ABD3207B81E4"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/inc/vs_pointsprite.h",
+          "BeforeSha256": "1A24EE5A35CE98C2F408A0E711C83130D64A16359DB04FD9EAFA9853FBB0955E",
+          "AfterSha256": "7F5105B83752B3C5FD759453D3997C6DBF5CA55978E5E0B728F945C3DD056DD5",
+          "Payload": "payload/shader/inc/vs_pointsprite.h",
+          "PayloadSha256": "7F5105B83752B3C5FD759453D3997C6DBF5CA55978E5E0B728F945C3DD056DD5"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/inc/vs_smoke.h",
+          "BeforeSha256": "BEDD141EA8A0023CE5CAD12720A64DC92D4E097DAF266F1E45BD953EF8573001",
+          "AfterSha256": "23D6466F858DAE0E7BD7A51BB1937AD368A18E0BD08BFBC75A442F791755ADD7",
+          "Payload": "payload/shader/inc/vs_smoke.h",
+          "PayloadSha256": "23D6466F858DAE0E7BD7A51BB1937AD368A18E0BD08BFBC75A442F791755ADD7"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/inc/vs_water.h",
+          "BeforeSha256": "A6EA6F287B64D15445EEA4B8EEAC06F9F70A009D68DA9EC8AB29987AA3EA9224",
+          "AfterSha256": "09D4B3D768A4232F293B16B94B6725D1F7617BCE67043298BD50EFE4B6FE2478",
+          "Payload": "payload/shader/inc/vs_water.h",
+          "PayloadSha256": "09D4B3D768A4232F293B16B94B6725D1F7617BCE67043298BD50EFE4B6FE2478"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/inc/vs_waterdrop.h",
+          "BeforeSha256": "C61F294AA46A19F22B96D7EAF59F6DC08836B34BA43B16763555915795578E56",
+          "AfterSha256": "6D4E53A7F4577B77A0EBFB9A8D7B1C90C08937F7B4918B65EABECA63C7BEB736",
+          "Payload": "payload/shader/inc/vs_waterdrop.h",
+          "PayloadSha256": "6D4E53A7F4577B77A0EBFB9A8D7B1C90C08937F7B4918B65EABECA63C7BEB736"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/inc/vs_zsprite.h",
+          "BeforeSha256": "D5301CFE8164830332834A1EE47A946A7DB124707AEE2F02BF8902364CFCA322",
+          "AfterSha256": "5326F22CEBECBAE50721FF035B87AF7FE39CBD2C644A7D906C91E7092DAB97E3",
+          "Payload": "payload/shader/inc/vs_zsprite.h",
+          "PayloadSha256": "5326F22CEBECBAE50721FF035B87AF7FE39CBD2C644A7D906C91E7092DAB97E3"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_col_tweening.vsh",
+          "BeforeSha256": "A84863D91F1406F5B53715C0FD7A8EE8704AB8C1D3FCAD9160C213D67D8B9D44",
+          "AfterSha256": "45C60723C60505253E5D54E462F4AC7F3827A73CC2DA6CABE13710A296C3B3D4",
+          "Payload": "payload/shader/unit/inc/vsu_col_tweening.vsh",
+          "PayloadSha256": "45C60723C60505253E5D54E462F4AC7F3827A73CC2DA6CABE13710A296C3B3D4"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_col_vertex.vsh",
+          "BeforeSha256": "C18FCDC1AF29D98878AD9CF002892259555A407DBEFF909C6B66719510355911",
+          "AfterSha256": "001BEC1D543D1438A66252DFD7B4AC27ECBBCA1C75011AD5CF1DFF1E0FE3874A",
+          "Payload": "payload/shader/unit/inc/vsu_col_vertex.vsh",
+          "PayloadSha256": "001BEC1D543D1438A66252DFD7B4AC27ECBBCA1C75011AD5CF1DFF1E0FE3874A"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_footer.vsh",
+          "BeforeSha256": "8F811388A58C140F5F17AA8EB1391FD7592BA00BCF054D1A69A6A447DD2CB641",
+          "AfterSha256": "9FA5C72753271B1C43E50801529D148920E37A706F0E85B60548BD882473A636",
+          "Payload": "payload/shader/unit/inc/vsu_footer.vsh",
+          "PayloadSha256": "9FA5C72753271B1C43E50801529D148920E37A706F0E85B60548BD882473A636"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_header.vsh",
+          "BeforeSha256": "A7A2663833115F50A9365C5890CACB897C81892792B1E93D4149E0EFA11D5F93",
+          "AfterSha256": "C9902D8B17C1077854334BD96385111DFC15AC3DCFF516F4282990A3C0707CBF",
+          "Payload": "payload/shader/unit/inc/vsu_header.vsh",
+          "PayloadSha256": "C9902D8B17C1077854334BD96385111DFC15AC3DCFF516F4282990A3C0707CBF"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_header_nv2.vsh",
+          "BeforeSha256": "0CE9DF487BEA8F1B8D4BE4DD2CCBBAC474234EF98CB64442B27C4A82373F1555",
+          "AfterSha256": "796F9D8A59AE7DE8BF52D581B3AD70F6C1E06F7EFF09D2E7B89AF9454D0D3BA2",
+          "Payload": "payload/shader/unit/inc/vsu_header_nv2.vsh",
+          "PayloadSha256": "796F9D8A59AE7DE8BF52D581B3AD70F6C1E06F7EFF09D2E7B89AF9454D0D3BA2"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_all_lambert_d.vsh",
+          "BeforeSha256": "45274136DC25444B6F8157CD7DCB23DD8BDA9B12DB12EF04E1CB60EE18B4055A",
+          "AfterSha256": "2A9F86081BC721D7B3332AB8648EB13FE28AA0AD5492CAD04E0687CFBEF9F8CC",
+          "Payload": "payload/shader/unit/inc/vsu_lit_all_lambert_d.vsh",
+          "PayloadSha256": "2A9F86081BC721D7B3332AB8648EB13FE28AA0AD5492CAD04E0687CFBEF9F8CC"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_all_lambert_t.vsh",
+          "BeforeSha256": "84C1961FAACAD56EE15385E71E9C9F1BB3015F304049E89133463E8849A3F410",
+          "AfterSha256": "ED97AE54A335894EB2DCFE0928B756667F2ED46FDB5621CBBA52C2869AFB710B",
+          "Payload": "payload/shader/unit/inc/vsu_lit_all_lambert_t.vsh",
+          "PayloadSha256": "ED97AE54A335894EB2DCFE0928B756667F2ED46FDB5621CBBA52C2869AFB710B"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_all_specular_d.vsh",
+          "BeforeSha256": "2F8F5D3C70595CBAFEC9639CE004DCAD5283768CB3B9BEC2E1A52D202101469D",
+          "AfterSha256": "23224CFB88C7EDE238568848B33D8E8A5CA0924AB20E9671CEE7A916D1B23C54",
+          "Payload": "payload/shader/unit/inc/vsu_lit_all_specular_d.vsh",
+          "PayloadSha256": "23224CFB88C7EDE238568848B33D8E8A5CA0924AB20E9671CEE7A916D1B23C54"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_all_specular_t.vsh",
+          "BeforeSha256": "EBBA41BCFAB01904E10F75666268852040076BCC008AF1FD4B7D6C1EDF31CC28",
+          "AfterSha256": "1D43CE958186A49D8A5C8BB596FEB65E85C351443A08E99608AE16FF8D4804AF",
+          "Payload": "payload/shader/unit/inc/vsu_lit_all_specular_t.vsh",
+          "PayloadSha256": "1D43CE958186A49D8A5C8BB596FEB65E85C351443A08E99608AE16FF8D4804AF"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_lambert_d.vsh",
+          "BeforeSha256": "AC14E63C135FAA93E66FFC20397C40D18AA389DF14954CAE2950ADBC7F041EA1",
+          "AfterSha256": "9658F7F3BE9AC3A8CF90360FEFC8AE1C3080DF341BFD93F8EADF32F4804F6E79",
+          "Payload": "payload/shader/unit/inc/vsu_lit_lambert_d.vsh",
+          "PayloadSha256": "9658F7F3BE9AC3A8CF90360FEFC8AE1C3080DF341BFD93F8EADF32F4804F6E79"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_lambert_d_night0.vsh",
+          "BeforeSha256": "520D2E9BEAAE30967EAA2E5F5E9170575C4E551F7319E220AEBE602C2FB30129",
+          "AfterSha256": "4BA9D3BAABCE80F7A50D82D64BEFA3473659C3C9162FDE58A4A4FA0F0A02C61C",
+          "Payload": "payload/shader/unit/inc/vsu_lit_lambert_d_night0.vsh",
+          "PayloadSha256": "4BA9D3BAABCE80F7A50D82D64BEFA3473659C3C9162FDE58A4A4FA0F0A02C61C"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_lambert_d_night1.vsh",
+          "BeforeSha256": "B73D7CD485401039E9F3D59E6EC6F5AAD8C98D22D096F06A3B739D8A83AB87C3",
+          "AfterSha256": "8CB416FAF5BBEE66E91A699F2A1A4D949310BEEB49F146F207717878251DAE2D",
+          "Payload": "payload/shader/unit/inc/vsu_lit_lambert_d_night1.vsh",
+          "PayloadSha256": "8CB416FAF5BBEE66E91A699F2A1A4D949310BEEB49F146F207717878251DAE2D"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_lambert_t.vsh",
+          "BeforeSha256": "1A83DDE346D8660818BC2360440E1D04A3EC407B1F966C07440ABC7F7FE2C754",
+          "AfterSha256": "0FCB6B2EBE369D84C6DCB4C002E262CC8BD70661F9C217264E35516D3A4B652A",
+          "Payload": "payload/shader/unit/inc/vsu_lit_lambert_t.vsh",
+          "PayloadSha256": "0FCB6B2EBE369D84C6DCB4C002E262CC8BD70661F9C217264E35516D3A4B652A"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_optical_camouflage.vsh",
+          "BeforeSha256": "1A79EF505F3E0BECA1AF73DB07C33338BCE48A05311D13BE7F7A5ABF424A3949",
+          "AfterSha256": "60B01BE1EE86EE1DE5D8E5807CC12505638EDD942021C7D4DB8FE8D778930751",
+          "Payload": "payload/shader/unit/inc/vsu_lit_optical_camouflage.vsh",
+          "PayloadSha256": "60B01BE1EE86EE1DE5D8E5807CC12505638EDD942021C7D4DB8FE8D778930751"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_specular_d.vsh",
+          "BeforeSha256": "ED327E1074507A7DB0EC5B2E9E01B453CE63401ED5FFC894CC7D939174F29CAE",
+          "AfterSha256": "3F16AB6C3A99DE7C7A673CDC03547FB89FFE72DB3184E243210A430EA05710C5",
+          "Payload": "payload/shader/unit/inc/vsu_lit_specular_d.vsh",
+          "PayloadSha256": "3F16AB6C3A99DE7C7A673CDC03547FB89FFE72DB3184E243210A430EA05710C5"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_specular_d_night0.vsh",
+          "BeforeSha256": "B388B8F7EC9FF0A639FE1D1AF9A478F66F18F42F3F46407E33E63EB3439F96EB",
+          "AfterSha256": "D773E4E4269A510E837177A00F4D7DD86781ADEE0154096EA58453999DEC4114",
+          "Payload": "payload/shader/unit/inc/vsu_lit_specular_d_night0.vsh",
+          "PayloadSha256": "D773E4E4269A510E837177A00F4D7DD86781ADEE0154096EA58453999DEC4114"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_specular_d_night1.vsh",
+          "BeforeSha256": "5FDFDF2DF79C02C74C5B3FC92C15374EBC04222F2DBAA2C08D3227F199882A4D",
+          "AfterSha256": "D315FD70DA72E0364675182CE011450480EDD43DA11A23356E811BA6C518C9F2",
+          "Payload": "payload/shader/unit/inc/vsu_lit_specular_d_night1.vsh",
+          "PayloadSha256": "D315FD70DA72E0364675182CE011450480EDD43DA11A23356E811BA6C518C9F2"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_specular_t.vsh",
+          "BeforeSha256": "2031938D405CA072E31E55EC6E22A594B0D4BBB2B2EE04D19868C871DC75506E",
+          "AfterSha256": "1A69AFAEFD95925A33FF70BADC25964CE0012FEE4E06CE9F9E559D1FAB14447E",
+          "Payload": "payload/shader/unit/inc/vsu_lit_specular_t.vsh",
+          "PayloadSha256": "1A69AFAEFD95925A33FF70BADC25964CE0012FEE4E06CE9F9E559D1FAB14447E"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_thermograph.vsh",
+          "BeforeSha256": "07F4FB959564F25961D0CE4C228B0DDC7E44733C4E53A44414114A663C661678",
+          "AfterSha256": "537A1E9EFE58ABA8B424AE464AF9127AA194C3C38576E6B987AC9535F32CAF80",
+          "Payload": "payload/shader/unit/inc/vsu_lit_thermograph.vsh",
+          "PayloadSha256": "537A1E9EFE58ABA8B424AE464AF9127AA194C3C38576E6B987AC9535F32CAF80"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_pos_basis.vsh",
+          "BeforeSha256": "DCD119F1D4E5A65A4D70323243430BCF6EB0B9474E3BB1B6200DCD2D29E355A7",
+          "AfterSha256": "793A4996F2111FE7E3B6123AA3BA94868A4E8C11C9100ECC46960FCC7F65DB9E",
+          "Payload": "payload/shader/unit/inc/vsu_pos_basis.vsh",
+          "PayloadSha256": "793A4996F2111FE7E3B6123AA3BA94868A4E8C11C9100ECC46960FCC7F65DB9E"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_pos_blend2.vsh",
+          "BeforeSha256": "35E37D3E070E37D8CA3A5AEB108AA9F97F7E41523338165D788220A6F71ADF9B",
+          "AfterSha256": "C4B39227E892A492E003DC2873D272901299BA239CE7D1ED2F25DAA1F02A577E",
+          "Payload": "payload/shader/unit/inc/vsu_pos_blend2.vsh",
+          "PayloadSha256": "C4B39227E892A492E003DC2873D272901299BA239CE7D1ED2F25DAA1F02A577E"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_pos_blend3.vsh",
+          "BeforeSha256": "3F0753DAD5B4DD233A23F70E5A1BAD80D97B4B1328E15994C856109889696E61",
+          "AfterSha256": "B63AA664C8DA4C93600BDCF54E5DB2F00359EBB97B922C7BE98CF19D9A44F73B",
+          "Payload": "payload/shader/unit/inc/vsu_pos_blend3.vsh",
+          "PayloadSha256": "B63AA664C8DA4C93600BDCF54E5DB2F00359EBB97B922C7BE98CF19D9A44F73B"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_pos_blend4.vsh",
+          "BeforeSha256": "CF31E5DC60832058A3BE2A3E272881D28D435B6111439800A36F633BF9F4941D",
+          "AfterSha256": "0CBCC097E07BBCE54A91DDFE9D3C56371809B69B865218CE5F2DFC3B56BE6BEA",
+          "Payload": "payload/shader/unit/inc/vsu_pos_blend4.vsh",
+          "PayloadSha256": "0CBCC097E07BBCE54A91DDFE9D3C56371809B69B865218CE5F2DFC3B56BE6BEA"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_pos_oneskin_basis.vsh",
+          "BeforeSha256": "2F382AFD51A0607081DA92331E8CD5685ABF0B67CC5518C885DFF1DBB1C36E95",
+          "AfterSha256": "E91C6F49DCE1A7225AB7778C384F54C7D8DE440219FDB05CF979B95CCDC64E42",
+          "Payload": "payload/shader/unit/inc/vsu_pos_oneskin_basis.vsh",
+          "PayloadSha256": "E91C6F49DCE1A7225AB7778C384F54C7D8DE440219FDB05CF979B95CCDC64E42"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_pos_oneskin_blend2.vsh",
+          "BeforeSha256": "D724910682EDA32D98822FD4FA37645C77533FA3859138BEEF0BD7FB719BDCA1",
+          "AfterSha256": "6C3EEC8A585BC7009DFAF4673CC7E3A0ED2DC9360D96E5729F4BCBAD0E2867A9",
+          "Payload": "payload/shader/unit/inc/vsu_pos_oneskin_blend2.vsh",
+          "PayloadSha256": "6C3EEC8A585BC7009DFAF4673CC7E3A0ED2DC9360D96E5729F4BCBAD0E2867A9"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_pos_oneskin_blend3.vsh",
+          "BeforeSha256": "6539067423A739B90A6CAE00ABC06B39E1E3A31A715F1AEA366A638392A294F6",
+          "AfterSha256": "5DC8DD8DC3B7F8A6BFD62533F267AC7A6846595B6E4B98408D2A4360BD2514B7",
+          "Payload": "payload/shader/unit/inc/vsu_pos_oneskin_blend3.vsh",
+          "PayloadSha256": "5DC8DD8DC3B7F8A6BFD62533F267AC7A6846595B6E4B98408D2A4360BD2514B7"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_pos_oneskin_blend4.vsh",
+          "BeforeSha256": "79289E3222AFC69C4A91FE11EB9A4F323BFA54643E358F379170838E60808DFD",
+          "AfterSha256": "D3360638F3826C670559FEB878C6D40FB517616FD04B9D85EF106D1B0BAB70B3",
+          "Payload": "payload/shader/unit/inc/vsu_pos_oneskin_blend4.vsh",
+          "PayloadSha256": "D3360638F3826C670559FEB878C6D40FB517616FD04B9D85EF106D1B0BAB70B3"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_pos_tweening.vsh",
+          "BeforeSha256": "C0F3A3A599450137FD2CE9760151205CB8A2EF547C7DC2206A4C68F7838210B2",
+          "AfterSha256": "413F52389AC8301B465C5C6537707E17E88A3B86B8F3C0504281585B5BE6A7D1",
+          "Payload": "payload/shader/unit/inc/vsu_pos_tweening.vsh",
+          "PayloadSha256": "413F52389AC8301B465C5C6537707E17E88A3B86B8F3C0504281585B5BE6A7D1"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx0_count2.vsh",
+          "BeforeSha256": "BF789135D015F639B8AFA2AFD584E7045C727C4FE387792CDCF697A8AE68DFC3",
+          "AfterSha256": "B9465568BB1876F13B890FA8A3A3F84ED2583174CF023B56753D0C670DB57B9F",
+          "Payload": "payload/shader/unit/inc/vsu_tx0_count2.vsh",
+          "PayloadSha256": "B9465568BB1876F13B890FA8A3A3F84ED2583174CF023B56753D0C670DB57B9F"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx0_count3.vsh",
+          "BeforeSha256": "D98335C6B5F1CC82D602FE3E3461C7DA6FF1EBA376279D76750D866222D56894",
+          "AfterSha256": "D7FC1D7CA3C1CB2E891ED8F6D1ACCAB262D7AC18050020B1B2EEAB166F3297F5",
+          "Payload": "payload/shader/unit/inc/vsu_tx0_count3.vsh",
+          "PayloadSha256": "D7FC1D7CA3C1CB2E891ED8F6D1ACCAB262D7AC18050020B1B2EEAB166F3297F5"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx0_count4.vsh",
+          "BeforeSha256": "9BCA83490437FECFA72E0ABA2AD81430C1E128D7ADD62DCBE0A007043214CE2A",
+          "AfterSha256": "00B8823E5F419F5F40EF2BDAF1BFB449AB71F40137E34BF213D35C5720398EFE",
+          "Payload": "payload/shader/unit/inc/vsu_tx0_count4.vsh",
+          "PayloadSha256": "00B8823E5F419F5F40EF2BDAF1BFB449AB71F40137E34BF213D35C5720398EFE"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx0_footer.vsh",
+          "BeforeSha256": "054EFEC9F0A5C1BFC3C0485CAC9195D70759845E478CDE925BDCD19008B4E42F",
+          "AfterSha256": "22B5472C754BF9803C553CC8C2A76DCCD034CBA5C05F5017E089ED3C54569A7C",
+          "Payload": "payload/shader/unit/inc/vsu_tx0_footer.vsh",
+          "PayloadSha256": "22B5472C754BF9803C553CC8C2A76DCCD034CBA5C05F5017E089ED3C54569A7C"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx1_count2.vsh",
+          "BeforeSha256": "CEAA6EEE62FDF3942C4E1BCB45AC2939E237029CF6818E4D9CDADF413E0523F4",
+          "AfterSha256": "A2D082D7C83C0A2DDD21564951A50376E4574A9AAD17171D8D9334F0CE74A62C",
+          "Payload": "payload/shader/unit/inc/vsu_tx1_count2.vsh",
+          "PayloadSha256": "A2D082D7C83C0A2DDD21564951A50376E4574A9AAD17171D8D9334F0CE74A62C"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx1_count3.vsh",
+          "BeforeSha256": "4A0F8BE5D7FD7E49D7CAD47AB829F758282ADBB4F08095F700F8AF25E59CA533",
+          "AfterSha256": "48BA6678530391D53951B7BEA576D4BE850A3EE7CBC2F71F73D7EF28DE4691A1",
+          "Payload": "payload/shader/unit/inc/vsu_tx1_count3.vsh",
+          "PayloadSha256": "48BA6678530391D53951B7BEA576D4BE850A3EE7CBC2F71F73D7EF28DE4691A1"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx1_count4.vsh",
+          "BeforeSha256": "E4899A4C64E53220BE13EA2F63998E6BF9D6C2D5E10CC5269BD7C6199F8543E4",
+          "AfterSha256": "51E99BB836F1B7BB2F312CFE1519BDB43928B22314A9F3DE911867A0370BF35E",
+          "Payload": "payload/shader/unit/inc/vsu_tx1_count4.vsh",
+          "PayloadSha256": "51E99BB836F1B7BB2F312CFE1519BDB43928B22314A9F3DE911867A0370BF35E"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx1_footer.vsh",
+          "BeforeSha256": "754232F8D14FBB567E91FF2FD6CC7E37D1507D68904396D04822E503740A7596",
+          "AfterSha256": "B7B7C005B971C64FE9E20725F7ADB8B2474E68AADD328438F53D9740468699F7",
+          "Payload": "payload/shader/unit/inc/vsu_tx1_footer.vsh",
+          "PayloadSha256": "B7B7C005B971C64FE9E20725F7ADB8B2474E68AADD328438F53D9740468699F7"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx2_count2.vsh",
+          "BeforeSha256": "E97637F34003E63ADF3AAF93B7E68F652F37274D749445DBB51210B2B10FF0B4",
+          "AfterSha256": "E398E745D523FA938D847DC55FA17821384420BBEEEC4CA102F3E4344A64ED55",
+          "Payload": "payload/shader/unit/inc/vsu_tx2_count2.vsh",
+          "PayloadSha256": "E398E745D523FA938D847DC55FA17821384420BBEEEC4CA102F3E4344A64ED55"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx2_count3.vsh",
+          "BeforeSha256": "15CEACAE51F1D4F2E9C5A4512DF7C3A5AA7A441CD86A8833B69D5E104C781D1A",
+          "AfterSha256": "5458E5DC396371A29D033C2A2CDF5CA1F38E47C55B077E5BDCBA04D324515A8B",
+          "Payload": "payload/shader/unit/inc/vsu_tx2_count3.vsh",
+          "PayloadSha256": "5458E5DC396371A29D033C2A2CDF5CA1F38E47C55B077E5BDCBA04D324515A8B"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx2_count4.vsh",
+          "BeforeSha256": "62C74B0CD56E9F261985F04793EDC06C900EE48A27D6A94E9B59E2B174C31865",
+          "AfterSha256": "922C4B7B4B2BB068230569C9DD13424862614D853D4C58301C890916551F795A",
+          "Payload": "payload/shader/unit/inc/vsu_tx2_count4.vsh",
+          "PayloadSha256": "922C4B7B4B2BB068230569C9DD13424862614D853D4C58301C890916551F795A"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx2_footer.vsh",
+          "BeforeSha256": "64285666427CCB289E66E3F22EFBF15C48945DA66973086ABC7E68CB64AC425E",
+          "AfterSha256": "352C3E2ADDEB405D5EF11D657B3B15A32C7B849418EE8D615718D64DA6E8C48A",
+          "Payload": "payload/shader/unit/inc/vsu_tx2_footer.vsh",
+          "PayloadSha256": "352C3E2ADDEB405D5EF11D657B3B15A32C7B849418EE8D615718D64DA6E8C48A"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx3_count2.vsh",
+          "BeforeSha256": "8D0AC51AD2401A25FD56129F236F0D008E9399376DD588826731301E374B78C2",
+          "AfterSha256": "AD8A64A8E20496670BE7C2900231F0D1BE7C5D6153B567AAE5B4398DD3907B16",
+          "Payload": "payload/shader/unit/inc/vsu_tx3_count2.vsh",
+          "PayloadSha256": "AD8A64A8E20496670BE7C2900231F0D1BE7C5D6153B567AAE5B4398DD3907B16"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx3_count3.vsh",
+          "BeforeSha256": "2750CF556CAB97C17B13179718DC7CCCA2E14ECAC70E0BA1F83A3BFC4EC1E6FF",
+          "AfterSha256": "CA621F1B9A307E43375D768F00A1E36E423A12C82749A3045A98A8F8D25DCEDC",
+          "Payload": "payload/shader/unit/inc/vsu_tx3_count3.vsh",
+          "PayloadSha256": "CA621F1B9A307E43375D768F00A1E36E423A12C82749A3045A98A8F8D25DCEDC"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx3_count4.vsh",
+          "BeforeSha256": "9D236C451B72DE964A80B96CFF89EAB2EF926F93386FDD1464485181B14F2D22",
+          "AfterSha256": "5E0C83CF6F2F654F361700186E808C9AC78D7062F901048A1371C2B7AB873436",
+          "Payload": "payload/shader/unit/inc/vsu_tx3_count4.vsh",
+          "PayloadSha256": "5E0C83CF6F2F654F361700186E808C9AC78D7062F901048A1371C2B7AB873436"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_tx3_footer.vsh",
+          "BeforeSha256": "8EC20DF163015A5381C155DEC7A111B81CD5476483AAE005941E9D6FD6944393",
+          "AfterSha256": "D16322B0CFB425CBA71AEC95EB6BA6D69F3947263CE32D6DF3F7B37BB8131AC5",
+          "Payload": "payload/shader/unit/inc/vsu_tx3_footer.vsh",
+          "PayloadSha256": "D16322B0CFB425CBA71AEC95EB6BA6D69F3947263CE32D6DF3F7B37BB8131AC5"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_txc_bumpcubemap.vsh",
+          "BeforeSha256": "54C1FFCCA2534E7E6649FB01C0B94CF4F6852FFB8AFBD10B8B3C8A6EB4839329",
+          "AfterSha256": "A1472B28988165FB2BCD7E3FDC0596D851371F3F9473EA47DFD16B4A66828CA5",
+          "Payload": "payload/shader/unit/inc/vsu_txc_bumpcubemap.vsh",
+          "PayloadSha256": "A1472B28988165FB2BCD7E3FDC0596D851371F3F9473EA47DFD16B4A66828CA5"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_txc_fresnel.vsh",
+          "BeforeSha256": "0816365E4D575CC5A0A81BD068B6EE151985690BFCBDF520DE0971F0D726EADE",
+          "AfterSha256": "C668A65ECA8DE20E8C5E357DACD3E0A7C33DD9B2B651335F4A3F1FDF67507C5A",
+          "Payload": "payload/shader/unit/inc/vsu_txc_fresnel.vsh",
+          "PayloadSha256": "C668A65ECA8DE20E8C5E357DACD3E0A7C33DD9B2B651335F4A3F1FDF67507C5A"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_txc_index0.vsh",
+          "BeforeSha256": "19A6EB3CE0482739A9A1B3E3E03FDE9A4A23FC9A12AABBD717A46F7B0A37E849",
+          "AfterSha256": "280F607B85B3E976DAF83976AD666D0E5E0E143BA211E186268FF1A7909F411E",
+          "Payload": "payload/shader/unit/inc/vsu_txc_index0.vsh",
+          "PayloadSha256": "280F607B85B3E976DAF83976AD666D0E5E0E143BA211E186268FF1A7909F411E"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_txc_index1.vsh",
+          "BeforeSha256": "C6E7AC2DDE5C5532098BBEEBCF845AE4BDFE84169075E80E341591ABFEB9B102",
+          "AfterSha256": "F82475A8515188BCA1E49011691B2CE3D6A3D35DF89BA43E02BC152E663A8088",
+          "Payload": "payload/shader/unit/inc/vsu_txc_index1.vsh",
+          "PayloadSha256": "F82475A8515188BCA1E49011691B2CE3D6A3D35DF89BA43E02BC152E663A8088"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_txc_index2.vsh",
+          "BeforeSha256": "2609335793A84DFB02355A090759EA7944EACB2177ECF2C879B39BA440D93740",
+          "AfterSha256": "4DC4A025E2301D1EDBEFF093EDC60147F4E8F3B55F19535F2156299F36792327",
+          "Payload": "payload/shader/unit/inc/vsu_txc_index2.vsh",
+          "PayloadSha256": "4DC4A025E2301D1EDBEFF093EDC60147F4E8F3B55F19535F2156299F36792327"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_txc_index3.vsh",
+          "BeforeSha256": "55A12167DC76F353FC2866A0596E1B48930AF3180BD830A7A9504F6B133663CE",
+          "AfterSha256": "9E5BC5D2B35F18B98CBD20C1D59594D47B06FD2FE9999DC009439A569D9A57BD",
+          "Payload": "payload/shader/unit/inc/vsu_txc_index3.vsh",
+          "PayloadSha256": "9E5BC5D2B35F18B98CBD20C1D59594D47B06FD2FE9999DC009439A569D9A57BD"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_col_tweening.vsh",
+          "BeforeSha256": "1CED4B5D238FC936DD58E44EA460E6C9698B0352D7F48924A805B3454840BBEB",
+          "AfterSha256": "EF0070CCDCF70D72705DF715216CDE5C2BA3D5FAF8FB683E66BEE40D9975CAD8",
+          "Payload": "payload/shader/unit/vsu_col_tweening.vsh",
+          "PayloadSha256": "EF0070CCDCF70D72705DF715216CDE5C2BA3D5FAF8FB683E66BEE40D9975CAD8"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_col_vertex.vsh",
+          "BeforeSha256": "90D498577F16FA01187786BAA459E91AE75DA0649D68C75897CAE647E7AD919A",
+          "AfterSha256": "686D022B452FE649887BABC149E51F3AB416E50793E413444880DF30A49081BC",
+          "Payload": "payload/shader/unit/vsu_col_vertex.vsh",
+          "PayloadSha256": "686D022B452FE649887BABC149E51F3AB416E50793E413444880DF30A49081BC"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_footer.vsh",
+          "BeforeSha256": "9A97649DFD1796EFDE4E6695D6E98C8BF45EAE849DDC3D157C5DC926496444B8",
+          "AfterSha256": "881AA629F4DDC28E02B1759F36A188FC3DF1D25EF5AC9400B4CD9A3888A1D522",
+          "Payload": "payload/shader/unit/vsu_footer.vsh",
+          "PayloadSha256": "881AA629F4DDC28E02B1759F36A188FC3DF1D25EF5AC9400B4CD9A3888A1D522"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_header.vsh",
+          "BeforeSha256": "7B6C984E86D03EC01DA44CEB39B2F4470D0D7543101C0362264D0597DC05AADD",
+          "AfterSha256": "1C778E4ABEF7B5179C7FFD5A074F3EA24621D045F0E950B48D15F0316BE345FD",
+          "Payload": "payload/shader/unit/vsu_header.vsh",
+          "PayloadSha256": "1C778E4ABEF7B5179C7FFD5A074F3EA24621D045F0E950B48D15F0316BE345FD"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_header_nv2.vsh",
+          "BeforeSha256": "05EF142ECF2E8E62337ACAFA8757B088F7C63E3F15E337D78431BA4DE2DCD69C",
+          "AfterSha256": "C22529C6026BCBAAB98E99008AD7E4D4EFF289BA02BDAB2A22B0C1EA4B1AC0EB",
+          "Payload": "payload/shader/unit/vsu_header_nv2.vsh",
+          "PayloadSha256": "C22529C6026BCBAAB98E99008AD7E4D4EFF289BA02BDAB2A22B0C1EA4B1AC0EB"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_all_lambert_d.vsh",
+          "BeforeSha256": "A87B28E9AB2B7AE4F47ABFB0A723C98EC4BD4A9E1EE4B10AEE266E218753ABFB",
+          "AfterSha256": "5057A1B17FDBDFC5503A66786BFDE603105DE85090D63376801B8CC719C2FCEB",
+          "Payload": "payload/shader/unit/vsu_lit_all_lambert_d.vsh",
+          "PayloadSha256": "5057A1B17FDBDFC5503A66786BFDE603105DE85090D63376801B8CC719C2FCEB"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_all_lambert_t.vsh",
+          "BeforeSha256": "A1C1C58A608FF58E5A8F13B7C3DD5C3DD8E2CC6C4BEEE9E6EB99FB25A60AFF1E",
+          "AfterSha256": "B760670BC0725D84BA34B9A3F4FC3282B8DD7E09D4CE7DEA645C6404418D700F",
+          "Payload": "payload/shader/unit/vsu_lit_all_lambert_t.vsh",
+          "PayloadSha256": "B760670BC0725D84BA34B9A3F4FC3282B8DD7E09D4CE7DEA645C6404418D700F"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_all_specular_d.vsh",
+          "BeforeSha256": "A36A17BC4AF926E7922DAAFB9BD9A7A911778866742AD7D68269B5F586F79586",
+          "AfterSha256": "0CC81D908FEF2CF673E9412B038F370C1B415C23C90AE21C2D59F2BBBED07971",
+          "Payload": "payload/shader/unit/vsu_lit_all_specular_d.vsh",
+          "PayloadSha256": "0CC81D908FEF2CF673E9412B038F370C1B415C23C90AE21C2D59F2BBBED07971"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_all_specular_t.vsh",
+          "BeforeSha256": "C1E83F4F6485A30EF76C93ABF525579F96C001C1740179EEB5B6D9D442437F4E",
+          "AfterSha256": "6F2D0618613A84EFD5D3320CF73F147E8E3DFE544F6BD164418B5A632197F107",
+          "Payload": "payload/shader/unit/vsu_lit_all_specular_t.vsh",
+          "PayloadSha256": "6F2D0618613A84EFD5D3320CF73F147E8E3DFE544F6BD164418B5A632197F107"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_lambert_d.vsh",
+          "BeforeSha256": "EDA1E61D3617543E43BE67C85CD0F386228E05A045EAB0F80E751C054546C32E",
+          "AfterSha256": "11F4DBC125781E32F5B88426E06DB0DCEA5E71CC9FB14E15079821F5AC128735",
+          "Payload": "payload/shader/unit/vsu_lit_lambert_d.vsh",
+          "PayloadSha256": "11F4DBC125781E32F5B88426E06DB0DCEA5E71CC9FB14E15079821F5AC128735"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_lambert_d_night0.vsh",
+          "BeforeSha256": "171EFBC989D6A8488914B9058C0E9980C3854F5FC89B6F2BADDE9F9A4ECDF3AF",
+          "AfterSha256": "96DBCCA88392E4215C64468D55DAA87142AE395E43AB90E66A902964D53416FA",
+          "Payload": "payload/shader/unit/vsu_lit_lambert_d_night0.vsh",
+          "PayloadSha256": "96DBCCA88392E4215C64468D55DAA87142AE395E43AB90E66A902964D53416FA"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_lambert_d_night1.vsh",
+          "BeforeSha256": "01A5DD469C7924DA518B43D1BEA5B154D26BA579F6B80390C5AC8E3349683778",
+          "AfterSha256": "11D016AC29A64B9570265E783F4BD2452845380E75EE676496D4E2EFB4EA238B",
+          "Payload": "payload/shader/unit/vsu_lit_lambert_d_night1.vsh",
+          "PayloadSha256": "11D016AC29A64B9570265E783F4BD2452845380E75EE676496D4E2EFB4EA238B"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_lambert_t.vsh",
+          "BeforeSha256": "8C71095755F1ADEFF3B0BA131F1F3E71A569119E720EA329F6FF1F33E60BA2E9",
+          "AfterSha256": "172B76EC7250CC86FA9741D294635DBF2340492EED3A4A3711CF54ADECBD082C",
+          "Payload": "payload/shader/unit/vsu_lit_lambert_t.vsh",
+          "PayloadSha256": "172B76EC7250CC86FA9741D294635DBF2340492EED3A4A3711CF54ADECBD082C"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_optical_camouflage.vsh",
+          "BeforeSha256": "EEEF21F5F2A38C8FA7D08B3997ADECE719F0BB821ED9D821D12E51CBE547651F",
+          "AfterSha256": "7644F59A76559927BECF0B218BBF9A74D975326513C16F93C888B111F27E90F5",
+          "Payload": "payload/shader/unit/vsu_lit_optical_camouflage.vsh",
+          "PayloadSha256": "7644F59A76559927BECF0B218BBF9A74D975326513C16F93C888B111F27E90F5"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_specular_d.vsh",
+          "BeforeSha256": "544BB76D33E769775AB13B6023DADF9831A4071A0EE520193934430B1B0F9FB0",
+          "AfterSha256": "8177E9B08B593AE2C51EA781640C666344EE03FA4CD9A9AC163F51798C485E01",
+          "Payload": "payload/shader/unit/vsu_lit_specular_d.vsh",
+          "PayloadSha256": "8177E9B08B593AE2C51EA781640C666344EE03FA4CD9A9AC163F51798C485E01"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_specular_d_night0.vsh",
+          "BeforeSha256": "6CAA16E47E1FC585C1B0EA1B269AB7EAAC64DF924EFBD0087DAFFF777CA92940",
+          "AfterSha256": "FC21FD4BFABCBCEADF1C00FD2886C3CA559FE62781970975C585EB3B95DD0618",
+          "Payload": "payload/shader/unit/vsu_lit_specular_d_night0.vsh",
+          "PayloadSha256": "FC21FD4BFABCBCEADF1C00FD2886C3CA559FE62781970975C585EB3B95DD0618"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_specular_d_night1.vsh",
+          "BeforeSha256": "C75436543D8FBE18C65D1E203A079A05CD73DD429DD10F659814E5238B085878",
+          "AfterSha256": "10017191894E0035828D5B3866FFE54CD873B88FDAE651D092B4DA1C31C1F0F0",
+          "Payload": "payload/shader/unit/vsu_lit_specular_d_night1.vsh",
+          "PayloadSha256": "10017191894E0035828D5B3866FFE54CD873B88FDAE651D092B4DA1C31C1F0F0"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_specular_t.vsh",
+          "BeforeSha256": "246A86E4C01E376D42C1A980A9E77C368DC17108FAB353993B95350095F13B4B",
+          "AfterSha256": "6A7EB9308C5DBC3ACB8BFE707EC0E9D644BEB26EE17DBDAF4F4B4BB23A10DCC2",
+          "Payload": "payload/shader/unit/vsu_lit_specular_t.vsh",
+          "PayloadSha256": "6A7EB9308C5DBC3ACB8BFE707EC0E9D644BEB26EE17DBDAF4F4B4BB23A10DCC2"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_thermograph.vsh",
+          "BeforeSha256": "D37B9E8526F0C270CE5BA034D467C5C3E26AD07F5BBCEF726897510FF10CDB62",
+          "AfterSha256": "08B7B5A5455AE68CB1066ED4CC0C3D7C6855F3C995F0545544DFC81808C7815D",
+          "Payload": "payload/shader/unit/vsu_lit_thermograph.vsh",
+          "PayloadSha256": "08B7B5A5455AE68CB1066ED4CC0C3D7C6855F3C995F0545544DFC81808C7815D"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_pos_basis.vsh",
+          "BeforeSha256": "3E6C957CD625679C1593EF1568F3B5B0BF04D14311345CBD5E32587C25AD015D",
+          "AfterSha256": "A3D917721F8F9D7B4833199ED87695ADE8E9FA847906A7EFB5E6DD0A1D4B3CEC",
+          "Payload": "payload/shader/unit/vsu_pos_basis.vsh",
+          "PayloadSha256": "A3D917721F8F9D7B4833199ED87695ADE8E9FA847906A7EFB5E6DD0A1D4B3CEC"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_pos_blend2.vsh",
+          "BeforeSha256": "800F08A628CBE9B30D4D47901286309EA3408879500D613BFED61F5A0E6B335F",
+          "AfterSha256": "25C9C07C4470A12C55AB3B67C47EAAD5A052328361E2558975F4156BCC2B9A35",
+          "Payload": "payload/shader/unit/vsu_pos_blend2.vsh",
+          "PayloadSha256": "25C9C07C4470A12C55AB3B67C47EAAD5A052328361E2558975F4156BCC2B9A35"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_pos_blend3.vsh",
+          "BeforeSha256": "4CDF3565150E56120051283947AA4F91B31322830114FF8B930D3193597D33A5",
+          "AfterSha256": "80DBAA4119A8F6DD974E1E795B943591BB49B326D1154D8F4DFFD09C8674D1D8",
+          "Payload": "payload/shader/unit/vsu_pos_blend3.vsh",
+          "PayloadSha256": "80DBAA4119A8F6DD974E1E795B943591BB49B326D1154D8F4DFFD09C8674D1D8"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_pos_blend4.vsh",
+          "BeforeSha256": "011A5ED34F23857E7491C6CB777C333EF1C56983D66B9D4FBBC133518B56C15E",
+          "AfterSha256": "00722947CEA077999968009E92E46F280436F3EAB21A74C5C22A31C6E0DEB268",
+          "Payload": "payload/shader/unit/vsu_pos_blend4.vsh",
+          "PayloadSha256": "00722947CEA077999968009E92E46F280436F3EAB21A74C5C22A31C6E0DEB268"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_pos_oneskin_basis.vsh",
+          "BeforeSha256": "519E7FAF22764DAB318E5F09676265CA41BC469FBD64951BA09D4D3958B7E9A8",
+          "AfterSha256": "7EB5FE4974884F33201622E10B7D18B1C5ACB928D948F90576E39A5F10501795",
+          "Payload": "payload/shader/unit/vsu_pos_oneskin_basis.vsh",
+          "PayloadSha256": "7EB5FE4974884F33201622E10B7D18B1C5ACB928D948F90576E39A5F10501795"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_pos_oneskin_blend2.vsh",
+          "BeforeSha256": "02C5D6AC60C962C8DCD724329770A83AFA488B3D89D05B46F557F1EF670F221B",
+          "AfterSha256": "91B229B4420BB3698FCC903859C5A6CC456BFDF573D2A9BFC44306DA301E1860",
+          "Payload": "payload/shader/unit/vsu_pos_oneskin_blend2.vsh",
+          "PayloadSha256": "91B229B4420BB3698FCC903859C5A6CC456BFDF573D2A9BFC44306DA301E1860"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_pos_oneskin_blend3.vsh",
+          "BeforeSha256": "CC54DF5E63D8CC60CD0CA8F1D08B527605C489DCB4568327A18BF0A61ACB3550",
+          "AfterSha256": "1F31FB947A2CFD017FC9642D535A65D365B055D3292F526DBFED666019E0CB41",
+          "Payload": "payload/shader/unit/vsu_pos_oneskin_blend3.vsh",
+          "PayloadSha256": "1F31FB947A2CFD017FC9642D535A65D365B055D3292F526DBFED666019E0CB41"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_pos_oneskin_blend4.vsh",
+          "BeforeSha256": "7F987ECA691D2012B9E59DEE42448F82BE1985F8167B49E761476C156962B6BD",
+          "AfterSha256": "44387AA4FC79EB8141BE6AC2ECE776DE75EBDCABBEC3982A29A8441C88942C1D",
+          "Payload": "payload/shader/unit/vsu_pos_oneskin_blend4.vsh",
+          "PayloadSha256": "44387AA4FC79EB8141BE6AC2ECE776DE75EBDCABBEC3982A29A8441C88942C1D"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_pos_tweening.vsh",
+          "BeforeSha256": "8150524D11585EF8887F6F3BA905E6148CF0179E9FEF24FDF39C7D69D0B51061",
+          "AfterSha256": "49C9A0F62E37CAC4880E393B43258C7C30B9631B1A672A2AFDA8286E5DAAEBBF",
+          "Payload": "payload/shader/unit/vsu_pos_tweening.vsh",
+          "PayloadSha256": "49C9A0F62E37CAC4880E393B43258C7C30B9631B1A672A2AFDA8286E5DAAEBBF"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx0_count2.vsh",
+          "BeforeSha256": "5ED52B7274229D3C11D2D30FD5BFB5AF77824F56A43E03566F24D67FE05C2FA9",
+          "AfterSha256": "6C4A503FF9E1314F7848065A814B0F89BD075EA48091999BF0A5A2243B636A1C",
+          "Payload": "payload/shader/unit/vsu_tx0_count2.vsh",
+          "PayloadSha256": "6C4A503FF9E1314F7848065A814B0F89BD075EA48091999BF0A5A2243B636A1C"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx0_count3.vsh",
+          "BeforeSha256": "4FCD6140FD45A7F2F4B08F28E2BDCA2808B23578B2A3E95640104249AAD26524",
+          "AfterSha256": "25E6D9891D138507CCE110A462E3BBD24A47F0AF3522E442410ED6E2FF37BF72",
+          "Payload": "payload/shader/unit/vsu_tx0_count3.vsh",
+          "PayloadSha256": "25E6D9891D138507CCE110A462E3BBD24A47F0AF3522E442410ED6E2FF37BF72"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx0_count4.vsh",
+          "BeforeSha256": "1ACC3E2CA197CC3D68237C8F9C4325B204831F0A501CAB602644BE73B48EAFD7",
+          "AfterSha256": "B741144AEE11DEEE92139DE0024611CCB609C99CCD73AC52509869F734B3810B",
+          "Payload": "payload/shader/unit/vsu_tx0_count4.vsh",
+          "PayloadSha256": "B741144AEE11DEEE92139DE0024611CCB609C99CCD73AC52509869F734B3810B"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx0_footer.vsh",
+          "BeforeSha256": "496415E569F936B0A7D802DE3396801DE1F05C1D82E132AA62F32F0823C01BF6",
+          "AfterSha256": "E5E806EB487FD182876B242E0D3E92BDBC6DE029CAAC71AA51A50B0BC8F499C9",
+          "Payload": "payload/shader/unit/vsu_tx0_footer.vsh",
+          "PayloadSha256": "E5E806EB487FD182876B242E0D3E92BDBC6DE029CAAC71AA51A50B0BC8F499C9"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx1_count2.vsh",
+          "BeforeSha256": "907FFF3790831D3D30A0ED2A2E10C18C6347021EEE25A1140284D5C3314B627E",
+          "AfterSha256": "B40267C8C10CAB0FC989D9069EDF5CAF3675A71867A4BF492AFDA8C824147AC6",
+          "Payload": "payload/shader/unit/vsu_tx1_count2.vsh",
+          "PayloadSha256": "B40267C8C10CAB0FC989D9069EDF5CAF3675A71867A4BF492AFDA8C824147AC6"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx1_count3.vsh",
+          "BeforeSha256": "2AC1A9608A45F607D827AA495CEE8ABDB617C9D94DD59E27F1CB6B8B511ABB1E",
+          "AfterSha256": "A0BE200AAF168A809DCFD0F70DD8ADE42C83F871E2C99A1235513FE395474C95",
+          "Payload": "payload/shader/unit/vsu_tx1_count3.vsh",
+          "PayloadSha256": "A0BE200AAF168A809DCFD0F70DD8ADE42C83F871E2C99A1235513FE395474C95"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx1_count4.vsh",
+          "BeforeSha256": "A597E0AF04B00DDCB25F90177AC13408E79F8CAAD6299671DFA5C548698049AE",
+          "AfterSha256": "60BAABCFCDBD8D8D25465EBDF5E5000046C70E317F6EE822C8ECC10E974EBACF",
+          "Payload": "payload/shader/unit/vsu_tx1_count4.vsh",
+          "PayloadSha256": "60BAABCFCDBD8D8D25465EBDF5E5000046C70E317F6EE822C8ECC10E974EBACF"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx1_footer.vsh",
+          "BeforeSha256": "98BF6C3979AA187FA8E7B637BACA2D58D34D15B0EA33C56405762C4E77394C88",
+          "AfterSha256": "044111FF6434996F67A95F37A7C2AB6F866A803F53F752770309F0517FC5D84E",
+          "Payload": "payload/shader/unit/vsu_tx1_footer.vsh",
+          "PayloadSha256": "044111FF6434996F67A95F37A7C2AB6F866A803F53F752770309F0517FC5D84E"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx2_count2.vsh",
+          "BeforeSha256": "0871654C4B62C688FC8B4038C5C6BC864A21658BB05AD39A5BFF364422697681",
+          "AfterSha256": "25AE644D526A046FB71A9242375360A9FCDDDD3EDE2C552E165E1C2603387769",
+          "Payload": "payload/shader/unit/vsu_tx2_count2.vsh",
+          "PayloadSha256": "25AE644D526A046FB71A9242375360A9FCDDDD3EDE2C552E165E1C2603387769"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx2_count3.vsh",
+          "BeforeSha256": "718E2810D2E37AE5BBA71776149A5AB0DD3BA71B5553226A47EA6F9F6A0CC34F",
+          "AfterSha256": "875330004AF0D4E8A1F349BBA45586B864FE21675144BC479D665BF05E8CC517",
+          "Payload": "payload/shader/unit/vsu_tx2_count3.vsh",
+          "PayloadSha256": "875330004AF0D4E8A1F349BBA45586B864FE21675144BC479D665BF05E8CC517"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx2_count4.vsh",
+          "BeforeSha256": "C858D16178B7F2EBF0752BAC67E667498B8B70A228B3CB780B98DDE7B0CCD964",
+          "AfterSha256": "CE0CD007FE22C70D97DD8ECB402141028EBAAC9323D2CF3F22955CB8C6E12E31",
+          "Payload": "payload/shader/unit/vsu_tx2_count4.vsh",
+          "PayloadSha256": "CE0CD007FE22C70D97DD8ECB402141028EBAAC9323D2CF3F22955CB8C6E12E31"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx2_footer.vsh",
+          "BeforeSha256": "D4A9179D0E6EE65AA6302DC8A099FE5756E103E55321126B9BB771BD579DF22C",
+          "AfterSha256": "E9F04ECFFF1CD070D3E34E0F41C2EA27C91EA1285463FF69022AD49CFCF77278",
+          "Payload": "payload/shader/unit/vsu_tx2_footer.vsh",
+          "PayloadSha256": "E9F04ECFFF1CD070D3E34E0F41C2EA27C91EA1285463FF69022AD49CFCF77278"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx3_count2.vsh",
+          "BeforeSha256": "26ED1FCAFC5946FB6D743DB248C916CD0B2F8CC4FAF9D3436E82848813B6A104",
+          "AfterSha256": "99E03DCB39B17C31C8108F037C1BCA293DB593C35DD559CD461747DBCBC3FA7C",
+          "Payload": "payload/shader/unit/vsu_tx3_count2.vsh",
+          "PayloadSha256": "99E03DCB39B17C31C8108F037C1BCA293DB593C35DD559CD461747DBCBC3FA7C"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx3_count3.vsh",
+          "BeforeSha256": "DC3584EDEE2A2DF96BCC6BC6F99166DA7072C203D8217EC9F399F2CAB392218F",
+          "AfterSha256": "C79BE0D6372EE3EF7EE4C9CF32D2FA1034B0AA5D80D96403A07BDC36F6E202BF",
+          "Payload": "payload/shader/unit/vsu_tx3_count3.vsh",
+          "PayloadSha256": "C79BE0D6372EE3EF7EE4C9CF32D2FA1034B0AA5D80D96403A07BDC36F6E202BF"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx3_count4.vsh",
+          "BeforeSha256": "DC8AACE85A5B4D58A20A216F0638E4575ED4C4CF63C4749B59FF15E29A0B448E",
+          "AfterSha256": "FDBEBF7B7A8C64AA52E46B8508BD117A8DCEFD90701504EB00C93EA267A2406E",
+          "Payload": "payload/shader/unit/vsu_tx3_count4.vsh",
+          "PayloadSha256": "FDBEBF7B7A8C64AA52E46B8508BD117A8DCEFD90701504EB00C93EA267A2406E"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_tx3_footer.vsh",
+          "BeforeSha256": "EFBE110AB53BD647C442F412CA8DD4B72CC6739CB1A8FA690F39E4FD55D2048E",
+          "AfterSha256": "2C757CA45E349FBBE506D67B3F50FF908DDB6C5BC827415C64AF4EB8FAFBE4B6",
+          "Payload": "payload/shader/unit/vsu_tx3_footer.vsh",
+          "PayloadSha256": "2C757CA45E349FBBE506D67B3F50FF908DDB6C5BC827415C64AF4EB8FAFBE4B6"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_txc_bumpcubemap.vsh",
+          "BeforeSha256": "6222A6FCB95FE614A823223CD1B49CDF3414BCFD278C628BAB7159CDE0DF075F",
+          "AfterSha256": "27ECDF1C6852AD05C718CA8EE78DFF8677F82F0154A2BF770F7D360CFAA19693",
+          "Payload": "payload/shader/unit/vsu_txc_bumpcubemap.vsh",
+          "PayloadSha256": "27ECDF1C6852AD05C718CA8EE78DFF8677F82F0154A2BF770F7D360CFAA19693"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_txc_fresnel.vsh",
+          "BeforeSha256": "8A69D7E9E52E470E0F5346E29F6CB1FDBCD6D91057278C245A3FFF2B640EDC67",
+          "AfterSha256": "E3C11249E798EF8CBCF5E8728DDAFDB6213B5C3FDC1B2DD19693B2394B8CFF9D",
+          "Payload": "payload/shader/unit/vsu_txc_fresnel.vsh",
+          "PayloadSha256": "E3C11249E798EF8CBCF5E8728DDAFDB6213B5C3FDC1B2DD19693B2394B8CFF9D"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_txc_index0.vsh",
+          "BeforeSha256": "CD334DFE1ADB91678E8BA7F451E84DCC2835EFE1C4DBD971F296A13D780DA2D4",
+          "AfterSha256": "EE880C1529DCE23B63B3BB3DCE7B9C8A2890F96B40D254F10F0707C233DB4DB1",
+          "Payload": "payload/shader/unit/vsu_txc_index0.vsh",
+          "PayloadSha256": "EE880C1529DCE23B63B3BB3DCE7B9C8A2890F96B40D254F10F0707C233DB4DB1"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_txc_index1.vsh",
+          "BeforeSha256": "ADCB70C142599F1CE642737167E18AF1B4CDAC164806429836A178CDF7573134",
+          "AfterSha256": "464C8F580B9C765A7722B0F4FB2E28689D339ADBC26635690299638769436B68",
+          "Payload": "payload/shader/unit/vsu_txc_index1.vsh",
+          "PayloadSha256": "464C8F580B9C765A7722B0F4FB2E28689D339ADBC26635690299638769436B68"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_txc_index2.vsh",
+          "BeforeSha256": "47FCB4811311D00C7E9507AA6B564732B7876319756E4BA0DA54D1426648E9B4",
+          "AfterSha256": "995F231D8A60E0DCCC8623BC52116EFCB442557E1E6DAA0CDB3F7497D722B84F",
+          "Payload": "payload/shader/unit/vsu_txc_index2.vsh",
+          "PayloadSha256": "995F231D8A60E0DCCC8623BC52116EFCB442557E1E6DAA0CDB3F7497D722B84F"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_txc_index3.vsh",
+          "BeforeSha256": "BD7886201CA31E4AD548CF6DF0E7BB2B1B2FD3CBF1CB0319B5909155BDEA7600",
+          "AfterSha256": "FE1B037013A5B158FBD519F1F12023AFF9B78433FA8FD281C94A2A4306E51EA7",
+          "Payload": "payload/shader/unit/vsu_txc_index3.vsh",
+          "PayloadSha256": "FE1B037013A5B158FBD519F1F12023AFF9B78433FA8FD281C94A2A4306E51EA7"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vertexshader.vsh",
+          "BeforeSha256": "02F356C3A848B483EF5AC0821913FB94DE7CDBAAEA3964690BAF08A468AA43B5",
+          "AfterSha256": "F77BA866E6BF485B10CC4937DC90610ECA17F1D241BF2FA74D4CE991F7DB9E6B",
+          "Payload": "payload/shader/vertexshader.vsh",
+          "PayloadSha256": "F77BA866E6BF485B10CC4937DC90610ECA17F1D241BF2FA74D4CE991F7DB9E6B"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vs_afterimage.vsh",
+          "BeforeSha256": "D8DF9AEEEDEA50E64E0E1319917F6D0D8868973662CBE90C13466333F637835C",
+          "AfterSha256": "01C98F3F9E157DD341B187CE93D18CA6D6D04A860B0E45E69CC061C68FAB457A",
+          "Payload": "payload/shader/vs_afterimage.vsh",
+          "PayloadSha256": "01C98F3F9E157DD341B187CE93D18CA6D6D04A860B0E45E69CC061C68FAB457A"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vs_bullet.vsh",
+          "BeforeSha256": "6CD98E6015831FDA40BB1336397DD32EDF6C6E214DAA3DA3C5185AB15AF82A03",
+          "AfterSha256": "6CD4D8629EA3B796AFB5BBAE4280B61B8975AD3AF1F30536361D9CA5AE483220",
+          "Payload": "payload/shader/vs_bullet.vsh",
+          "PayloadSha256": "6CD4D8629EA3B796AFB5BBAE4280B61B8975AD3AF1F30536361D9CA5AE483220"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vs_bullet2.vsh",
+          "BeforeSha256": "F9AB30DFDFE5C831DD5FA18B8A7AC94593CFF7758B452DF8B68DE1983AA95224",
+          "AfterSha256": "550B3EEE9EF287E1CBF8421E3D84B7F26A5A3515571AE8ABE8DCE02F1C20CF4D",
+          "Payload": "payload/shader/vs_bullet2.vsh",
+          "PayloadSha256": "550B3EEE9EF287E1CBF8421E3D84B7F26A5A3515571AE8ABE8DCE02F1C20CF4D"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vs_bumpcubemap.vsh",
+          "BeforeSha256": "509AD1F0C82237CA1186EDFB3A6BF20B9F4F42791747290433312ED8E0B149FA",
+          "AfterSha256": "C0842DE0EEDA2CAD7719A2559741539792BAB3CA2189A1C6ED3C2AF4AB325BDD",
+          "Payload": "payload/shader/vs_bumpcubemap.vsh",
+          "PayloadSha256": "C0842DE0EEDA2CAD7719A2559741539792BAB3CA2189A1C6ED3C2AF4AB325BDD"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vs_bumpdotmap.vsh",
+          "BeforeSha256": "A0D6287A8F5A7649DE2A5BDAB8241355E03E9FC47A4290FFCD98BDFAABE19DA5",
+          "AfterSha256": "CB91FEF5CF0924A726E5913A7A6C8E4ACC3816D8A900B7E797EA4349DFA33171",
+          "Payload": "payload/shader/vs_bumpdotmap.vsh",
+          "PayloadSha256": "CB91FEF5CF0924A726E5913A7A6C8E4ACC3816D8A900B7E797EA4349DFA33171"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vs_constant.vsh",
+          "BeforeSha256": "1E77942002608C76CD4660C32A9754B4C8538078663C3D5FEFA659F211F32B03",
+          "AfterSha256": "72AE7D73E41C5450175C3574D9BC20E01BF5E45BA097D6A4937702F6728299D3",
+          "Payload": "payload/shader/vs_constant.vsh",
+          "PayloadSha256": "72AE7D73E41C5450175C3574D9BC20E01BF5E45BA097D6A4937702F6728299D3"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vs_pointsprite.vsh",
+          "BeforeSha256": "7F743AB35E960A68D2F84341C5790892CCE1E45081D87F9C76C01A5C0D67EBB9",
+          "AfterSha256": "1D6C9CD7521461E057E079FAFDB923B7A41BB655BEFCB8886AF4F12D20B7C5C3",
+          "Payload": "payload/shader/vs_pointsprite.vsh",
+          "PayloadSha256": "1D6C9CD7521461E057E079FAFDB923B7A41BB655BEFCB8886AF4F12D20B7C5C3"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vs_smoke.vsh",
+          "BeforeSha256": "FB46A808911C18ADEEECE219D558897EC31B2411DAB3A0AFBDC81C3C9355BA6D",
+          "AfterSha256": "83EF1E8523E9BCD6456FE8CB4222BFF3BDFACA1CB1C31460B2666B6FA18F37C3",
+          "Payload": "payload/shader/vs_smoke.vsh",
+          "PayloadSha256": "83EF1E8523E9BCD6456FE8CB4222BFF3BDFACA1CB1C31460B2666B6FA18F37C3"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vs_water.vsh",
+          "BeforeSha256": "0D2FB678D620FED92424E451F156292C832996A79FC2054BABBA7939F4E1C6E3",
+          "AfterSha256": "C788D6F021B73E2FB3F8F60369382C604384458B27FEA2CE2855CD46C7887E5E",
+          "Payload": "payload/shader/vs_water.vsh",
+          "PayloadSha256": "C788D6F021B73E2FB3F8F60369382C604384458B27FEA2CE2855CD46C7887E5E"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vs_waterdrop.vsh",
+          "BeforeSha256": "EE3AE8E9AD3EEF7C53F9D516FABD9774FFE85E93C8C24C918D9DA8455405AB66",
+          "AfterSha256": "439AEE40A6B1CA54BA45B7D893CB40A6599E11A8D06F639E633C25A8739987CB",
+          "Payload": "payload/shader/vs_waterdrop.vsh",
+          "PayloadSha256": "439AEE40A6B1CA54BA45B7D893CB40A6599E11A8D06F639E633C25A8739987CB"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vs_zsprite.vsh",
+          "BeforeSha256": "E31FC20262A6F9015C7315710DD39737FF639149525743A4A03A2F59B9080A39",
+          "AfterSha256": "A33949A81D15078F5B8C6BD4CB8205C0AFF3D5CC69EE14FF0FE2A43D59FF3F3A",
+          "Payload": "payload/shader/vs_zsprite.vsh",
+          "PayloadSha256": "A33949A81D15078F5B8C6BD4CB8205C0AFF3D5CC69EE14FF0FE2A43D59FF3F3A"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vsVertexBlend/vs_vertex_blend_2_matrices.vsh",
+          "BeforeSha256": "59C18159BD852E74E0FAB24726FCE6EA856B756A2A694CCC7AD9B17D39B21423",
+          "AfterSha256": "0B476FC8711A877ACFC9478841A057AEF88858CF73BF6DEFAF03B423A3B29245",
+          "Payload": "payload/shader/vsVertexBlend/vs_vertex_blend_2_matrices.vsh",
+          "PayloadSha256": "0B476FC8711A877ACFC9478841A057AEF88858CF73BF6DEFAF03B423A3B29245"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vsVertexBlend/vs_vertex_blend_3_matrices.vsh",
+          "BeforeSha256": "1C04C450F2F24F2D4E8EE8E22E8314BA0B27480720E26B90BB2CAE345FD2C172",
+          "AfterSha256": "E3D5AF6D0FE7093D3924EE4329CE5CDBA7533CEF9C6D4C3E86B5C972BAD07A59",
+          "Payload": "payload/shader/vsVertexBlend/vs_vertex_blend_3_matrices.vsh",
+          "PayloadSha256": "E3D5AF6D0FE7093D3924EE4329CE5CDBA7533CEF9C6D4C3E86B5C972BAD07A59"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/vsVertexBlend/vs_vertex_blend_4_matrices.vsh",
+          "BeforeSha256": "FB1C7FA5768C05F3B30023AF5401EB88B1C8655BA58B7AF1CD810262EDEAE81B",
+          "AfterSha256": "2E9AB64156CD64197F5D0052E2D05C1B282BC6F219502E110357BB66DE17C1D1",
+          "Payload": "payload/shader/vsVertexBlend/vs_vertex_blend_4_matrices.vsh",
+          "PayloadSha256": "2E9AB64156CD64197F5D0052E2D05C1B282BC6F219502E110357BB66DE17C1D1"
+        }
+      ]
+    },
+    {
+      "Id": "ghost-squad-evolution-shaderfix-nvidia",
+      "ProfileId": "GSEVOELF2",
+      "BuildName": "Ghost Squad Evolution (1.0 Rev A)(2007-02-14)[Sega Lindbergh Red][TP]",
+      "Executable": "vsg",
+      "ExecutableSha256": "2966EED7254B485BD086215DF226240AE97464132714A1A1504C52BA2A9E4815",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Ghost Squad Evolution (1.0 Rev A)(2007-02-14)[Sega Lindbergh Red][TP].zip",
+      "SourceEntry": "Patches/GSEvo_Nvidia_shaderfix/shader/unit/inc/vsu_lit_all_lambert_d.vsh",
+      "SourceSize": 2681,
+      "SourceSha256": "654014FB33B7ED709C5B0570DC306CAC070C9A9650CC472C59558CC6EA05B56B",
+      "MoreSourceEntries": [
+        { "SourceEntry": "Patches/GSEvo_Nvidia_shaderfix/shader/unit/inc/vsu_lit_all_lambert_t.vsh", "SourceSize": 3027 },
+        { "SourceEntry": "Patches/GSEvo_Nvidia_shaderfix/shader/unit/inc/vsu_lit_all_specular_d.vsh", "SourceSize": 3166 },
+        { "SourceEntry": "Patches/GSEvo_Nvidia_shaderfix/shader/unit/inc/vsu_lit_all_specular_t.vsh", "SourceSize": 3747 },
+        { "SourceEntry": "Patches/GSEvo_Nvidia_shaderfix/shader/unit/vsu_lit_all_lambert_d.vsh", "SourceSize": 4088 },
+        { "SourceEntry": "Patches/GSEvo_Nvidia_shaderfix/shader/unit/vsu_lit_all_lambert_t.vsh", "SourceSize": 4846 },
+        { "SourceEntry": "Patches/GSEvo_Nvidia_shaderfix/shader/unit/vsu_lit_all_specular_d.vsh", "SourceSize": 4894 },
+        { "SourceEntry": "Patches/GSEvo_Nvidia_shaderfix/shader/unit/vsu_lit_all_specular_t.vsh", "SourceSize": 5729 }
+      ],
+      "ExclusiveGroup": "ghost-squad-evolution-shaderfix",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_all_lambert_d.vsh",
+          "BeforeSha256": "45274136DC25444B6F8157CD7DCB23DD8BDA9B12DB12EF04E1CB60EE18B4055A",
+          "AfterSha256": "654014FB33B7ED709C5B0570DC306CAC070C9A9650CC472C59558CC6EA05B56B",
+          "Payload": "payload/shader/unit/inc/vsu_lit_all_lambert_d.vsh",
+          "PayloadSha256": "654014FB33B7ED709C5B0570DC306CAC070C9A9650CC472C59558CC6EA05B56B"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_all_lambert_t.vsh",
+          "BeforeSha256": "84C1961FAACAD56EE15385E71E9C9F1BB3015F304049E89133463E8849A3F410",
+          "AfterSha256": "F4C9FBE155798CCA265280522307F24B18B7379FF9801B8D3DE510FA39D970B5",
+          "Payload": "payload/shader/unit/inc/vsu_lit_all_lambert_t.vsh",
+          "PayloadSha256": "F4C9FBE155798CCA265280522307F24B18B7379FF9801B8D3DE510FA39D970B5"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_all_specular_d.vsh",
+          "BeforeSha256": "2F8F5D3C70595CBAFEC9639CE004DCAD5283768CB3B9BEC2E1A52D202101469D",
+          "AfterSha256": "74E6832FDFBA25F5D9CB4A1AD5C5E5BFAFE891C680EEE08FF90C0A2648527559",
+          "Payload": "payload/shader/unit/inc/vsu_lit_all_specular_d.vsh",
+          "PayloadSha256": "74E6832FDFBA25F5D9CB4A1AD5C5E5BFAFE891C680EEE08FF90C0A2648527559"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/inc/vsu_lit_all_specular_t.vsh",
+          "BeforeSha256": "EBBA41BCFAB01904E10F75666268852040076BCC008AF1FD4B7D6C1EDF31CC28",
+          "AfterSha256": "B9AF3109BDDEF2D38EE887952787C039BC028469548277DFDCFDDF5ABB0206F0",
+          "Payload": "payload/shader/unit/inc/vsu_lit_all_specular_t.vsh",
+          "PayloadSha256": "B9AF3109BDDEF2D38EE887952787C039BC028469548277DFDCFDDF5ABB0206F0"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_all_lambert_d.vsh",
+          "BeforeSha256": "A87B28E9AB2B7AE4F47ABFB0A723C98EC4BD4A9E1EE4B10AEE266E218753ABFB",
+          "AfterSha256": "10D96DF99F0D6AC2D575940BDABA5A4003DBCD5CAF31574482615E2F31310573",
+          "Payload": "payload/shader/unit/vsu_lit_all_lambert_d.vsh",
+          "PayloadSha256": "10D96DF99F0D6AC2D575940BDABA5A4003DBCD5CAF31574482615E2F31310573"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_all_lambert_t.vsh",
+          "BeforeSha256": "A1C1C58A608FF58E5A8F13B7C3DD5C3DD8E2CC6C4BEEE9E6EB99FB25A60AFF1E",
+          "AfterSha256": "2A51440CABE1E479246AAB999FF012810C950E774FDF2B9A1E35A0E273884764",
+          "Payload": "payload/shader/unit/vsu_lit_all_lambert_t.vsh",
+          "PayloadSha256": "2A51440CABE1E479246AAB999FF012810C950E774FDF2B9A1E35A0E273884764"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_all_specular_d.vsh",
+          "BeforeSha256": "A36A17BC4AF926E7922DAAFB9BD9A7A911778866742AD7D68269B5F586F79586",
+          "AfterSha256": "44E9DF94C5969CC5EE643D460D6D1466229FEBE8D330F7542B0C29D8E09E2BD1",
+          "Payload": "payload/shader/unit/vsu_lit_all_specular_d.vsh",
+          "PayloadSha256": "44E9DF94C5969CC5EE643D460D6D1466229FEBE8D330F7542B0C29D8E09E2BD1"
+        },
+        {
+          "Type": "ReplaceFile",
+          "Target": "shader/unit/vsu_lit_all_specular_t.vsh",
+          "BeforeSha256": "C1E83F4F6485A30EF76C93ABF525579F96C001C1740179EEB5B6D9D442437F4E",
+          "AfterSha256": "C77888D73DB780B85CF1CFBA2C278A9C3D23E08B51642C07A52A535190F16C07",
+          "Payload": "payload/shader/unit/vsu_lit_all_specular_t.vsh",
+          "PayloadSha256": "C77888D73DB780B85CF1CFBA2C278A9C3D23E08B51642C07A52A535190F16C07"
+        }
+      ]
+    },
+    {
+      "Id": "the-house-of-the-dead-ex-folder-copy",
+      "ProfileId": "HOTDEX",
+      "BuildName": "The House of the Dead EX (folder copy, needs measured values)",
+      "Executable": "",
+      "ExecutableSha256": "",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "ExclusiveGroup": "",
+      "Operations": [
+        {
+          "Type": "CopyFolder",
+          "DestinationRoot": "TeknoParrot",
+          "Destination": "",
+          "Files": [],
+          "NeedsMeasured": [
+            "the game program file name inside the game folder",
+            "the name of the ZIP that holds the patch folder and the folder inside it",
+            "the folder inside your TeknoParrot folder that the files go into",
+            "every file in the patch folder with its size and SHA-256"
+          ]
+        }
+      ]
+    },
+    {
+      "Id": "tatsunoko-vs-capcom-folder-copy",
+      "ProfileId": "tatsuvscap",
+      "BuildName": "Tatsunoko vs. Capcom (folder copy, needs measured values)",
+      "Executable": "",
+      "ExecutableSha256": "",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "ExclusiveGroup": "",
+      "Operations": [
+        {
+          "Type": "CopyFolder",
+          "DestinationRoot": "TeknoParrot",
+          "Destination": "",
+          "Files": [],
+          "NeedsMeasured": [
+            "the game program file name inside the game folder",
+            "the name of the ZIP that holds the Wii folder and the folder inside it",
+            "the folder inside your TeknoParrot folder that the Wii files go into",
+            "every file in the Wii folder with its size and SHA-256 (and the total size, which may be larger than TeknoParrot Manager copies today)"
+          ]
+        }
+      ]
+    },
+    {
+      "Id": "block-king-folder-copy",
+      "ProfileId": "BlockKing",
+      "BuildName": "Block King Ball Shooter (JConfig game.exe, needs measured values)",
+      "Executable": "",
+      "ExecutableSha256": "",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "ExclusiveGroup": "",
+      "Operations": [
+        {
+          "Type": "CopyFolder",
+          "DestinationRoot": "Game",
+          "Destination": "",
+          "Files": [],
+          "NeedsMeasured": [
+            "the SHA-256 and size of game.exe inside GekiToDensetsu (Block King Ball Shooter)(JConfig).zip (only its CRC32 1E882C69 is known)",
+            "the SHA-256 of the original game.exe that it replaces",
+            "the game program file name and SHA-256 of the main game build"
           ]
         }
       ]

@@ -463,8 +463,10 @@ work is a planning group for that gap. It is not a release-candidate scope expan
   and reduced first-run decisions into safe TPM-managed capabilities.
 - #281 remains the post-1.0 PCSX2x6 investigation track, including .acgame,
   arcade BIOS, and System 246/System 256 considerations.
-- #200 broad automatic device/context-aware control mapping remains deferred;
-  this roadmap group must not use workflow or profile language to bypass that
+- #200 broad automatic device/context-aware control mapping remains deferred.
+  What ships in RC9 is smaller: the player picks a controller layout and TPM
+  applies it with a preview, a backup and an undo (see the #200 record below).
+  This roadmap group must not use workflow or profile language to bypass that
   boundary.
 
 - All seven issues are assigned to the Post-1.0 / 1.1 milestone. None is part
@@ -474,10 +476,29 @@ work is a planning group for that gap. It is not a release-candidate scope expan
 
 ### #200 controls and readiness design record (post-1.0 only)
 
-RC9 does not implement broad automatic controller or context-aware mapping.
-The standing simplicity rule remains: the eventual product should configure
-each game automatically, not make a beginner understand TeknoParrot mapping
-internals or manually reproduce raw mapping decisions.
+What ships in RC9 under #200 is player-driven, not automatic. The player
+chooses one controller layout (Xbox, PlayStation, Nintendo, arcade stick or
+learned arcade controls). If TPM finds exactly one kind of controller it
+pre-selects that layout, and the player's answer always wins. TPM then sets up
+one game, all games after one preview and approval, or game by game. It sets
+only the buttons TeknoParrot's own game file lists, never replaces a button
+that already has a setting, makes a backup first, reads each change back and
+can undo it. Triggers and analog controls (steering, aim, throttle) stay
+manual in TeknoParrotUI. A read-only controls check, a Controls line in the
+Library health check, a change-by-hand screen, saved answers, button learning
+and control guides also ship. A game counts as Verified only after the player
+records that it worked. Real-controller proof of all this is
+`docs\RC9-OWNER-TEST-PLAN.md`, Part 3, steps 64 to 107.
+
+The read-only check of an outside controller list (#304) stays read-only. It
+writes no mapping and is not promoted by this record.
+
+What remains deferred is the broad automatic mapping: TPM choosing and writing
+the right controls for each game and each device by itself, without a layout
+chosen by the player. The standing simplicity rule remains: the eventual
+product should configure each game automatically, not make a beginner
+understand TeknoParrot mapping internals or manually reproduce raw mapping
+decisions.
 
 Before any #200 implementation is authorized, the post-1.0 design must define:
 

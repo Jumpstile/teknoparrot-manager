@@ -27,10 +27,10 @@ BeforeAll {
     # duplicate with exactly this layout (checked below), so the list cannot go stale. Names are compared without regard to case, as PowerShell does.
     $script:F87Allowed = @{
         'Resolve-Pcsx2Directory'       = @{ Layout = 'Resolve-Pcsx2Directory.ps1=1;TeknoParrot-Manager.ps1=1'; Reason = 'The certification scripts dot-source scripts\Resolve-Pcsx2Directory.ps1 and never load TeknoParrot-Manager.ps1, so the two copies are never in one session.' }
-        'Get-TpmProfileMap'            = @{ Layout = 'New-TpmReleaseCatalogSnapshot.ps1=1;Test-TpmReleaseCatalogSnapshot.ps1=1'; Reason = 'New-TpmReleaseCatalogSnapshot.ps1 and Test-TpmReleaseCatalogSnapshot.ps1 are separate stand-alone scripts; neither dot-sources the other.' }
-        'Get-TpmSemanticHash'          = @{ Layout = 'New-TpmReleaseCatalogSnapshot.ps1=1;Test-TpmReleaseCatalogSnapshot.ps1=1'; Reason = 'New-TpmReleaseCatalogSnapshot.ps1 and Test-TpmReleaseCatalogSnapshot.ps1 are separate stand-alone scripts; neither dot-sources the other.' }
-        'Get-TpmSnapshotSha256Bytes'   = @{ Layout = 'New-TpmReleaseCatalogSnapshot.ps1=1;Test-TpmReleaseCatalogSnapshot.ps1=1'; Reason = 'New-TpmReleaseCatalogSnapshot.ps1 and Test-TpmReleaseCatalogSnapshot.ps1 are separate stand-alone scripts; neither dot-sources the other.' }
-        'Get-TpmSnapshotSha256File'    = @{ Layout = 'New-TpmReleaseCatalogSnapshot.ps1=1;Test-TpmReleaseCatalogSnapshot.ps1=1'; Reason = 'New-TpmReleaseCatalogSnapshot.ps1 and Test-TpmReleaseCatalogSnapshot.ps1 are separate stand-alone scripts; neither dot-sources the other.' }
+        'Get-TpmProfileMap'            = @{ Layout = 'Test-TpmReleaseCatalogSnapshot.ps1=1;TpmReleaseCatalogSnapshot.Common.ps1=1'; Reason = 'TpmReleaseCatalogSnapshot.Common.ps1 is dot-sourced by the snapshot builders; Test-TpmReleaseCatalogSnapshot.ps1 is a separate stand-alone verifier that does not load it.' }
+        'Get-TpmSemanticHash'          = @{ Layout = 'Test-TpmReleaseCatalogSnapshot.ps1=1;TpmReleaseCatalogSnapshot.Common.ps1=1'; Reason = 'TpmReleaseCatalogSnapshot.Common.ps1 is dot-sourced by the snapshot builders; Test-TpmReleaseCatalogSnapshot.ps1 is a separate stand-alone verifier that does not load it.' }
+        'Get-TpmSnapshotSha256Bytes'   = @{ Layout = 'Test-TpmReleaseCatalogSnapshot.ps1=1;TpmReleaseCatalogSnapshot.Common.ps1=1'; Reason = 'TpmReleaseCatalogSnapshot.Common.ps1 is dot-sourced by the snapshot builders; Test-TpmReleaseCatalogSnapshot.ps1 is a separate stand-alone verifier that does not load it.' }
+        'Get-TpmSnapshotSha256File'    = @{ Layout = 'Test-TpmReleaseCatalogSnapshot.ps1=1;TpmReleaseCatalogSnapshot.Common.ps1=1'; Reason = 'TpmReleaseCatalogSnapshot.Common.ps1 is dot-sourced by the snapshot builders; Test-TpmReleaseCatalogSnapshot.ps1 is a separate stand-alone verifier that does not load it.' }
     }
 
     # The names that are defined more than once, each with where: "Name: File:Line, File:Line".

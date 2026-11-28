@@ -6,8 +6,8 @@ Status: implementation basis for `TPM-S1-CURRENT-RELEASE-GAMESUPPORT-002`
 
 | Specification | Authority used in this slice | Invariant extracted |
 |---|---|---|
-| `contracts/snapshots/TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628/snapshot-manifest.json` | Accepted immutable current-release evidence | SnapshotId, asset SHA, source-proof commit, and catalog counts are exact; source proof is semantic evidence, not official release provenance |
-| `contracts/snapshots/TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628/delta.json` | Accepted machine-generated historical/current comparison | Added/removed/changed/unchanged counts and identities are regenerated and compared, never hand-edited |
+| `contracts/snapshots/TPM-GAME-SUPPORT-RELEASE-1.0.0.2343-ASSET-5E79A108/snapshot-manifest.json` | Accepted immutable current-release evidence | SnapshotId, asset SHA, source-proof commit, and catalog counts are exact; source proof is semantic evidence, not official release provenance |
+| `contracts/snapshots/TPM-GAME-SUPPORT-RELEASE-1.0.0.2343-ASSET-5E79A108/delta.json` | Accepted machine-generated historical/current comparison | Added/removed/changed/unchanged counts and identities are regenerated and compared, never hand-edited |
 | `contracts/_schema/GameSupportContractV1.3.schema.json` | Current additive static contract schema | Contract fields are static evidence and declarations; runtime state is excluded |
 | `contracts/_schema/GameSupportContractRegistryV1.3.schema.json` | Current registry schema | One registry binds one SnapshotId, source identity, expected count, totals, audit, gate, and sorted contracts |
 | Pinned `GameProfiles`, `GameSetup`, and `Metadata` roots | Source serialization contract | Profile filename stem is canonical identity; optional evidence joins by case-insensitive stem; raw source hashes remain evidence |
@@ -16,7 +16,7 @@ Status: implementation basis for `TPM-S1-CURRENT-RELEASE-GAMESUPPORT-002`
 ## Contract rules
 
 1. `HISTORICAL_PINNED_695` and `CURRENT_RELEASE_925` are explicit generation modes. No mode silently substitutes the other corpus.
-2. Current mode requires SnapshotId `TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628`, source-proof commit `dc998e374608abbda373bb3c236db5b26b5afca7`, historical source root, and accepted delta evidence.
+2. Current mode requires SnapshotId `TPM-GAME-SUPPORT-RELEASE-1.0.0.2343-ASSET-5E79A108`, source-proof commit `dc998e374608abbda373bb3c236db5b26b5afca7`, historical source root, and accepted delta evidence.
 3. Current mode accepts no installed profile root, UserProfiles root, fixture root, DAT input, or live network lookup.
 4. Current mode requires 925 GameProfiles, 383 GameSetup files, and 923 Metadata files. The accepted manifest remains authoritative for the 2231-file catalog total.
 5. Profile codes compare case-insensitively for uniqueness and preserve source spelling in output. Ordering is deterministic.

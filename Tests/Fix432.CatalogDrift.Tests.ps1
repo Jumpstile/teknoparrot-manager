@@ -10,7 +10,8 @@ BeforeAll {
     . $script:driftScript
     $script:driftDecisions = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\scripts\TpmGameSupportDecisions.json')) | ConvertFrom-Json
     $script:driftIndex = Get-TpmCatalogDecisionIndex -Decisions $script:driftDecisions
-    $script:driftManifestPath = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '..\contracts\snapshots') -Filter 'snapshot-manifest.json' -File -Recurse)[0].FullName
+    $script:driftPin = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\contracts\snapshots\CURRENT-SNAPSHOT-PIN.json')) | ConvertFrom-Json
+    $script:driftManifestPath = Join-Path $PSScriptRoot ('..\contracts\snapshots\' + $script:driftPin.SnapshotId + '\snapshot-manifest.json')
 }
 
 Describe 'Every TeknoParrot profile resolves to a decision' {
